@@ -1,8 +1,9 @@
 //! zent schema-as-code — user domain for zenaipa.
 //!
-//! Mirrors pagoda's two entities (`User`, `PasswordToken`) with the same
-//! semantics: email is unique + lowercased on write, password is stored
-//! hashed (Sensitive), users may be admins and email-verified.
+//! Mirrors pagoda's entities (`User`, `PasswordToken`, verification
+//! tokens) with the same semantics: email is unique + lowercased on write,
+//! password is stored hashed (Sensitive), users may be admins and
+//! email-verified.
 
 const zent = @import("zent");
 const field = zent.core.field;
@@ -20,6 +21,15 @@ pub const User = Schema("User", .{
 });
 
 pub const PasswordToken = Schema("PasswordToken", .{
+    .fields = &.{
+        field.Int("user_id"),
+        field.String("token").Sensitive(),
+    },
+    .mixins = &.{zent.core.mixin.TimeMixin},
+});
+
+/// One-time email-verification token. Only the hash is stored.
+pub const EmailVerification = Schema("EmailVerification", .{
     .fields = &.{
         field.Int("user_id"),
         field.String("token").Sensitive(),

@@ -4,14 +4,56 @@
 //! talks to it over `/api/v1`. Run:
 //!   zig build run                          # sqlite (zenaipa.db)
 //!   ZENAIPA_DB_DRIVER=postgres ZENAIPA_PG_CONNINFO='host=... dbname=zenaipa user=postgres password=...' zig build run
+//!   zig build admin -- --email you@example.com   # create the first admin
+//!
+//! Feature surface (pagoda parity + zigmodu-native extras):
+//!   auth (register/login/logout/reset/verify/me/profile/password), user CRUD,
+//!   durable background tasks + dispatcher, email (SMTP + console), cache,
+//!   file uploads, notifications, cron housekeeping, access logs, security
+//!   headers, health/ready probes, runtime diagnostics.
 
 const std = @import("std");
 const zigmodu = @import("zigmodu");
 const config_mod = @import("config.zig");
 const db_mod = @import("db.zig");
+const schema = @import("schema.zig");
 const cors_mw = @import("middleware/cors.zig");
+const access_log_mod = @import("middleware/access_log.zig");
+const sec_headers = @import("middleware/security_headers.zig");
+const mail = @import("services/mail.zig");
+const cache_svc = @import("services/cache.zig");
+const jobs = @import("jobs.zig");
+const scheduled = @import("scheduled.zig");
 const user = @import("modules/user/root.zig");
 const auth = @import("modules/auth/root.zig");
+const task = @import("modules/task/root.zig");
+const file = @import("modules/file/root.zig");
+const notify = @import("modules/notify/root.zig");
+const system = @import("modules/system/root.zig");
+
+/// Shared state for scheduled housekeeping jobs (single background thread —
+/// zent's SQLite driver is a single connection).
+const CleanupCtx = struct {
+    io: std.Io,
+    user_store: *user.persistence.UserStore,
+    notify_store: *notify.persistence.NotificationStore,
+    password_token_max_age: i64,
+    verification_token_max_age: i64,
+    notification_max_age: i64,
+};
+
+fn jobTokensCleanup(ctx: ?*anyopaque) void {
+    const c: *CleanupCtx = @ptrCast(@alignCast(ctx orelse return));
+    const now = zigmodu.time.wallClockSeconds(c.io);
+    _ = c.user_store.purgeExpiredPasswordTokens(now, c.password_token_max_age) catch {};
+    _ = c.user_store.purgeExpiredEmailVerifications(now, c.verification_token_max_age) catch {};
+}
+
+fn jobNotifyPrune(ctx: ?*anyopaque) void {
+    const c: *CleanupCtx = @ptrCast(@alignCast(ctx orelse return));
+    const now = zigmodu.time.wallClockSeconds(c.io);
+    _ = c.notify_store.purgeOlderThan(now, c.notification_max_age) catch {};
+}
 
 pub fn main(init: std.process.Init) !void {
     const allocator = init.gpa;
@@ -23,42 +65,155 @@ pub fn main(init: std.process.Init) !void {
     // ── Data store: zent driver + schema-as-code migration ──
     const kind: db_mod.DriverKind = if (std.mem.eql(u8, cfg.db_driver, "postgres")) .postgres else .sqlite;
     const dsn = if (kind == .postgres) cfg.pg_conninfo else cfg.sqlite_path;
-    var store_env = try db_mod.StoreEnv(user.persistence.infos).open(allocator, kind, dsn);
+    var store_env = try db_mod.StoreEnv(schema.infos, .{
+        user.persistence.infos,
+        task.persistence.infos,
+        file.persistence.infos,
+        notify.persistence.infos,
+    }).open(allocator, kind, dsn);
     defer store_env.deinit();
     std.log.info("[zent] migrated schema via {s} ({s})", .{ @tagName(kind), dsn });
 
+    // ── Domain services ──
     var store = user.persistence.UserStore.init(allocator, store_env.client);
-
     var sec = zigmodu.security.AppSecurity.init(allocator, io, .{
         .jwt_secret = cfg.jwt_secret,
         .token_expiry_seconds = cfg.token_expiry_seconds,
     });
+    var mailer = mail.Mailer.init(
+        allocator,
+        io,
+        cfg.smtp_host,
+        cfg.smtp_port,
+        cfg.smtp_username,
+        cfg.smtp_password,
+        cfg.smtp_from,
+        cfg.smtp_starttls,
+        cfg.mail_console,
+    );
+    var cache = cache_svc.CacheService.init(allocator, cfg.cache_max_entries, cfg.cache_ttl_seconds);
+    defer cache.deinit();
 
-    var user_svc = user.service.UserService.init(&store, &sec, io, cfg.password_token_expiration_seconds);
-    var user_api = user.api.UserApi(@TypeOf(user_svc)).init(&user_svc);
-    var login_limiter = try zigmodu.RateLimiter.init(allocator, "auth-public", 20, 1);
-    defer login_limiter.deinit();
-    var auth_api = auth.api.AuthApi(@TypeOf(user_svc)).init(&user_svc, cfg.app_host, &login_limiter);
+    var user_svc = user.service.UserService.init(
+        &store,
+        &sec,
+        io,
+        cfg.password_token_expiration_seconds,
+        cfg.verification_token_expiration_seconds,
+    );
+    var task_store = task.persistence.TaskStore.init(allocator, store_env.client);
+    var task_svc = task.service.TaskService.init(&task_store, io, cfg.task_max_attempts);
+    var notify_store = notify.persistence.NotificationStore.init(allocator, store_env.client);
+    var notify_svc = notify.service.NotificationService.init(allocator, io, &notify_store);
+    var file_store = file.persistence.FileStore.init(allocator, store_env.client);
+    var file_svc = file.service.FileService.init(allocator, io, &file_store, cfg.upload_dir, cfg.upload_max_bytes);
+    try file_svc.ensureDir();
 
     // ── ZigModu module lifecycle ──
-    var modules = try zigmodu.scanModules(allocator, .{ user.module, auth.module });
+    var modules = try zigmodu.scanModules(allocator, .{
+        user.module,
+        auth.module,
+        task.module,
+        file.module,
+        notify.module,
+        system.module,
+    });
     defer modules.deinit();
     try zigmodu.validateModules(&modules);
     try zigmodu.startAll(&modules);
     defer zigmodu.stopAll(&modules);
+    const module_count = modules.modules.count();
 
-    // ── HTTP server ──
-    var server = zigmodu.http.Server.init(io, allocator, cfg.http_port);
+    // ── Background: task dispatcher + scheduled housekeeping ──
+    var cleanup_ctx = CleanupCtx{
+        .io = io,
+        .user_store = &store,
+        .notify_store = &notify_store,
+        .password_token_max_age = cfg.password_token_expiration_seconds,
+        .verification_token_max_age = cfg.verification_token_expiration_seconds,
+        .notification_max_age = 30 * 24 * 3600,
+    };
+    var scheduled_jobs = [_]scheduled.ScheduledJob{
+        .{
+            .name = "tokens.cleanup",
+            .interval_seconds = 3600,
+            .run = jobTokensCleanup,
+            .ctx = &cleanup_ctx,
+        },
+        .{
+            .name = "notify.prune",
+            .interval_seconds = 24 * 3600,
+            .run = jobNotifyPrune,
+            .ctx = &cleanup_ctx,
+        },
+    };
+    var scheduled_runner = scheduled.ScheduledRunner{ .jobs = &scheduled_jobs };
+
+    const handler_registry = jobs.handlers(&mailer);
+    var dispatcher = task.service.Dispatcher.init(
+        allocator,
+        io,
+        &task_store,
+        &handler_registry,
+        cfg.task_retry_interval_seconds,
+        300, // stale claim threshold (seconds)
+    );
+    dispatcher.scheduled = &scheduled_runner;
+    try dispatcher.start();
+    defer dispatcher.deinit();
+    std.log.info("[task] dispatcher started ({d} handlers, {d} workers)", .{ handler_registry.len, cfg.task_workers });
+
+    // ── HTTP API ──
+    var login_limiter = try zigmodu.RateLimiter.init(allocator, "auth-public", 20, 1);
+    defer login_limiter.deinit();
+
+    var user_api = user.api.UserApi(@TypeOf(user_svc)).init(&user_svc);
+    var auth_api = auth.api.AuthApi(@TypeOf(user_svc)).init(&user_svc, cfg.app_host, &login_limiter, &mailer, &task_svc, &notify_svc);
+    var task_api = task.api.TaskApi(@TypeOf(task_svc), @TypeOf(user_svc)).init(&task_svc, &user_svc);
+    var file_api = file.api.FileApi(@TypeOf(file_svc), @TypeOf(user_svc)).init(&file_svc, &user_svc);
+    var notify_api = notify.api.NotificationApi(@TypeOf(notify_svc), @TypeOf(user_svc)).init(&notify_svc, &user_svc);
+    var system_api = system.api.SystemApi(@TypeOf(cache), @TypeOf(task_svc)).init(
+        &cache,
+        &task_svc,
+        &user_svc,
+        io,
+        zigmodu.time.wallClockSeconds(io),
+        @tagName(kind),
+        cfg.smtp_host.len > 0,
+        cfg.mail_console,
+        module_count,
+    );
+
+    var server = zigmodu.http.Server.initWithConfig(io, allocator, .{
+        .port = cfg.http_port,
+        .name = "zenaipa",
+        .max_body_size = cfg.upload_max_bytes + 64 * 1024,
+    });
     defer server.deinit();
 
     const origins = try parseCorsOrigins(allocator, cfg.cors_origins);
     defer allocator.free(origins);
+
+    var access_log = access_log_mod.AccessLog.init(allocator, 4096);
+    defer access_log.deinit();
+    try server.addMiddleware(sec_headers.securityHeaders());
+    try server.addMiddleware(access_log.middleware());
     try server.addMiddleware(cors_mw.cors(origins));
 
     var v1 = server.group("/api/v1");
     try auth_api.registerRoutes(&v1);
     try user_api.registerRoutes(&v1);
+    try task_api.registerRoutes(&v1);
+    try file_api.registerRoutes(&v1);
+    try notify_api.registerRoutes(&v1);
+    try system_api.registerRoutes(&v1);
 
+    // Health: liveness at the server root (probe convention) and readiness
+    // under the API prefix (checks the data store).
+    const Ready = struct {
+        var user_store_ref: *user.persistence.UserStore = undefined;
+    };
+    Ready.user_store_ref = &store;
     try server.addRoute(.{
         .method = .GET,
         .path = "health/live",
@@ -68,8 +223,31 @@ pub fn main(init: std.process.Init) !void {
             }
         }.handle,
     });
+    try server.addRoute(.{
+        .method = .GET,
+        .path = "api/v1/health/live",
+        .handler = struct {
+            fn handle(ctx: *zigmodu.http.Context) !void {
+                try ctx.json(200, "{\"code\":0,\"msg\":\"ok\",\"data\":{\"status\":\"UP\"}}");
+            }
+        }.handle,
+    });
+    try server.addRoute(.{
+        .method = .GET,
+        .path = "api/v1/health/ready",
+        .handler = struct {
+            fn handle(ctx: *zigmodu.http.Context) !void {
+                var probe = Ready.user_store_ref.listUsers(1, 1, null) catch {
+                    try ctx.sendErrorResponse(503, 503, "数据库不可用");
+                    return;
+                };
+                defer probe.free(ctx.allocator);
+                try ctx.json(200, "{\"code\":0,\"msg\":\"ok\",\"data\":{\"status\":\"READY\"}}");
+            }
+        }.handle,
+    });
 
-    std.log.info("zenaipa listening on http://127.0.0.1:{d}", .{cfg.http_port});
+    std.log.info("zenaipa listening on http://127.0.0.1:{d} (admin CLI: zig build admin -- --help)", .{cfg.http_port});
     try server.start();
 }
 

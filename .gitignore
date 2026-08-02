@@ -25,5 +25,8 @@ _ref/
 zenaipa.db
 *.db
 
+# Uploaded files (runtime data)
+uploads/
+
 # Stray root package-lock (real lockfile lives in web/)
 package-lock.json

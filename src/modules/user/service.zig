@@ -23,8 +23,24 @@ pub const ResetTokenError = error{
     InvalidPassword,
 };
 
+pub const VerificationError = error{
+    InvalidToken,
+    TokenExpired,
+};
+
+pub const ChangePasswordError = error{
+    InvalidCredentials,
+    InvalidPassword,
+};
+
 /// Raw reset token plus the owning user id (for the reset link).
 pub const PasswordResetInfo = struct {
+    user_id: i64,
+    raw: []const u8,
+};
+
+/// Raw email-verification token plus the owning user id (for the link).
+pub const VerificationInfo = struct {
     user_id: i64,
     raw: []const u8,
 };
@@ -45,18 +61,21 @@ pub const UserService = struct {
     sec: *zigmodu.security.AppSecurity,
     io: std.Io,
     password_token_expiration_seconds: i64,
+    verification_token_expiration_seconds: i64,
 
     pub fn init(
         store: *persist.UserStore,
         sec: *zigmodu.security.AppSecurity,
         io: std.Io,
         password_token_expiration_seconds: i64,
+        verification_token_expiration_seconds: i64,
     ) UserService {
         return .{
             .store = store,
             .sec = sec,
             .io = io,
             .password_token_expiration_seconds = password_token_expiration_seconds,
+            .verification_token_expiration_seconds = verification_token_expiration_seconds,
         };
     }
 
@@ -244,6 +263,55 @@ pub const UserService = struct {
         try self.validatePasswordResetToken(allocator, user_id, raw_token);
         self.setPassword(allocator, user_id, new_password) catch return error.InvalidPassword;
         self.store.deleteTokensForUser(user_id) catch return error.InvalidToken;
+    }
+
+    // ── Email verification ────────────────────────────────────────
+
+    /// Create a verification token for the user and return the raw token
+    /// (only its hash is stored). Returns null if the user does not exist.
+    pub fn createEmailVerification(self: *UserService, allocator: std.mem.Allocator, user_id: i64) !?VerificationInfo {
+        const row_opt = try self.store.getUserById(user_id);
+        const row = row_opt orelse return null;
+        defer row.free(allocator);
+        if (row.verified) return null;
+
+        const raw = try randomToken(allocator, self.io, 32);
+        errdefer allocator.free(raw);
+        const hash = try self.sec.module.hashPassword(raw);
+        defer allocator.free(hash);
+        const now = zigmodu.time.wallClockSeconds(self.io);
+        // Housekeeping: drop this user's stale tokens before inserting a new one.
+        self.store.deleteExpiredEmailVerifications(user_id, now, self.verification_token_expiration_seconds) catch {};
+        _ = try self.store.createEmailVerification(user_id, hash, now);
+        return .{ .user_id = user_id, .raw = raw };
+    }
+
+    /// Validate a raw verification token and mark the user verified.
+    pub fn verifyEmail(self: *UserService, allocator: std.mem.Allocator, user_id: i64, raw_token: []const u8) VerificationError!void {
+        const tok_opt = self.store.getLatestEmailVerification(user_id) catch return error.InvalidToken;
+        const tok = tok_opt orelse return error.InvalidToken;
+        defer tok.free(allocator);
+
+        const now = zigmodu.time.wallClockSeconds(self.io);
+        if (now - tok.created_at > self.verification_token_expiration_seconds) {
+            self.store.deleteEmailVerificationsForUser(user_id) catch {};
+            return error.TokenExpired;
+        }
+        if (!self.sec.module.verifyPassword(raw_token, tok.token)) return error.InvalidToken;
+
+        self.setVerified(user_id, true) catch return error.InvalidToken;
+        self.store.deleteEmailVerificationsForUser(user_id) catch {};
+    }
+
+    /// Self-service password change: verify the current password, then set
+    /// the new one.
+    pub fn changePassword(self: *UserService, allocator: std.mem.Allocator, id: i64, old_password: []const u8, new_password: []const u8) ChangePasswordError!void {
+        if (new_password.len < 8) return error.InvalidPassword;
+        const hash_opt = self.store.getPasswordHashById(id) catch return error.InvalidCredentials;
+        const hash = hash_opt orelse return error.InvalidCredentials;
+        defer allocator.free(hash);
+        if (!self.sec.module.verifyPassword(old_password, hash)) return error.InvalidCredentials;
+        self.setPassword(allocator, id, new_password) catch return error.InvalidPassword;
     }
 };
 

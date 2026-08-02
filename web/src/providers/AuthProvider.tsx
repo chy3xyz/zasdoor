@@ -105,6 +105,11 @@ export function AuthProvider(props: JSX.HTMLAttributes<HTMLElement>) {
     clearError() {
       setStore('error', null);
     },
+    setCurrentUser(user) {
+      const token = store.token;
+      if (token) persistSession(token, user);
+      setStore('user', user);
+    },
   };
 
   const value: AuthContextValue = [store, actions];

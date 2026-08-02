@@ -11,19 +11,20 @@ pub const DriverKind = enum {
     postgres,
 };
 
-/// RAII wrapper over the shared zent store: owns the driver, exposes the
-/// generated client for the module's `infos`.
+/// RAII wrapper over the shared zent store: owns the driver, migrates each
+/// schema group (small comptime graphs — zent's migration generator has a
+/// per-call branch quota), and exposes one type-safe client for all tables.
 ///
 /// The driver lives on the heap: `makeClient` captures `driver.asDriver()`
 /// which is a pointer, so the driver must outlive `open`'s frame (a value
 /// copy of `Self` is returned). Heap allocation keeps that pointer stable.
-pub fn StoreEnv(comptime Infos: anytype) type {
+pub fn StoreEnv(comptime ClientInfos: anytype, comptime MigrateGroups: anytype) type {
     return struct {
         allocator: std.mem.Allocator,
         kind: DriverKind,
         sqlite: ?*zent.sql_sqlite.SQLiteDriver = null,
         pg: ?*zent.sql_postgres.PostgresDriver = null,
-        client: zent.codegen.client.Client(Infos),
+        client: zent.codegen.client.Client(ClientInfos),
 
         const Self = @This();
 
@@ -39,18 +40,22 @@ pub fn StoreEnv(comptime Infos: anytype) type {
                     errdefer allocator.destroy(driver);
                     driver.* = try zent.sql_sqlite.SQLiteDriver.open(allocator, dsn);
                     errdefer driver.close();
-                    try zent.sql_schema.migrateSchema(allocator, driver.asDriver(), Infos);
+                    inline for (MigrateGroups) |gi| {
+                        try zent.sql_schema.migrateSchema(allocator, driver.asDriver(), gi);
+                    }
                     self.sqlite = driver;
-                    self.client = zent.codegen.client.makeClient(Infos, allocator, driver.asDriver());
+                    self.client = zent.codegen.client.makeClient(ClientInfos, allocator, driver.asDriver());
                 },
                 .postgres => {
                     const driver = try allocator.create(zent.sql_postgres.PostgresDriver);
                     errdefer allocator.destroy(driver);
                     driver.* = try zent.sql_postgres.PostgresDriver.connect(allocator, dsn);
                     errdefer driver.close();
-                    try zent.sql_schema.migrateSchema(allocator, driver.asDriver(), Infos);
+                    inline for (MigrateGroups) |gi| {
+                        try zent.sql_schema.migrateSchema(allocator, driver.asDriver(), gi);
+                    }
                     self.pg = driver;
-                    self.client = zent.codegen.client.makeClient(Infos, allocator, driver.asDriver());
+                    self.client = zent.codegen.client.makeClient(ClientInfos, allocator, driver.asDriver());
                 },
             }
             return self;

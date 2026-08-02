@@ -22,6 +22,28 @@ pub const Config = struct {
     /// Comma-separated CORS allow-list. "*" allows any origin (dev only);
     /// set e.g. `ZENAIPA_CORS_ORIGINS=https://admin.example.com` in prod.
     cors_origins: []const u8 = "*",
+    /// Mail transport. Empty host => console/log sink (dev). When set, SMTP
+    /// is used (with STARTTLS when `smtp_starttls` is true).
+    smtp_host: []const u8 = "",
+    smtp_port: u16 = 587,
+    smtp_username: []const u8 = "",
+    smtp_password: []const u8 = "",
+    smtp_from: []const u8 = "zenaipa@localhost",
+    smtp_starttls: bool = true,
+    /// Also log every outbound email at info level (useful in dev).
+    mail_console: bool = true,
+    /// Email verification token lifetime in seconds.
+    verification_token_expiration_seconds: i64 = 24 * 3600,
+    /// Upload directory (created on startup). Files are served from /files.
+    upload_dir: []const u8 = "uploads",
+    upload_max_bytes: usize = 10 * 1024 * 1024,
+    /// In-memory cache capacity / TTL.
+    cache_max_entries: usize = 1024,
+    cache_ttl_seconds: u64 = 300,
+    /// Background task dispatcher.
+    task_workers: usize = 2,
+    task_max_attempts: i64 = 3,
+    task_retry_interval_seconds: i64 = 60,
 
     pub fn fromEnv(environ: *const std.process.Environ.Map) Config {
         var cfg: Config = .{};
@@ -34,6 +56,21 @@ pub const Config = struct {
         cfg.password_token_expiration_seconds = parseInt64(environ.get("ZENAIPA_PASSWORD_TOKEN_EXPIRATION") orelse "3600", 3600);
         cfg.app_host = environ.get("ZENAIPA_APP_HOST") orelse "http://localhost:3001";
         cfg.cors_origins = environ.get("ZENAIPA_CORS_ORIGINS") orelse "*";
+        cfg.smtp_host = environ.get("ZENAIPA_SMTP_HOST") orelse "";
+        cfg.smtp_port = parsePort(environ.get("ZENAIPA_SMTP_PORT") orelse "587");
+        cfg.smtp_username = environ.get("ZENAIPA_SMTP_USERNAME") orelse "";
+        cfg.smtp_password = environ.get("ZENAIPA_SMTP_PASSWORD") orelse "";
+        cfg.smtp_from = environ.get("ZENAIPA_SMTP_FROM") orelse "zenaipa@localhost";
+        cfg.smtp_starttls = parseBool(environ.get("ZENAIPA_SMTP_STARTTLS") orelse "true", true);
+        cfg.mail_console = parseBool(environ.get("ZENAIPA_MAIL_CONSOLE") orelse "true", true);
+        cfg.verification_token_expiration_seconds = parseInt64(environ.get("ZENAIPA_VERIFICATION_TOKEN_EXPIRATION") orelse "86400", 86400);
+        cfg.upload_dir = environ.get("ZENAIPA_UPLOAD_DIR") orelse "uploads";
+        cfg.upload_max_bytes = parseIntUsize(environ.get("ZENAIPA_UPLOAD_MAX_BYTES") orelse "10485760", 10 * 1024 * 1024);
+        cfg.cache_max_entries = parseIntUsize(environ.get("ZENAIPA_CACHE_MAX_ENTRIES") orelse "1024", 1024);
+        cfg.cache_ttl_seconds = @intCast(parseInt64(environ.get("ZENAIPA_CACHE_TTL_SECONDS") orelse "300", 300));
+        cfg.task_workers = parseIntUsize(environ.get("ZENAIPA_TASK_WORKERS") orelse "2", 2);
+        cfg.task_max_attempts = parseInt64(environ.get("ZENAIPA_TASK_MAX_ATTEMPTS") orelse "3", 3);
+        cfg.task_retry_interval_seconds = parseInt64(environ.get("ZENAIPA_TASK_RETRY_INTERVAL_SECONDS") orelse "60", 60);
         return cfg;
     }
 };
@@ -44,4 +81,14 @@ fn parsePort(s: []const u8) u16 {
 
 fn parseInt64(s: []const u8, default: i64) i64 {
     return std.fmt.parseInt(i64, s, 10) catch default;
+}
+
+fn parseIntUsize(s: []const u8, default: usize) usize {
+    return std.fmt.parseInt(usize, s, 10) catch default;
+}
+
+fn parseBool(s: []const u8, default: bool) bool {
+    if (std.mem.eql(u8, s, "1") or std.mem.eql(u8, s, "true") or std.mem.eql(u8, s, "yes")) return true;
+    if (std.mem.eql(u8, s, "0") or std.mem.eql(u8, s, "false") or std.mem.eql(u8, s, "no")) return false;
+    return default;
 }

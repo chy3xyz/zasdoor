@@ -6,12 +6,15 @@
 const std = @import("std");
 const zent = @import("zent");
 const model = @import("model.zig");
+const schema = @import("../../schema.zig");
 
-const graph = zent.codegen.graph.buildGraph(&.{ model.User, model.PasswordToken });
+const graph = zent.codegen.graph.buildGraph(&.{ model.User, model.PasswordToken, model.EmailVerification });
 pub const infos = graph.types;
-pub const Client = zent.codegen.client.Client(infos);
+/// Shared, application-wide typed client (all schemas registered in schema.zig).
+pub const Client = schema.Client;
 pub const UserInfo = infos[0];
 pub const PasswordTokenInfo = infos[1];
+pub const EmailVerificationInfo = infos[2];
 
 pub const UserRow = struct {
     id: i64,
@@ -290,5 +293,88 @@ pub const UserStore = struct {
         defer d.deinit();
         _ = try d.Where(.{preds.user_idEQ(.{ .int = user_id })});
         _ = try d.Exec();
+    }
+
+    // ── EmailVerification ─────────────────────────────────────────
+
+    pub fn createEmailVerification(self: *UserStore, user_id: i64, token_hash: []const u8, now: i64) !i64 {
+        var b = try self.client.email_verification.Create();
+        defer b.deinit();
+        _ = try b.setFieldValue("user_id", user_id);
+        _ = try b.setFieldValue("token", token_hash);
+        _ = try b.setFieldValue("created_at", now);
+        var row = try b.Save();
+        defer zent.codegen.deinitEntity(infos, EmailVerificationInfo, &row, self.allocator);
+        return row.id;
+    }
+
+    pub const EmailVerificationRow = struct {
+        id: i64,
+        user_id: i64,
+        token: []const u8,
+        created_at: i64,
+
+        pub fn free(self: EmailVerificationRow, allocator: std.mem.Allocator) void {
+            allocator.free(self.token);
+        }
+    };
+
+    pub fn getLatestEmailVerification(self: *UserStore, user_id: i64) !?EmailVerificationRow {
+        var q = self.client.email_verification.Query();
+        defer q.deinit();
+        const preds = self.client.email_verification.predicates;
+        _ = try q.Where(.{preds.user_idEQ(.{ .int = user_id })});
+        _ = try q.OrderBy(&[_]zent.sql.Order{.{ .column = .{ .name = "created_at", .desc = true } }});
+        _ = q.Limit(1);
+        const entity_opt = try q.First();
+        var entity = entity_opt orelse return null;
+        defer zent.codegen.deinitEntity(infos, EmailVerificationInfo, &entity, self.allocator);
+        const token_dup = try self.allocator.dupe(u8, entity.token);
+        return .{
+            .id = entity.id,
+            .user_id = entity.user_id,
+            .token = token_dup,
+            .created_at = entity.created_at orelse 0,
+        };
+    }
+
+    pub fn deleteEmailVerificationsForUser(self: *UserStore, user_id: i64) !void {
+        const preds = self.client.email_verification.predicates;
+        var d = self.client.email_verification.Delete();
+        defer d.deinit();
+        _ = try d.Where(.{preds.user_idEQ(.{ .int = user_id })});
+        _ = try d.Exec();
+    }
+
+    pub fn deleteExpiredEmailVerifications(self: *UserStore, user_id: i64, now: i64, max_age: i64) !void {
+        const preds = self.client.email_verification.predicates;
+        const cutoff = now - max_age;
+        var d = self.client.email_verification.Delete();
+        defer d.deinit();
+        _ = try d.Where(.{preds.user_idEQ(.{ .int = user_id })});
+        _ = try d.Where(.{preds.created_atLT(.{ .int = cutoff })});
+        _ = try d.Exec();
+    }
+
+    /// Global sweep (cron): remove every expired password-reset token.
+    pub fn purgeExpiredPasswordTokens(self: *UserStore, now: i64, max_age: i64) !usize {
+        const preds = self.client.password_token.predicates;
+        const cutoff = now - max_age;
+        var d = self.client.password_token.Delete();
+        defer d.deinit();
+        _ = try d.Where(.{preds.created_atLT(.{ .int = cutoff })});
+        _ = try d.Exec();
+        return 0;
+    }
+
+    /// Global sweep (cron): remove every expired email-verification token.
+    pub fn purgeExpiredEmailVerifications(self: *UserStore, now: i64, max_age: i64) !usize {
+        const preds = self.client.email_verification.predicates;
+        const cutoff = now - max_age;
+        var d = self.client.email_verification.Delete();
+        defer d.deinit();
+        _ = try d.Where(.{preds.created_atLT(.{ .int = cutoff })});
+        _ = try d.Exec();
+        return 0;
     }
 };

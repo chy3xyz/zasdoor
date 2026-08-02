@@ -9,6 +9,9 @@ import type {
   LoginResult,
   RegisterRequest,
   ResetPasswordRequest,
+  VerifyEmailRequest,
+  UpdateProfileRequest,
+  ChangePasswordRequest,
 } from './types';
 
 async function postEnvelope<T>(path: string, body: unknown): Promise<T> {
@@ -18,6 +21,11 @@ async function postEnvelope<T>(path: string, body: unknown): Promise<T> {
 
 async function getEnvelope<T>(path: string): Promise<T> {
   const { data } = await http.get<{ code: number; msg: string; data: T }>(path);
+  return unwrapEnvelope(data);
+}
+
+async function putEnvelope<T>(path: string, body: unknown): Promise<T> {
+  const { data } = await http.put<{ code: number; msg: string; data: T }>(path, body);
   return unwrapEnvelope(data);
 }
 
@@ -39,6 +47,26 @@ export async function forgotPassword(body: ForgotPasswordRequest): Promise<void>
 
 export async function resetPassword(body: ResetPasswordRequest): Promise<void> {
   await postEnvelope<null>(AUTH_PATH.resetPassword, body);
+}
+
+/** Request an email-verification link for the signed-in user. */
+export async function sendVerification(): Promise<void> {
+  await postEnvelope<null>(AUTH_PATH.sendVerification, {});
+}
+
+/** Redeem a verification link (user_id + token from the email). */
+export async function verifyEmail(body: VerifyEmailRequest): Promise<void> {
+  await postEnvelope<null>(AUTH_PATH.verifyEmail, body);
+}
+
+/** Update own profile (name / email). Returns the fresh user. */
+export async function updateProfile(body: UpdateProfileRequest): Promise<AuthUser> {
+  return putEnvelope<AuthUser>(AUTH_PATH.profile, body);
+}
+
+/** Change own password (current password required). */
+export async function changePassword(body: ChangePasswordRequest): Promise<void> {
+  await putEnvelope<null>(AUTH_PATH.password, body);
 }
 
 /** Current authenticated user. */

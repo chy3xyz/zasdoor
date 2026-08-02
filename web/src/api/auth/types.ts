@@ -33,3 +33,18 @@ export interface ResetPasswordRequest {
   token: string;
   new_password: string;
 }
+
+export interface VerifyEmailRequest {
+  user_id: number;
+  token: string;
+}
+
+export interface UpdateProfileRequest {
+  name?: string;
+  email?: string;
+}
+
+export interface ChangePasswordRequest {
+  old_password: string;
+  new_password: string;
+}

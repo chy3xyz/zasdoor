@@ -26,7 +26,10 @@ const SignIn = lazy(() => import('#ui/pages/SignIn'));
 const SignUp = lazy(() => import('#ui/pages/SignUp'));
 const ForgotPassword = lazy(() => import('#ui/pages/ForgotPassword'));
 const ResetPassword = lazy(() => import('#ui/pages/ResetPassword'));
+const VerifyEmail = lazy(() => import('#ui/pages/VerifyEmail'));
 const Users = lazy(() => import('#ui/pages/Users'));
+const Tasks = lazy(() => import('#ui/pages/Tasks'));
+const Files = lazy(() => import('#ui/pages/Files'));
 const Profile = lazy(() => import('#ui/pages/Profile'));
 const NotFound = lazy(() => import('#ui/pages/NotFound'));
 
@@ -138,6 +141,14 @@ if (root) {
             </AuthLayout>
           )}
         />
+        <Route
+          path={ROUTE_PATH.verifyEmail}
+          component={() => (
+            <AuthLayout>
+              <VerifyEmail />
+            </AuthLayout>
+          )}
+        />
         <Route path={ROUTE_PATH.root} component={Protected}>
           <Route
             path={ROUTE_PATH.users}
@@ -147,6 +158,15 @@ if (root) {
               </AdminGate>
             )}
           />
+          <Route
+            path={ROUTE_PATH.tasks}
+            component={() => (
+              <AdminGate>
+                <Tasks />
+              </AdminGate>
+            )}
+          />
+          <Route path={ROUTE_PATH.files} component={Files} />
           <Route path={ROUTE_PATH.profile} component={Profile} />
         </Route>
         <Route path="*" component={NotFound} />

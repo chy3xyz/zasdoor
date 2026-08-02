@@ -35,6 +35,25 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run the zenaipa server");
     run_step.dependOn(&run_cmd.step);
 
+    // Admin CLI (pagoda `make admin` equivalent)
+    const admin_mod = b.createModule(.{
+        .root_source_file = b.path("src/admin_cli.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    admin_mod.addImport("zigmodu", zigmodu_dep.module("zigmodu"));
+    admin_mod.addImport("zent", zent_dep.module("zent"));
+    db_link.link(admin_mod, b, features);
+
+    const admin_exe = b.addExecutable(.{ .name = "zenaipa-admin", .root_module = admin_mod });
+    b.installArtifact(admin_exe);
+
+    const admin_cmd = b.addRunArtifact(admin_exe);
+    admin_cmd.step.dependOn(b.getInstallStep());
+    const admin_step = b.step("admin", "Admin CLI help; run zig-out/bin/zenaipa-admin create-admin --email you@example.com");
+    admin_step.dependOn(&admin_cmd.step);
+
     // Unit tests
     const tests_mod = b.createModule(.{
         .root_source_file = b.path("src/tests.zig"),

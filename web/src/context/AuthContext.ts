@@ -16,6 +16,8 @@ export type AuthActions = {
   register: (name: string, email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   clearError: () => void;
+  /** Update the cached user after a profile change. */
+  setCurrentUser: (user: AuthUser) => void;
 };
 
 export type AuthContextValue = [AuthState, AuthActions];
@@ -32,5 +34,6 @@ export const AuthContext = createContext<AuthContextValue>([
     register: async () => {},
     logout: async () => {},
     clearError: () => {},
+    setCurrentUser: () => {},
   },
 ]);
