@@ -30,6 +30,7 @@ const VerifyEmail = lazy(() => import('#ui/pages/VerifyEmail'));
 const Users = lazy(() => import('#ui/pages/Users'));
 const Tasks = lazy(() => import('#ui/pages/Tasks'));
 const Files = lazy(() => import('#ui/pages/Files'));
+const Tenants = lazy(() => import('#ui/pages/Tenants'));
 const Profile = lazy(() => import('#ui/pages/Profile'));
 const NotFound = lazy(() => import('#ui/pages/NotFound'));
 
@@ -167,6 +168,14 @@ if (root) {
             )}
           />
           <Route path={ROUTE_PATH.files} component={Files} />
+          <Route
+            path={ROUTE_PATH.tenants}
+            component={() => (
+              <AdminGate>
+                <Tenants />
+              </AdminGate>
+            )}
+          />
           <Route path={ROUTE_PATH.profile} component={Profile} />
         </Route>
         <Route path="*" component={NotFound} />

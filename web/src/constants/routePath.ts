@@ -10,5 +10,6 @@ export const ROUTE_PATH = {
   profile: '/profile',
   tasks: '/tasks',
   files: '/files',
+  tenants: '/tenants',
   notFound: '/404',
 } as const;

@@ -30,6 +30,7 @@ const task = @import("modules/task/root.zig");
 const file = @import("modules/file/root.zig");
 const notify = @import("modules/notify/root.zig");
 const system = @import("modules/system/root.zig");
+const tenant = @import("modules/tenant/root.zig");
 
 /// Shared state for scheduled housekeeping jobs (single background thread —
 /// zent's SQLite driver is a single connection).
@@ -66,6 +67,7 @@ pub fn main(init: std.process.Init) !void {
     const kind: db_mod.DriverKind = if (std.mem.eql(u8, cfg.db_driver, "postgres")) .postgres else .sqlite;
     const dsn = if (kind == .postgres) cfg.pg_conninfo else cfg.sqlite_path;
     var store_env = try db_mod.StoreEnv(schema.infos, .{
+        tenant.persistence.infos,
         user.persistence.infos,
         task.persistence.infos,
         file.persistence.infos,
@@ -108,9 +110,14 @@ pub fn main(init: std.process.Init) !void {
     var file_store = file.persistence.FileStore.init(allocator, store_env.client);
     var file_svc = file.service.FileService.init(allocator, io, &file_store, cfg.upload_dir, cfg.upload_max_bytes);
     try file_svc.ensureDir();
+    var tenant_store = tenant.persistence.TenantStore.init(allocator, store_env.client);
+    var tenant_svc = tenant.service.TenantService.init(allocator, io, &tenant_store);
+    const default_tenant_id = try tenant_svc.ensureDefault();
+    std.log.info("[tenant] default tenant ready (id={d})", .{default_tenant_id});
 
     // ── ZigModu module lifecycle ──
     var modules = try zigmodu.scanModules(allocator, .{
+        tenant.module,
         user.module,
         auth.module,
         task.module,
@@ -167,11 +174,12 @@ pub fn main(init: std.process.Init) !void {
     var login_limiter = try zigmodu.RateLimiter.init(allocator, "auth-public", 20, 1);
     defer login_limiter.deinit();
 
-    var user_api = user.api.UserApi(@TypeOf(user_svc)).init(&user_svc);
-    var auth_api = auth.api.AuthApi(@TypeOf(user_svc)).init(&user_svc, cfg.app_host, &login_limiter, &mailer, &task_svc, &notify_svc);
+    var user_api = user.api.UserApi(@TypeOf(user_svc)).init(&user_svc, default_tenant_id);
+    var auth_api = auth.api.AuthApi(@TypeOf(user_svc)).init(&user_svc, cfg.app_host, &login_limiter, &mailer, &task_svc, &notify_svc, default_tenant_id);
     var task_api = task.api.TaskApi(@TypeOf(task_svc), @TypeOf(user_svc)).init(&task_svc, &user_svc);
-    var file_api = file.api.FileApi(@TypeOf(file_svc), @TypeOf(user_svc)).init(&file_svc, &user_svc);
+    var file_api = file.api.FileApi(@TypeOf(file_svc), @TypeOf(user_svc)).init(&file_svc, &user_svc, default_tenant_id);
     var notify_api = notify.api.NotificationApi(@TypeOf(notify_svc), @TypeOf(user_svc)).init(&notify_svc, &user_svc);
+    var tenant_api = tenant.api.TenantApi(@TypeOf(tenant_svc), @TypeOf(user_svc)).init(&tenant_svc, &user_svc);
     var system_api = system.api.SystemApi(@TypeOf(cache), @TypeOf(task_svc)).init(
         &cache,
         &task_svc,
@@ -206,6 +214,7 @@ pub fn main(init: std.process.Init) !void {
     try task_api.registerRoutes(&v1);
     try file_api.registerRoutes(&v1);
     try notify_api.registerRoutes(&v1);
+    try tenant_api.registerRoutes(&v1);
     try system_api.registerRoutes(&v1);
 
     // Health: liveness at the server root (probe convention) and readiness
@@ -237,7 +246,7 @@ pub fn main(init: std.process.Init) !void {
         .path = "api/v1/health/ready",
         .handler = struct {
             fn handle(ctx: *zigmodu.http.Context) !void {
-                var probe = Ready.user_store_ref.listUsers(1, 1, null) catch {
+                var probe = Ready.user_store_ref.listUsers(1, 1, null, null) catch {
                     try ctx.sendErrorResponse(503, 503, "数据库不可用");
                     return;
                 };

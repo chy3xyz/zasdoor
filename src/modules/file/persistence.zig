@@ -17,6 +17,7 @@ pub const FileRow = struct {
     mime: []const u8,
     size_bytes: i64,
     uploader_id: i64,
+    tenant_id: i64,
     created_at: i64,
     updated_at: i64,
 
@@ -59,12 +60,13 @@ pub const FileStore = struct {
             .mime = mime,
             .size_bytes = e.size_bytes,
             .uploader_id = e.uploader_id,
+            .tenant_id = e.tenant_id,
             .created_at = e.created_at orelse 0,
             .updated_at = e.updated_at orelse 0,
         };
     }
 
-    pub fn create(self: *FileStore, name: []const u8, storage_key: []const u8, mime: []const u8, size_bytes: i64, uploader_id: i64, now: i64) !i64 {
+    pub fn create(self: *FileStore, name: []const u8, storage_key: []const u8, mime: []const u8, size_bytes: i64, uploader_id: i64, tenant_id: i64, now: i64) !i64 {
         var b = try self.client.file.Create();
         defer b.deinit();
         _ = try b.setFieldValue("name", name);
@@ -72,6 +74,7 @@ pub const FileStore = struct {
         _ = try b.setFieldValue("mime", mime);
         _ = try b.setFieldValue("size_bytes", size_bytes);
         _ = try b.setFieldValue("uploader_id", uploader_id);
+        _ = try b.setFieldValue("tenant_id", tenant_id);
         _ = try b.setFieldValue("created_at", now);
         _ = try b.setFieldValue("updated_at", now);
         var row = try b.Save();
@@ -101,18 +104,21 @@ pub const FileStore = struct {
         return try self.dup(entity);
     }
 
-    pub fn list(self: *FileStore, page: usize, page_size: usize, uploader_id: ?i64) !FileListResult {
+    pub fn list(self: *FileStore, page: usize, page_size: usize, uploader_id: ?i64, tenant_id: ?i64) !FileListResult {
         const preds = self.client.file.predicates;
         const owner_pred = if (uploader_id) |uid| preds.uploader_idEQ(.{ .int = uid }) else null;
+        const tenant_pred = if (tenant_id) |tid| preds.tenant_idEQ(.{ .int = tid }) else null;
 
         var count_q = self.client.file.Query();
         defer count_q.deinit();
         if (owner_pred) |op| _ = try count_q.Where(.{op});
+        if (tenant_pred) |tp| _ = try count_q.Where(.{tp});
         const total: i64 = @intCast(try count_q.Count());
 
         var q = self.client.file.Query();
         defer q.deinit();
         if (owner_pred) |op| _ = try q.Where(.{op});
+        if (tenant_pred) |tp| _ = try q.Where(.{tp});
         if (page_size > 0) {
             _ = q.Limit(page_size);
             if (page > 1) _ = q.Offset((page - 1) * page_size);

@@ -23,13 +23,13 @@ pub const TaskService = struct {
     }
 
     /// Enqueue a task for immediate or delayed execution. Returns the new id.
-    pub fn enqueue(self: *TaskService, name: []const u8, payload: []const u8, available_at: i64) !i64 {
+    pub fn enqueue(self: *TaskService, name: []const u8, payload: []const u8, available_at: i64, tenant_id: i64) !i64 {
         const now = self.nowSeconds();
-        return self.store.createTask(name, payload, "pending", 0, self.max_attempts, "", available_at, now);
+        return self.store.createTask(name, payload, "pending", tenant_id, 0, self.max_attempts, "", available_at, now);
     }
 
-    pub fn enqueueNow(self: *TaskService, name: []const u8, payload: []const u8) !i64 {
-        return self.enqueue(name, payload, 0);
+    pub fn enqueueNow(self: *TaskService, name: []const u8, payload: []const u8, tenant_id: i64) !i64 {
+        return self.enqueue(name, payload, 0, tenant_id);
     }
 
     pub fn list(self: *TaskService, page: usize, page_size: usize, status: ?[]const u8) !TaskListResult {

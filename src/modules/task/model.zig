@@ -13,6 +13,7 @@ pub const Task = Schema("Task", .{
         field.String("name"),
         field.String("payload").Default(""),
         field.String("status").Default("pending"),
+        field.Int("tenant_id").Default(0),
         field.Int("attempts").Default(0),
         field.Int("max_attempts").Default(3),
         field.String("last_error").Default(""),

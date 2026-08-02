@@ -137,6 +137,10 @@ function Profile() {
                 </dd>
               </div>
               <div class="flex justify-between">
+                <dt class="text-base-content/60">租户 ID</dt>
+                <dd class="font-mono">{user()?.tenant_id}</dd>
+              </div>
+              <div class="flex justify-between">
                 <dt class="text-base-content/60">验证状态</dt>
                 <dd>
                   <span class={`badge badge-sm ${user()?.verified ? 'badge-success' : 'badge-outline'}`}>

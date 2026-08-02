@@ -19,6 +19,7 @@ const user = @import("modules/user/root.zig");
 const task = @import("modules/task/root.zig");
 const file = @import("modules/file/root.zig");
 const notify = @import("modules/notify/root.zig");
+const tenant = @import("modules/tenant/root.zig");
 
 pub fn main(init: std.process.Init) !void {
     const allocator = init.gpa;
@@ -41,6 +42,7 @@ pub fn main(init: std.process.Init) !void {
     const kind: db_mod.DriverKind = if (std.mem.eql(u8, cfg.db_driver, "postgres")) .postgres else .sqlite;
     const dsn = if (kind == .postgres) cfg.pg_conninfo else cfg.sqlite_path;
     var store_env = try db_mod.StoreEnv(schema.infos, .{
+        tenant.persistence.infos,
         user.persistence.infos,
         task.persistence.infos,
         file.persistence.infos,
@@ -55,9 +57,13 @@ pub fn main(init: std.process.Init) !void {
     });
     var svc = user.service.UserService.init(&store, &sec, io, cfg.password_token_expiration_seconds, cfg.verification_token_expiration_seconds);
 
+    var tenant_store = tenant.persistence.TenantStore.init(allocator, store_env.client);
+    var tenant_svc = tenant.service.TenantService.init(allocator, io, &tenant_store);
+    const default_tenant_id = try tenant_svc.ensureDefault();
+
     const cmd = args.items[0];
     if (std.mem.eql(u8, cmd, "create-admin")) {
-        try cmdCreateAdmin(io, allocator, &svc, args.items[1..]);
+        try cmdCreateAdmin(io, allocator, &svc, default_tenant_id, args.items[1..]);
     } else if (std.mem.eql(u8, cmd, "list-admins")) {
         try cmdListAdmins(io, allocator, &store);
     } else {
@@ -76,7 +82,7 @@ fn printHelp(io: std.Io) !void {
     );
 }
 
-fn cmdCreateAdmin(io: std.Io, allocator: std.mem.Allocator, svc: *user.service.UserService, args: []const []const u8) !void {
+fn cmdCreateAdmin(io: std.Io, allocator: std.mem.Allocator, svc: *user.service.UserService, default_tenant_id: i64, args: []const []const u8) !void {
     var email: ?[]const u8 = null;
     var password: ?[]const u8 = null;
     var name: []const u8 = "Administrator";
@@ -124,7 +130,7 @@ fn cmdCreateAdmin(io: std.Io, allocator: std.mem.Allocator, svc: *user.service.U
         return;
     }
 
-    var session = try svc.register(allocator, name, email.?, final_password, true);
+    var session = try svc.register(allocator, name, email.?, final_password, true, default_tenant_id);
     defer session.deinit(allocator);
     try svc.setVerified(session.row.id, true);
     const line = try std.fmt.allocPrint(allocator, "admin created: {s} (id={d})\n", .{ session.row.email, session.row.id });
@@ -138,7 +144,7 @@ fn cmdCreateAdmin(io: std.Io, allocator: std.mem.Allocator, svc: *user.service.U
 }
 
 fn cmdListAdmins(io: std.Io, allocator: std.mem.Allocator, store: *user.persistence.UserStore) !void {
-    var result = try store.listUsers(1, 1000, null);
+    var result = try store.listUsers(1, 1000, null, null);
     defer result.free(allocator);
     for (result.items) |u| {
         if (u.admin) {

@@ -153,6 +153,15 @@ function MainLayout(props: { children?: JSX.Element }) {
               任务中心
             </A>
           </Show>
+          <Show when={auth.user?.admin}>
+            <A
+              href={ROUTE_PATH.tenants}
+              class="block rounded-lg px-3 py-2 text-sm hover:bg-base-300 [&.active]:bg-primary [&.active]:text-primary-content"
+              activeClass="active"
+            >
+              租户管理
+            </A>
+          </Show>
           <A
             href={ROUTE_PATH.files}
             class="block rounded-lg px-3 py-2 text-sm hover:bg-base-300 [&.active]:bg-primary [&.active]:text-primary-content"

@@ -4,6 +4,7 @@ export interface AuthUser {
   email: string;
   verified: boolean;
   admin: boolean;
+  tenant_id: number;
   created_at: number;
   updated_at: number;
 }

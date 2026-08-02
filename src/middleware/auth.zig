@@ -5,6 +5,7 @@ const zigmodu = @import("zigmodu");
 const http = zigmodu.http;
 
 pub const auth_user_id_attr = "auth_user_id";
+pub const tenant_id_attr = "tenant_id";
 
 /// Parses `Authorization: Bearer <token>`, verifies the JWT and stores the
 /// subject (user id) as a context attribute. Responds 401 on any failure.
@@ -28,6 +29,14 @@ pub fn jwtAuth(sec: *zigmodu.security.AppSecurity) http.Middleware {
             };
             defer S.stored.module.freePayload(payload);
             try ctx.setAttr(auth_user_id_attr, payload.sub);
+            // zenaipa puts the tenant id in the JWT `aud` claim (issued via
+            // generateTokenWithTenant). Legacy tokens without a numeric aud
+            // leave the attr unset; handlers fall back to the default tenant.
+            if (std.fmt.parseInt(i64, payload.aud, 10) catch null) |tid| {
+                var buf: [32]u8 = undefined;
+                const tid_str = try std.fmt.bufPrint(&buf, "{d}", .{tid});
+                try ctx.setAttr(tenant_id_attr, tid_str);
+            }
             try next(ctx);
         }
     }.mw };
@@ -36,5 +45,12 @@ pub fn jwtAuth(sec: *zigmodu.security.AppSecurity) http.Middleware {
 /// The authenticated user id, or null when the JWT middleware did not run.
 pub fn authUserId(ctx: *http.Context) ?i64 {
     const id_str = ctx.getAttr(auth_user_id_attr) orelse return null;
+    return std.fmt.parseInt(i64, id_str, 10) catch null;
+}
+
+/// The authenticated user's tenant id (from the JWT `aud` claim), or null
+/// when the token predates tenant support.
+pub fn authTenantId(ctx: *http.Context) ?i64 {
+    const id_str = ctx.getAttr(tenant_id_attr) orelse return null;
     return std.fmt.parseInt(i64, id_str, 10) catch null;
 }

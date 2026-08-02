@@ -38,6 +38,13 @@ file uploads, notifications, caching, and an admin UI that covers all of it.
 - **Caching** — in-memory LRU with configurable TTL and capacity
 - **Scheduled maintenance** — automatic cleanup of expired tokens and old notifications
 
+### Multi-tenancy
+- Tenant entity with admin management UI (`/tenants`) and soft disable
+- Row-level isolation: `tenant_id` on `User` and `File`; provenance on `Task`
+- Tenant travels in the JWT (`aud` claim) — no per-request database lookup
+- Registration binds to a tenant via the `X-Tenant-ID` header (falls back to the
+  default tenant, so single-tenant deployments are unchanged)
+
 ### Admin & operations
 - User management: CRUD, pagination, keyword search, self-protection guards
 - Task center: live queue stats, retry / cancel / purge failed work
@@ -65,7 +72,7 @@ Browser (SolidJS SPA)
         │  /api/v1 (JSON envelope: { code, msg, data })
         ▼
 Zig HTTP server (zigmodu)
-        │  global middleware: security headers → access log → CORS
+        │  global middleware: security headers → access log → CORS → JWT (tenant)
         ▼
 Module APIs ──► Services ──► Persistence (zent client) ──► SQLite / PostgreSQL
         │
@@ -156,7 +163,12 @@ Every endpoint returns the envelope `{ code, msg, data }`; `code === 0` means su
 | `GET` | `/api/v1/tasks/stats` · `/api/v1/system/info` | Admin |
 | `POST/GET/DELETE` | `/api/v1/files` · `/api/v1/files/{id}` | Authenticated (owner or admin) |
 | `GET/POST/DELETE` | `/api/v1/notifications` · `/notifications/{id}/read` · `/read-all` | Authenticated |
+| `GET/POST/PUT` | `/api/v1/tenants` · `/api/v1/tenants/{id}` | Admin |
 | `GET` | `/health/live` · `/api/v1/health/live` · `/api/v1/health/ready` | Public |
+
+> **Multi-tenancy:** every API response includes `tenant_id` on user/file records;
+> non-admin users can only reach rows of their own tenant. Platform admins can
+> filter cross-tenant data with the `?tenant_id=` query parameter.
 
 ## 📁 Project Structure
 
@@ -171,7 +183,7 @@ src/
 ├── scheduled.zig          # Interval jobs executed by the dispatcher
 ├── middleware/            # CORS, JWT, rate limit, access log, security headers
 ├── services/              # Mailer, cache
-└── modules/               # user, auth, task, file, notify, system
+└── modules/               # tenant, user, auth, task, file, notify, system
 web/
 └── src/
     ├── api/               # Typed API clients (auth, user, task, file, notify)

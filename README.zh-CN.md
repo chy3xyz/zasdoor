@@ -36,6 +36,12 @@ Zenaipa 是一个开箱即用的管理后台与内部平台脚手架：基于 **
 - **缓存**：内存 LRU，TTL 与容量可配置
 - **定时维护**：自动清理过期令牌与旧通知
 
+### 多租户
+- 租户实体与管理界面（`/tenants`），支持软停用
+- 行级隔离：`User` 与 `File` 携带 `tenant_id`，`Task` 记录来源租户
+- 租户随 JWT 的 `aud` claim 传递，无需每请求查库
+- 注册通过 `X-Tenant-ID` 请求头绑定租户（缺省落到默认租户，单租户部署零改动）
+
 ### 管理与运维
 - 用户管理：CRUD、分页、关键词搜索、自我保护（不可删除/降级自己）
 - 任务中心：实时队列统计，失败任务可重试 / 取消 / 清理
@@ -63,7 +69,7 @@ Zenaipa 是一个开箱即用的管理后台与内部平台脚手架：基于 **
         │  /api/v1 （统一信封：{ code, msg, data }）
         ▼
 Zig HTTP 服务 (zigmodu)
-        │  全局中间件：安全头 → 访问日志 → CORS
+        │  全局中间件：安全头 → 访问日志 → CORS → JWT（租户）
         ▼
 模块 API ──► Service ──► Persistence（zent client）──► SQLite / PostgreSQL
         │
@@ -152,7 +158,11 @@ npm run dev
 | `GET` | `/api/v1/tasks/stats` · `/api/v1/system/info` | 管理员 |
 | `POST/GET/DELETE` | `/api/v1/files` · `/api/v1/files/{id}` | 登录（本人或管理员） |
 | `GET/POST/DELETE` | `/api/v1/notifications` · `/notifications/{id}/read` · `/read-all` | 登录 |
+| `GET/POST/PUT` | `/api/v1/tenants` · `/api/v1/tenants/{id}` | 管理员 |
 | `GET` | `/health/live` · `/api/v1/health/live` · `/api/v1/health/ready` | 公开 |
+
+> **多租户**：用户/文件等记录会返回 `tenant_id`；普通用户只能访问本租户数据，
+> 平台管理员可通过 `?tenant_id=` 查询参数跨租户筛选。
 
 ## 📁 项目结构
 
@@ -167,7 +177,7 @@ src/
 ├── scheduled.zig          # 由调度器执行的定时任务
 ├── middleware/            # CORS、JWT、限流、访问日志、安全头
 ├── services/              # 邮件、缓存
-└── modules/               # user、auth、task、file、notify、system
+└── modules/               # tenant、user、auth、task、file、notify、system
 web/
 └── src/
     ├── api/               # 类型化 API 客户端（auth、user、task、file、notify）

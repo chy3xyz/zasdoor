@@ -14,6 +14,7 @@ pub const File = Schema("File", .{
         field.String("mime").Default("application/octet-stream"),
         field.Int("size_bytes").Default(0),
         field.Int("uploader_id").Default(0),
+        field.Int("tenant_id").Default(1),
     },
     .mixins = &.{zent.core.mixin.TimeMixin},
 });

@@ -18,6 +18,7 @@ function UserFormModal(props: Props) {
   const [password, setPassword] = createSignal('');
   const [admin, setAdmin] = createSignal(false);
   const [verified, setVerified] = createSignal(false);
+  const [tenantId, setTenantId] = createSignal(1);
   const [submitting, setSubmitting] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
 
@@ -29,6 +30,7 @@ function UserFormModal(props: Props) {
       setPassword('');
       setAdmin(props.user?.admin ?? false);
       setVerified(props.user?.verified ?? false);
+      setTenantId(props.user?.tenant_id ?? 1);
     }
   });
 
@@ -44,6 +46,7 @@ function UserFormModal(props: Props) {
           email: email().trim(),
           password: password(),
           admin: admin(),
+          tenant_id: tenantId(),
         });
       } else if (props.user) {
         await updateUser(props.user.id, {
@@ -107,6 +110,19 @@ function UserFormModal(props: Props) {
                   value={password()}
                   onInput={(e) => setPassword(e.currentTarget.value)}
                   minlength={8}
+                  required
+                />
+              </label>
+            </Show>
+            <Show when={props.mode === 'create'}>
+              <label class="form-control w-full">
+                <span class="label-text mb-1">租户 ID</span>
+                <input
+                  type="number"
+                  class="input input-bordered input-sm"
+                  value={tenantId()}
+                  onInput={(e) => setTenantId(Number(e.currentTarget.value) || 1)}
+                  min={1}
                   required
                 />
               </label>

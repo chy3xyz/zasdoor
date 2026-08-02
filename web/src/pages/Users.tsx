@@ -130,6 +130,7 @@ function Users() {
               <th>邮箱</th>
               <th>角色</th>
               <th>状态</th>
+              <th>租户</th>
               <th>创建时间</th>
               <th class="text-right">操作</th>
             </tr>
@@ -137,7 +138,7 @@ function Users() {
           <tbody>
             <Show when={users().length === 0 && !loading()}>
               <tr>
-                <td colspan={7} class="py-10 text-center text-base-content/50">
+                <td colspan={8} class="py-10 text-center text-base-content/50">
                   暂无用户
                 </td>
               </tr>
@@ -157,6 +158,9 @@ function Users() {
                     <span class={`badge badge-sm ${user.verified ? 'badge-success' : 'badge-outline'}`}>
                       {user.verified ? '已验证' : '未验证'}
                     </span>
+                  </td>
+                  <td>
+                    <span class="badge badge-sm badge-ghost font-mono">{user.tenant_id}</span>
                   </td>
                   <td class="text-sm text-base-content/70">{formatDateTime(user.created_at)}</td>
                   <td class="text-right">

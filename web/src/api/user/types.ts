@@ -14,6 +14,7 @@ export interface CreateUserRequest {
   email: string;
   password: string;
   admin?: boolean;
+  tenant_id?: number;
 }
 
 export interface UpdateUserRequest {

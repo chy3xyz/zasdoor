@@ -57,6 +57,7 @@ const UserDto = struct {
     email: []const u8,
     verified: bool,
     admin: bool,
+    tenant_id: i64,
     created_at: i64,
     updated_at: i64,
 };
@@ -68,6 +69,7 @@ fn toDto(row: user_service.UserRow) UserDto {
         .email = row.email,
         .verified = row.verified,
         .admin = row.admin,
+        .tenant_id = row.tenant_id,
         .created_at = row.created_at,
         .updated_at = row.updated_at,
     };
@@ -82,6 +84,7 @@ pub fn AuthApi(comptime Service: type) type {
         mailer: *const mail.Mailer,
         task_svc: *task_service.TaskService,
         notify_svc: *notify_service.NotificationService,
+        default_tenant_id: i64,
 
         pub fn init(
             svc: *Service,
@@ -90,6 +93,7 @@ pub fn AuthApi(comptime Service: type) type {
             mailer: *const mail.Mailer,
             task_svc: *task_service.TaskService,
             notify_svc: *notify_service.NotificationService,
+            default_tenant_id: i64,
         ) Self {
             return .{
                 .svc = svc,
@@ -98,6 +102,7 @@ pub fn AuthApi(comptime Service: type) type {
                 .mailer = mailer,
                 .task_svc = task_svc,
                 .notify_svc = notify_svc,
+                .default_tenant_id = default_tenant_id,
             };
         }
 
@@ -129,7 +134,8 @@ pub fn AuthApi(comptime Service: type) type {
             defer ctx.allocator.free(req.email);
             defer ctx.allocator.free(req.password);
 
-            var session = self.svc.register(ctx.allocator, req.name, req.email, req.password, false) catch |err| switch (err) {
+            const tenant_id = parseTenantHeader(ctx) orelse self.default_tenant_id;
+            var session = self.svc.register(ctx.allocator, req.name, req.email, req.password, false, tenant_id) catch |err| switch (err) {
                 error.InvalidName => {
                     try ctx.sendErrorResponse(400, 400, "姓名不能为空");
                     return;
@@ -238,7 +244,7 @@ pub fn AuthApi(comptime Service: type) type {
                 const link = std.fmt.bufPrint(&link_buf, "{s}/reset-password?user_id={d}&token={s}", .{ self.app_host, raw.user_id, raw.raw }) catch return;
                 const payload = jsonPayload(ctx.allocator, req.email, "重置你的 zenaipa 密码", link) catch return;
                 defer ctx.allocator.free(payload);
-                _ = self.task_svc.enqueueNow("mail.send", payload) catch {};
+                _ = self.task_svc.enqueue("mail.send", payload, 0, self.default_tenant_id) catch {};
             }
             // Always respond ok to avoid user enumeration.
             try ctx.jsonStruct(200, .{ .code = 0, .msg = "若该邮箱已注册，重置链接已发送", .data = null });
@@ -410,10 +416,15 @@ pub fn AuthApi(comptime Service: type) type {
             const link = std.fmt.bufPrint(&link_buf, "{s}/verify-email?user_id={d}&token={s}", .{ self.app_host, user_id, raw.raw }) catch return;
             const payload = jsonPayload(ctx.allocator, row.email, "验证你的 zenaipa 邮箱", link) catch return;
             defer ctx.allocator.free(payload);
-            _ = self.task_svc.enqueueNow("mail.send", payload) catch {};
+            _ = self.task_svc.enqueue("mail.send", payload, 0, row.tenant_id) catch {};
             _ = self.notify_svc.notify(user_id, "验证邮件已发送", "请查收邮件并点击验证链接。", "info") catch {};
         }
     };
+}
+
+fn parseTenantHeader(ctx: *http.Context) ?i64 {
+    const raw = ctx.header("X-Tenant-ID") orelse return null;
+    return std.fmt.parseInt(i64, raw, 10) catch null;
 }
 
 /// Build the JSON payload the `mail.send` task handler expects. Values are

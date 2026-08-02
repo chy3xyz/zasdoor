@@ -15,6 +15,7 @@ const UserDto = struct {
     email: []const u8,
     verified: bool,
     admin: bool,
+    tenant_id: i64,
     created_at: i64,
     updated_at: i64,
 };
@@ -26,6 +27,7 @@ fn toDto(row: UserRow) UserDto {
         .email = row.email,
         .verified = row.verified,
         .admin = row.admin,
+        .tenant_id = row.tenant_id,
         .created_at = row.created_at,
         .updated_at = row.updated_at,
     };
@@ -36,6 +38,7 @@ const CreateUserReq = struct {
     email: []const u8,
     password: []const u8,
     admin: ?bool = null,
+    tenant_id: ?i64 = null,
 };
 
 const UpdateUserReq = struct {
@@ -49,9 +52,10 @@ pub fn UserApi(comptime Service: type) type {
     return struct {
         const Self = @This();
         svc: *Service,
+        default_tenant_id: i64,
 
-        pub fn init(svc: *Service) Self {
-            return .{ .svc = svc };
+        pub fn init(svc: *Service, default_tenant_id: i64) Self {
+            return .{ .svc = svc, .default_tenant_id = default_tenant_id };
         }
 
         pub fn registerRoutes(self: *Self, group: *http.RouteGroup) !void {
@@ -93,6 +97,8 @@ pub fn UserApi(comptime Service: type) type {
             const page = ctx.queryInt(usize, "page", 1);
             const page_size = ctx.queryInt(usize, "page_size", 20);
             const keyword_raw = ctx.queryParam("keyword");
+            const tenant_query = ctx.queryInt(i64, "tenant_id", 0);
+            const tenant_filter: ?i64 = if (tenant_query > 0) tenant_query else null;
 
             // zigmodu does not percent-decode query values; decode for
             // non-ASCII (e.g. CJK) searches.
@@ -106,7 +112,7 @@ pub fn UserApi(comptime Service: type) type {
                 }
             }
 
-            var result = self.svc.listUsers(page, page_size, keyword_decoded) catch |err| {
+            var result = self.svc.listUsers(page, page_size, keyword_decoded, tenant_filter) catch |err| {
                 try ctx.sendErrorResponse(500, 500, @errorName(err));
                 return;
             };
@@ -163,7 +169,8 @@ pub fn UserApi(comptime Service: type) type {
             defer ctx.allocator.free(req.password);
 
             const is_admin = req.admin orelse false;
-            var session = self.svc.register(ctx.allocator, req.name, req.email, req.password, is_admin) catch |err| {
+            const tenant_id = req.tenant_id orelse self.default_tenant_id;
+            var session = self.svc.register(ctx.allocator, req.name, req.email, req.password, is_admin, tenant_id) catch |err| {
                 try sendCreateError(ctx, err);
                 return;
             };

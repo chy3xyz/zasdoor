@@ -1,5 +1,6 @@
 //! Unit tests for zenaipa. DB-backed tests use an in-memory zent store;
 //! HTTP-layer tests dispatch through zigmodu's Testkit without a socket.
+//! Tenant tests cover default bootstrap, JWT aud binding and row isolation.
 
 const std = @import("std");
 const zigmodu = @import("zigmodu");
@@ -11,17 +12,20 @@ const auth = @import("modules/auth/root.zig");
 const task = @import("modules/task/root.zig");
 const file = @import("modules/file/root.zig");
 const notify = @import("modules/notify/root.zig");
+const tenant = @import("modules/tenant/root.zig");
 const cache_svc = @import("services/cache.zig");
 const mail = @import("services/mail.zig");
 
 /// In-memory SQLite store with every schema group migrated.
 fn openMemory(allocator: std.mem.Allocator) !db_mod.StoreEnv(schema.infos, .{
+    tenant.persistence.infos,
     user.persistence.infos,
     task.persistence.infos,
     file.persistence.infos,
     notify.persistence.infos,
 }) {
     return db_mod.StoreEnv(schema.infos, .{
+        tenant.persistence.infos,
         user.persistence.infos,
         task.persistence.infos,
         file.persistence.infos,
@@ -65,11 +69,11 @@ test "sqlite store keyword search finds user" {
     var env = try openMemory(allocator);
     defer env.deinit();
     var store = user.persistence.UserStore.init(allocator, env.client);
-    _ = try store.createUser("Alice", "alice@example.com", "hash", false, false, 100);
-    _ = try store.createUser("Bob", "bob@example.com", "hash", false, false, 200);
+    _ = try store.createUser("Alice", "alice@example.com", "hash", false, false, 1, 100);
+    _ = try store.createUser("Bob", "bob@example.com", "hash", false, false, 1, 200);
 
     // Substring search: "alice" matches only alice's row via name or email.
-    var result = try store.listUsers(1, 20, "alice");
+    var result = try store.listUsers(1, 20, "alice", null);
     defer store.freeList(&result);
     try std.testing.expectEqual(@as(i64, 1), result.total);
     try std.testing.expectEqualStrings("alice@example.com", result.items[0].email);
@@ -83,7 +87,7 @@ test "service updateProfile keeps fields and normalizes email" {
     var sec = zigmodu.security.AppSecurity.init(allocator, std.testing.io, .{ .jwt_secret = "test-secret" });
     var svc = user.service.UserService.init(&store, &sec, std.testing.io, 3600, 86400);
 
-    const id = try store.createUser("Alice", "alice@example.com", "hash", false, false, 100);
+    const id = try store.createUser("Alice", "alice@example.com", "hash", false, false, 1, 100);
 
     // Only the name changes; email is preserved.
     try svc.updateProfile(id, "Alice Renamed", "alice@example.com");
@@ -114,8 +118,8 @@ test "emailTakenByOther detects a conflicting email" {
     var sec = zigmodu.security.AppSecurity.init(allocator, std.testing.io, .{ .jwt_secret = "test-secret" });
     var svc = user.service.UserService.init(&store, &sec, std.testing.io, 3600, 86400);
 
-    const alice_id = try store.createUser("Alice", "alice@example.com", "hash", false, false, 100);
-    const bob_id = try store.createUser("Bob", "bob@example.com", "hash", false, false, 200);
+    const alice_id = try store.createUser("Alice", "alice@example.com", "hash", false, false, 1, 100);
+    const bob_id = try store.createUser("Bob", "bob@example.com", "hash", false, false, 1, 200);
 
     try std.testing.expect(try svc.emailTakenByOther(allocator, bob_id, "alice@example.com"));
     try std.testing.expect(!try svc.emailTakenByOther(allocator, alice_id, "alice@example.com"));
@@ -130,7 +134,7 @@ test "password token lifecycle: issue, validate, expired cleanup" {
     var sec = zigmodu.security.AppSecurity.init(allocator, std.testing.io, .{ .jwt_secret = "test-secret" });
     var svc = user.service.UserService.init(&store, &sec, std.testing.io, 3600, 86400);
 
-    _ = try store.createUser("Alice", "alice@example.com", "hash", false, false, 100);
+    _ = try store.createUser("Alice", "alice@example.com", "hash", false, false, 1, 100);
 
     // Valid token round-trips.
     const info = (try svc.createPasswordResetToken(allocator, "alice@example.com")).?;
@@ -157,7 +161,7 @@ test "email verification lifecycle: issue, verify, purge" {
     var sec = zigmodu.security.AppSecurity.init(allocator, std.testing.io, .{ .jwt_secret = "test-secret" });
     var svc = user.service.UserService.init(&store, &sec, std.testing.io, 3600, 86400);
 
-    const id = try store.createUser("Alice", "alice@example.com", "hash", false, false, 100);
+    const id = try store.createUser("Alice", "alice@example.com", "hash", false, false, 1, 100);
     const info = (try svc.createEmailVerification(allocator, id)).?;
     defer allocator.free(info.raw);
     try svc.verifyEmail(allocator, id, info.raw);
@@ -174,7 +178,7 @@ test "changePassword verifies the current password" {
     var store = user.persistence.UserStore.init(allocator, env.client);
     var sec = zigmodu.security.AppSecurity.init(allocator, std.testing.io, .{ .jwt_secret = "test-secret" });
     var svc = user.service.UserService.init(&store, &sec, std.testing.io, 3600, 86400);
-    const id = try store.createUser("Alice", "alice@example.com", "hash", false, false, 100);
+    const id = try store.createUser("Alice", "alice@example.com", "hash", false, false, 1, 100);
 
     try std.testing.expectError(error.InvalidCredentials, svc.changePassword(allocator, id, "wrong", "newpassword123"));
     try std.testing.expectError(error.InvalidPassword, svc.changePassword(allocator, id, "hash", "short"));
@@ -204,7 +208,7 @@ test "task queue: enqueue -> claim -> done" {
     var task_store = task.persistence.TaskStore.init(allocator, env.client);
     var task_svc = task.service.TaskService.init(&task_store, std.testing.io, 3);
 
-    const id = try task_svc.enqueueNow("mail.send", "{}");
+    const id = try task_svc.enqueueNow("mail.send", "{}", 1);
     const claimed = (try task_store.claimNext(1000)).?;
     defer claimed.free(allocator);
     try std.testing.expectEqual(id, claimed.id);
@@ -221,7 +225,7 @@ test "task queue: retry backoff and failure budget" {
     defer env.deinit();
     var task_store = task.persistence.TaskStore.init(allocator, env.client);
 
-    const id = try task_store.createTask("mail.send", "{}", "pending", 1, 2, "", 0, 100);
+    const id = try task_store.createTask("mail.send", "{}", "pending", 1, 1, 2, "", 0, 100);
     try task_store.markFailedOrRetry(id, 1, 2, "boom", 200, 60);
     const after = (try task_store.getTaskById(id)).?;
     defer after.free(allocator);
@@ -258,7 +262,7 @@ test "file store metadata CRUD" {
     defer env.deinit();
     var file_store = file.persistence.FileStore.init(allocator, env.client);
 
-    const id = try file_store.create("a.txt", "key1", "text/plain", 4, 9, 100);
+    const id = try file_store.create("a.txt", "key1", "text/plain", 4, 9, 1, 100);
     const row = (try file_store.getById(id)).?;
     defer row.free(allocator);
     try std.testing.expectEqualStrings("a.txt", row.name);
@@ -281,7 +285,7 @@ test "HTTP dispatch: public auth flow (register -> me) via Testkit" {
     var task_svc = task.service.TaskService.init(&task_store, std.testing.io, 3);
     var notify_store = notify.persistence.NotificationStore.init(allocator, env.client);
     var notify_svc = notify.service.NotificationService.init(allocator, std.testing.io, &notify_store);
-    var auth_api = auth.api.AuthApi(@TypeOf(svc)).init(&svc, "http://localhost:3001", &limiter, &mailer, &task_svc, &notify_svc);
+    var auth_api = auth.api.AuthApi(@TypeOf(svc)).init(&svc, "http://localhost:3001", &limiter, &mailer, &task_svc, &notify_svc, 1);
 
     var server = zigmodu.http.Server.init(std.testing.io, allocator, 0);
     defer server.deinit();
@@ -292,4 +296,82 @@ test "HTTP dispatch: public auth flow (register -> me) via Testkit" {
     defer resp.deinit(allocator);
     try std.testing.expectEqual(@as(u16, 201), resp.status_code);
     try std.testing.expect(std.mem.indexOf(u8, resp.body, "\"code\":0") != null);
+}
+
+test "tenant service: ensureDefault is idempotent, CRUD works" {
+    const allocator = std.testing.allocator;
+    var env = try openMemory(allocator);
+    defer env.deinit();
+    var tenant_store = tenant.persistence.TenantStore.init(allocator, env.client);
+    var tenant_svc = tenant.service.TenantService.init(allocator, std.testing.io, &tenant_store);
+
+    const default_id = try tenant_svc.ensureDefault();
+    try std.testing.expectEqual(default_id, try tenant_svc.ensureDefault());
+
+    const acme = try tenant_svc.create("Acme Inc");
+    const acme_row = (try tenant_svc.get(acme)).?;
+    defer acme_row.free(allocator);
+    try std.testing.expectEqualStrings("Acme Inc", acme_row.name);
+    try std.testing.expectEqualStrings("active", acme_row.status);
+
+    _ = try tenant_svc.update(acme, "Acme Inc", "disabled");
+    const disabled = (try tenant_svc.get(acme)).?;
+    defer disabled.free(allocator);
+    try std.testing.expectEqualStrings("disabled", disabled.status);
+
+    var result = try tenant_svc.list(1, 20);
+    defer result.free(allocator);
+    try std.testing.expectEqual(@as(i64, 2), result.total);
+}
+
+test "register binds tenant and JWT aud carries it" {
+    const allocator = std.testing.allocator;
+    var env = try openMemory(allocator);
+    defer env.deinit();
+    var store = user.persistence.UserStore.init(allocator, env.client);
+    var sec = zigmodu.security.AppSecurity.init(allocator, std.testing.io, .{ .jwt_secret = "test-secret" });
+    var svc = user.service.UserService.init(&store, &sec, std.testing.io, 3600, 86400);
+
+    var session = try svc.register(allocator, "Alice", "alice@example.com", "password123", false, 7);
+    defer session.deinit(allocator);
+    try std.testing.expectEqual(@as(i64, 7), session.row.tenant_id);
+
+    const payload = try sec.module.verifyToken(session.token);
+    defer sec.module.freePayload(payload);
+    try std.testing.expectEqualStrings("7", payload.aud);
+}
+
+test "user list filters by tenant" {
+    const allocator = std.testing.allocator;
+    var env = try openMemory(allocator);
+    defer env.deinit();
+    var store = user.persistence.UserStore.init(allocator, env.client);
+
+    _ = try store.createUser("A1", "a1@example.com", "hash", false, false, 1, 100);
+    _ = try store.createUser("A2", "a2@example.com", "hash", false, false, 1, 101);
+    _ = try store.createUser("B1", "b1@example.com", "hash", false, false, 2, 102);
+
+    var tenant1 = try store.listUsers(1, 20, null, 1);
+    defer tenant1.free(allocator);
+    try std.testing.expectEqual(@as(i64, 2), tenant1.total);
+
+    var tenant2 = try store.listUsers(1, 20, null, 2);
+    defer tenant2.free(allocator);
+    try std.testing.expectEqual(@as(i64, 1), tenant2.total);
+    try std.testing.expectEqualStrings("b1@example.com", tenant2.items[0].email);
+}
+
+test "file list isolates tenants" {
+    const allocator = std.testing.allocator;
+    var env = try openMemory(allocator);
+    defer env.deinit();
+    var file_store = file.persistence.FileStore.init(allocator, env.client);
+
+    _ = try file_store.create("t1.txt", "k1", "text/plain", 3, 1, 1, 100);
+    _ = try file_store.create("t2.txt", "k2", "text/plain", 3, 1, 2, 101);
+
+    var tenant1 = try file_store.list(1, 20, null, 1);
+    defer tenant1.free(allocator);
+    try std.testing.expectEqual(@as(i64, 1), tenant1.total);
+    try std.testing.expectEqualStrings("t1.txt", tenant1.items[0].name);
 }

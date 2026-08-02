@@ -22,6 +22,7 @@ pub const UserRow = struct {
     email: []const u8,
     verified: bool,
     admin: bool,
+    tenant_id: i64,
     created_at: i64,
     updated_at: i64,
 
@@ -71,6 +72,7 @@ pub const UserStore = struct {
             .email = email,
             .verified = e.verified,
             .admin = e.admin,
+            .tenant_id = e.tenant_id,
             .created_at = e.created_at orelse 0,
             .updated_at = e.updated_at orelse 0,
         };
@@ -84,6 +86,7 @@ pub const UserStore = struct {
         password_hash: []const u8,
         verified: bool,
         admin: bool,
+        tenant_id: i64,
         now: i64,
     ) !i64 {
         var b = try self.client.user.Create();
@@ -93,6 +96,7 @@ pub const UserStore = struct {
         _ = try b.setFieldValue("password", password_hash);
         _ = try b.setFieldValue("verified", verified);
         _ = try b.setFieldValue("admin", admin);
+        _ = try b.setFieldValue("tenant_id", tenant_id);
         _ = try b.setFieldValue("created_at", now);
         _ = try b.setFieldValue("updated_at", now);
         var row = try b.Save();
@@ -134,8 +138,9 @@ pub const UserStore = struct {
         return try self.allocator.dupe(u8, entity.password);
     }
 
-    pub fn listUsers(self: *UserStore, page: usize, page_size: usize, keyword: ?[]const u8) !UserListResult {
+    pub fn listUsers(self: *UserStore, page: usize, page_size: usize, keyword: ?[]const u8, tenant_id: ?i64) !UserListResult {
         const preds = self.client.user.predicates;
+        const tenant_pred = if (tenant_id) |tid| preds.tenant_idEQ(.{ .int = tid }) else null;
 
         // Build the keyword predicate once; zent's LIKE is exact-match, so
         // wrap the term in % wildcards for substring search.
@@ -156,6 +161,7 @@ pub const UserStore = struct {
         if (or_pred) |op| {
             _ = try count_q.Where(.{op});
         }
+        if (tenant_pred) |tp| _ = try count_q.Where(.{tp});
         const total: i64 = @intCast(try count_q.Count());
 
         // Page
@@ -164,6 +170,7 @@ pub const UserStore = struct {
         if (or_pred) |op| {
             _ = try q.Where(.{op});
         }
+        if (tenant_pred) |tp| _ = try q.Where(.{tp});
         if (page_size > 0) {
             _ = q.Limit(page_size);
             if (page > 1) _ = q.Offset((page - 1) * page_size);

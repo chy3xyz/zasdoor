@@ -15,6 +15,7 @@ pub const TaskRow = struct {
     name: []const u8,
     payload: []const u8,
     status: []const u8,
+    tenant_id: i64,
     attempts: i64,
     max_attempts: i64,
     last_error: []const u8,
@@ -72,6 +73,7 @@ pub const TaskStore = struct {
             .name = name,
             .payload = payload,
             .status = status,
+            .tenant_id = e.tenant_id,
             .attempts = e.attempts,
             .max_attempts = e.max_attempts,
             .last_error = last_error,
@@ -88,6 +90,7 @@ pub const TaskStore = struct {
         name: []const u8,
         payload: []const u8,
         status: []const u8,
+        tenant_id: i64,
         attempts: i64,
         max_attempts: i64,
         last_error: []const u8,
@@ -99,6 +102,7 @@ pub const TaskStore = struct {
         _ = try b.setFieldValue("name", name);
         _ = try b.setFieldValue("payload", payload);
         _ = try b.setFieldValue("status", status);
+        _ = try b.setFieldValue("tenant_id", tenant_id);
         _ = try b.setFieldValue("attempts", attempts);
         _ = try b.setFieldValue("max_attempts", max_attempts);
         _ = try b.setFieldValue("last_error", last_error);

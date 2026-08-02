@@ -97,6 +97,7 @@ pub const UserService = struct {
         email: []const u8,
         password: []const u8,
         admin: bool,
+        tenant_id: i64,
     ) CreateError!Session {
         const trimmed_name = std.mem.trim(u8, name, " \t");
         if (trimmed_name.len == 0) return error.InvalidName;
@@ -117,7 +118,7 @@ pub const UserService = struct {
         const now = zigmodu.time.wallClockSeconds(self.io);
         // A prior `getUserByEmail` guard makes a create failure most likely
         // a unique-constraint race; re-check before blaming the DB.
-        _ = self.store.createUser(trimmed_name, norm_email, hash, false, admin, now) catch {
+        _ = self.store.createUser(trimmed_name, norm_email, hash, false, admin, tenant_id, now) catch {
             if (self.store.getUserByEmail(norm_email) catch null) |existing| {
                 existing.free(allocator);
                 return error.EmailTaken;
@@ -125,7 +126,7 @@ pub const UserService = struct {
             return error.Unexpected;
         };
 
-        return self.issueSession(allocator, norm_email, admin) catch return error.Unexpected;
+        return self.issueSession(allocator, norm_email, admin, tenant_id) catch return error.Unexpected;
     }
 
     /// Authenticate email+password. Returns null on wrong credentials.
@@ -142,19 +143,21 @@ pub const UserService = struct {
         defer allocator.free(hash);
 
         if (!self.sec.module.verifyPassword(password, hash)) return null;
-        return self.issueSession(allocator, row.email, row.admin) catch return error.InvalidCredentials;
+        return self.issueSession(allocator, row.email, row.admin, row.tenant_id) catch return error.InvalidCredentials;
     }
 
-    fn issueSession(self: *UserService, allocator: std.mem.Allocator, email: []const u8, admin: bool) !Session {
+    fn issueSession(self: *UserService, allocator: std.mem.Allocator, email: []const u8, admin: bool, tenant_id: i64) !Session {
         const row_opt = try self.store.getUserByEmail(email);
         const row = row_opt orelse return error.InvalidCredentials;
         errdefer row.free(allocator);
 
         const id_str = try std.fmt.allocPrint(allocator, "{d}", .{row.id});
         defer allocator.free(id_str);
+        const tenant_str = try std.fmt.allocPrint(allocator, "{d}", .{tenant_id});
+        defer allocator.free(tenant_str);
 
         const roles = if (admin) &[_][]const u8{"admin"} else &[_][]const u8{"user"};
-        const token = try self.sec.generateToken(id_str, roles);
+        const token = try self.sec.module.generateTokenWithTenant(id_str, roles, tenant_str);
         return .{ .row = row, .token = token };
     }
 
@@ -168,8 +171,8 @@ pub const UserService = struct {
         return try self.store.getUserByEmail(norm);
     }
 
-    pub fn listUsers(self: *UserService, page: usize, page_size: usize, keyword: ?[]const u8) !persist.UserListResult {
-        return try self.store.listUsers(page, page_size, keyword);
+    pub fn listUsers(self: *UserService, page: usize, page_size: usize, keyword: ?[]const u8, tenant_id: ?i64) !persist.UserListResult {
+        return try self.store.listUsers(page, page_size, keyword, tenant_id);
     }
 
     pub fn freeList(self: *UserService, result: *persist.UserListResult) void {

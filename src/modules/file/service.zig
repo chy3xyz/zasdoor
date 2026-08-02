@@ -37,7 +37,7 @@ pub const FileService = struct {
 
     /// Persist raw bytes to disk and record metadata. `filename` is the
     /// user-facing name; the on-disk name is a generated storage key.
-    pub fn save(self: *FileService, uploader_id: i64, filename: []const u8, mime: []const u8, data: []const u8) !FileRow {
+    pub fn save(self: *FileService, uploader_id: i64, tenant_id: i64, filename: []const u8, mime: []const u8, data: []const u8) !FileRow {
         if (data.len > self.max_bytes) return error.FileTooLarge;
         try self.ensureDir();
 
@@ -53,7 +53,7 @@ pub const FileService = struct {
         file.close(self.io);
 
         const now = wallNow(self.io);
-        const id = self.store.create(filename, key, mime, @intCast(data.len), uploader_id, now) catch |err| {
+        const id = self.store.create(filename, key, mime, @intCast(data.len), uploader_id, tenant_id, now) catch |err| {
             // Roll back the orphaned disk file on metadata failure.
             std.Io.Dir.cwd().deleteFile(self.io, path) catch {};
             return err;
@@ -77,8 +77,8 @@ pub const FileService = struct {
         return .{ .row = row, .bytes = bytes };
     }
 
-    pub fn list(self: *FileService, page: usize, page_size: usize, uploader_id: ?i64) !FileListResult {
-        return self.store.list(page, page_size, uploader_id);
+    pub fn list(self: *FileService, page: usize, page_size: usize, uploader_id: ?i64, tenant_id: ?i64) !FileListResult {
+        return self.store.list(page, page_size, uploader_id, tenant_id);
     }
 
     pub fn get(self: *FileService, id: i64) !?FileRow {

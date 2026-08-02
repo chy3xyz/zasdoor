@@ -14,6 +14,7 @@ const FileDto = struct {
     mime: []const u8,
     size_bytes: i64,
     uploader_id: i64,
+    tenant_id: i64,
     created_at: i64,
 };
 
@@ -24,6 +25,7 @@ fn toDto(row: service.FileRow) FileDto {
         .mime = row.mime,
         .size_bytes = row.size_bytes,
         .uploader_id = row.uploader_id,
+        .tenant_id = row.tenant_id,
         .created_at = row.created_at,
     };
 }
@@ -33,9 +35,10 @@ pub fn FileApi(comptime Service: type, comptime UserService: type) type {
         const Self = @This();
         svc: *Service,
         user_svc: *UserService,
+        default_tenant_id: i64,
 
-        pub fn init(svc: *Service, users: *UserService) Self {
-            return .{ .svc = svc, .user_svc = users };
+        pub fn init(svc: *Service, users: *UserService, default_tenant_id: i64) Self {
+            return .{ .svc = svc, .user_svc = users, .default_tenant_id = default_tenant_id };
         }
 
         pub fn registerRoutes(self: *Self, group: *http.RouteGroup) !void {
@@ -74,7 +77,8 @@ pub fn FileApi(comptime Service: type, comptime UserService: type) type {
             const filename = ctx.header("X-File-Name") orelse "upload.bin";
             const mime = ctx.header("Content-Type") orelse "application/octet-stream";
 
-            const row = self.svc.save(actor.id, filename, mime, body) catch |err| switch (err) {
+            const tenant_id = mw.authTenantId(ctx) orelse self.default_tenant_id;
+            const row = self.svc.save(actor.id, tenant_id, filename, mime, body) catch |err| switch (err) {
                 error.FileTooLarge => {
                     try ctx.sendErrorResponse(413, 413, "文件超过大小限制");
                     return;
@@ -94,9 +98,17 @@ pub fn FileApi(comptime Service: type, comptime UserService: type) type {
 
             const page = ctx.queryInt(usize, "page", 1);
             const page_size = ctx.queryInt(usize, "page_size", 20);
+            const current_tenant = mw.authTenantId(ctx) orelse self.default_tenant_id;
             const owner: ?i64 = if (actor.admin) null else actor.id;
+            const tenant_filter: ?i64 = if (actor.admin)
+                blk: {
+                    const tid = ctx.queryInt(i64, "tenant_id", 0);
+                    break :blk if (tid > 0) tid else null;
+                }
+            else
+                current_tenant;
 
-            var result = self.svc.list(page, page_size, owner) catch |err| {
+            var result = self.svc.list(page, page_size, owner, tenant_filter) catch |err| {
                 try ctx.sendErrorResponse(500, 500, @errorName(err));
                 return;
             };
@@ -136,7 +148,8 @@ pub fn FileApi(comptime Service: type, comptime UserService: type) type {
             };
             defer loaded.free(ctx.allocator);
 
-            if (!actor.admin and loaded.row.uploader_id != actor.id) {
+            const current_tenant = mw.authTenantId(ctx) orelse self.default_tenant_id;
+            if (!actor.admin and (loaded.row.uploader_id != actor.id or loaded.row.tenant_id != current_tenant)) {
                 try ctx.sendErrorResponse(403, 403, "无权访问该文件");
                 return;
             }
@@ -165,7 +178,8 @@ pub fn FileApi(comptime Service: type, comptime UserService: type) type {
                 return;
             };
             defer row.free(ctx.allocator);
-            if (!actor.admin and row.uploader_id != actor.id) {
+            const current_tenant = mw.authTenantId(ctx) orelse self.default_tenant_id;
+            if (!actor.admin and (row.uploader_id != actor.id or row.tenant_id != current_tenant)) {
                 try ctx.sendErrorResponse(403, 403, "无权删除该文件");
                 return;
             }

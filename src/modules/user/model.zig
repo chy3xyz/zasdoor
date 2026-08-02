@@ -15,6 +15,7 @@ pub const User = Schema("User", .{
         field.String("password").Sensitive(),
         field.Bool("verified").Default(false),
         field.Bool("admin").Default(false),
+        field.Int("tenant_id").Default(1),
     },
     .mixins = &.{zent.core.mixin.TimeMixin},
 });
