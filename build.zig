@@ -35,7 +35,7 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run the zenaipa server");
     run_step.dependOn(&run_cmd.step);
 
-    // Admin CLI (pagoda `make admin` equivalent)
+    // Admin CLI (create/list administrator accounts)
     const admin_mod = b.createModule(.{
         .root_source_file = b.path("src/admin_cli.zig"),
         .target = target,

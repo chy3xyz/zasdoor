@@ -2,8 +2,7 @@
 //!
 //! SMTP supports AUTH PLAIN and optional STARTTLS. When `ZENAIPA_SMTP_HOST`
 //! is empty the mailer only logs, so the rest of the app works without a
-//! mail server (same posture as pagoda's MailClient, but with a working
-//! SMTP path instead of a skeleton).
+//! mail server (SMTP becomes a drop-in for the console sink).
 
 const std = @import("std");
 

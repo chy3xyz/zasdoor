@@ -1,9 +1,8 @@
 //! zent schema-as-code — user domain for zenaipa.
 //!
-//! Mirrors pagoda's entities (`User`, `PasswordToken`, verification
-//! tokens) with the same semantics: email is unique + lowercased on write,
-//! password is stored hashed (Sensitive), users may be admins and
-//! email-verified.
+//! User-domain entities: `User`, `PasswordToken`, `EmailVerification`.
+//! Email is unique + lowercased on write, password is stored hashed
+//! (Sensitive), users may be admins and email-verified.
 
 const zent = @import("zent");
 const field = zent.core.field;

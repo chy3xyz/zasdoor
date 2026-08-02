@@ -1,104 +1,233 @@
-# zenaipa — Zig 全栈管理后台框架
+<div align="center">
 
-对 Go 版 [Pagoda](https://github.com/mikestefanello/pagoda) 的重写：**Zig (zigmodu + zent) 后端 + SolidJS 前端**，单二进制提供服务，开箱即用的后台管理系统骨架。
+# Zenaipa
 
-## 特性（对照 Pagoda）
+**A production-grade full-stack admin framework — Zig backend, SolidJS frontend, one binary.**
 
-| 能力 | 说明 |
+[![Zig](https://img.shields.io/badge/Zig-0.17-orange?logo=zig&logoColor=white)](https://ziglang.org)
+[![SolidJS](https://img.shields.io/badge/Frontend-SolidJS-2c4f7c?logo=solid&logoColor=white)](https://www.solidjs.com)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+
+**English** | [**简体中文**](README.zh-CN.md)
+
+</div>
+
+---
+
+Zenaipa is a batteries-included starting point for building admin consoles and internal
+platforms. It pairs a modular **Zig** backend (built on
+[zigmodu](https://github.com/zigmodu) and [zent](https://github.com/zent)) with a
+**SolidJS + TypeScript** single-page app, and ships everything you need to go from
+`git clone` to a deployed product: authentication, email verification, background jobs,
+file uploads, notifications, caching, and an admin UI that covers all of it.
+
+## ✨ Features
+
+### Authentication & accounts
+- Register / login / logout, forgot & reset password, `GET /me` (JWT + PBKDF2)
+- Email verification with one-click links and in-app banners for unverified users
+- Admin bootstrap CLI — create your first administrator in one command
+- Login rate limiting and anti-enumeration responses
+
+### Platform services
+- **Background jobs** — durable task queue with automatic retries and a management UI
+- **Email** — SMTP transport (STARTTLS + AUTH PLAIN) with a console sink for development
+- **File management** — upload, download and delete with per-user access control
+- **Notifications** — per-user inbox with an unread badge in the header
+- **Caching** — in-memory LRU with configurable TTL and capacity
+- **Scheduled maintenance** — automatic cleanup of expired tokens and old notifications
+
+### Admin & operations
+- User management: CRUD, pagination, keyword search, self-protection guards
+- Task center: live queue stats, retry / cancel / purge failed work
+- Runtime diagnostics endpoint (`/api/v1/system/info`)
+- Health probes: liveness and DB-backed readiness
+- Security headers, CORS allow-list, and redacted access logs
+
+### Data layer
+- Schema-as-code migrations run automatically at startup
+- SQLite out of the box; PostgreSQL via a single environment variable
+- One type-safe query client shared across all modules
+
+## 🧱 Tech Stack
+
+| Layer | Technology |
 | --- | --- |
-| 认证 | 注册 / 登录 / 登出 / 忘记密码 / 重置密码 / `me`，JWT + PBKDF2 密码哈希 + 登录限流 |
-| 邮箱验证 | 注册后自动发送验证邮件，`/verify-email` 链接验证，未验证用户前端有横幅提示 |
-| 邮件服务 | 控制台日志（开发）/ SMTP 真实发送（生产），支持 STARTTLS 与 AUTH PLAIN |
-| 用户管理 | 管理员 CRUD + 分页 + 关键词搜索，保护"不能删除/降级自己" |
-| 管理员引导 | `zig-out/bin/zenaipa-admin create-admin --email ...`（对应 Pagoda `make admin`） |
-| 后台任务 | 持久化任务队列（zent 表）+ 单线程 Dispatcher，失败自动退避重试，管理页可重试/取消/清理 |
-| 定时任务 | 令牌过期清理（每小时）、通知归档（每天），运行在 Dispatcher 同一后台线程 |
-| 缓存 | LRU 缓存服务（zigmodu CacheManager），TTL 与容量可配置 |
-| 文件管理 | 原始字节上传 → 本地磁盘 + 元数据表，下载/删除，权限隔离（普通用户仅自己的文件） |
-| 通知 | 每用户通知（验证成功、密码修改、系统消息），头部铃铛 + 未读角标，30s 轮询 |
-| 系统诊断 | `GET /api/v1/system/info`：运行时信息（DB、邮件模式、缓存、任务计数、模块数） |
-| 安全 | CORS 白名单、安全响应头（HSTS/X-Frame-Options/nosniff…）、访问日志（脱敏）、JWT 中间件 |
-| 健康检查 | `/health/live`（根）、`/api/v1/health/live`、`/api/v1/health/ready`（DB 探测） |
-| 数据库 | SQLite（默认）/ PostgreSQL 运行时切换，schema-as-code 自动迁移 |
+| Backend | [Zig](https://ziglang.org) 0.17, [zigmodu](https://github.com/zigmodu) (HTTP, security, rate limiting, cache), [zent](https://github.com/zent) (ORM, schema, migrations) |
+| Frontend | [SolidJS](https://www.solidjs.com), TypeScript, [Rsbuild](https://rsbuild.dev), [Tailwind CSS](https://tailwindcss.com) 4, [DaisyUI](https://daisyui.com) |
+| Database | SQLite (default), PostgreSQL (runtime switch) |
 
-## 技术栈
+## 🏗️ Architecture
 
-- 后端：Zig 0.17 + [zigmodu](https://github.com/zigmodu)（HTTP/安全/缓存/限流）+ [zent](https://github.com/zent)（ORM/schema）
-- 前端：SolidJS + TypeScript + Rsbuild + Tailwind CSS 4 + DaisyUI
+```
+Browser (SolidJS SPA)
+        │  /api/v1 (JSON envelope: { code, msg, data })
+        ▼
+Zig HTTP server (zigmodu)
+        │  global middleware: security headers → access log → CORS
+        ▼
+Module APIs ──► Services ──► Persistence (zent client) ──► SQLite / PostgreSQL
+        │
+        └── Task Dispatcher (background thread)
+                ├── durable queue rows
+                ├── registered handlers (e.g. mail.send)
+                └── scheduled housekeeping (token cleanup, notification pruning)
+```
 
-## 快速开始
+Each domain follows the same layout — `model` (schema) → `persistence` (queries) →
+`service` (business logic) → `api` (HTTP handlers) → `module` (lifecycle metadata).
+
+## 🚀 Quick Start
+
+### Requirements
+
+- [Zig](https://ziglang.org/download/) **0.17** (we recommend managing it with [zigup](https://github.com/tristanisham/zigup))
+- [Node.js](https://nodejs.org) **20+** and npm (frontend only)
+- SQLite (linked statically) or a running PostgreSQL instance
+
+### 1. Run the backend
 
 ```bash
-# 1. 后端（默认 SQLite 文件 zenaipa.db，端口 8000）
 zig build run
+```
 
-# 2. 创建第一个管理员（新开终端）
+The server starts on `http://localhost:8000` using a local `zenaipa.db` SQLite file.
+
+### 2. Create the first administrator
+
+```bash
 zig build
 zig-out/bin/zenaipa-admin create-admin --email admin@example.com --password 'YourPass123' --name Boss
+```
 
-# 3. 前端（端口 3001，/api 代理到 8000）
+### 3. Run the frontend
+
+```bash
 cd web
 npm install
 npm run dev
 ```
 
-打开 http://localhost:3001 登录。未配置 SMTP 时，验证/重置邮件会打印在服务端日志里（控制台 sink）。
+Open <http://localhost:3001> and sign in. The dev server proxies `/api` to the Zig
+backend on port 8000. If SMTP is not configured, verification and password-reset emails
+are printed to the backend console instead.
 
-## 环境变量（前缀 `ZENAIPA_`）
+## ⚙️ Configuration
 
-```bash
-# 服务
-ZENAIPA_HTTP_PORT=8000
-ZENAIPA_DB_DRIVER=sqlite            # sqlite | postgres
-ZENAIPA_SQLITE_PATH=zenaipa.db
-ZENAIPA_PG_CONNINFO='host=localhost port=5432 dbname=zenaipa user=postgres password=postgres sslmode=prefer'
-ZENAIPA_JWT_SECRET=change-me
-ZENAIPA_TOKEN_EXPIRY=86400
-ZENAIPA_APP_HOST=http://localhost:3001
-ZENAIPA_CORS_ORIGINS=*              # 或逗号分隔的白名单
+All settings are environment variables with the `ZENAIPA_` prefix. See
+[`src/config.zig`](src/config.zig) for defaults.
 
-# 邮件（留空 host = 仅控制台日志）
-ZENAIPA_SMTP_HOST=smtp.example.com
-ZENAIPA_SMTP_PORT=587
-ZENAIPA_SMTP_USERNAME=no-reply@example.com
-ZENAIPA_SMTP_PASSWORD=secret
-ZENAIPA_SMTP_FROM=no-reply@example.com
-ZENAIPA_SMTP_STARTTLS=true
+| Variable | Default | Description |
+| --- | --- | --- |
+| `ZENAIPA_HTTP_PORT` | `8000` | HTTP listen port |
+| `ZENAIPA_DB_DRIVER` | `sqlite` | `sqlite` or `postgres` |
+| `ZENAIPA_SQLITE_PATH` | `zenaipa.db` | SQLite file path |
+| `ZENAIPA_PG_CONNINFO` | localhost:5432 | PostgreSQL connection string |
+| `ZENAIPA_JWT_SECRET` | `dev-secret-change-me` | HMAC key for JWT signing |
+| `ZENAIPA_TOKEN_EXPIRY` | `86400` | JWT lifetime (seconds) |
+| `ZENAIPA_APP_HOST` | `http://localhost:3001` | Public app origin for email links |
+| `ZENAIPA_CORS_ORIGINS` | `*` | Comma-separated allow-list (use `*` only in dev) |
+| `ZENAIPA_SMTP_HOST` | _(empty)_ | SMTP host; empty = console-only email |
+| `ZENAIPA_SMTP_PORT` | `587` | SMTP port |
+| `ZENAIPA_SMTP_USERNAME` / `ZENAIPA_SMTP_PASSWORD` | _(empty)_ | SMTP credentials |
+| `ZENAIPA_SMTP_FROM` | `zenaipa@localhost` | From address |
+| `ZENAIPA_SMTP_STARTTLS` | `true` | Upgrade to TLS after `STARTTLS` |
+| `ZENAIPA_UPLOAD_DIR` | `uploads` | Local directory for uploaded files |
+| `ZENAIPA_UPLOAD_MAX_BYTES` | `10485760` | Max upload size (10 MiB) |
+| `ZENAIPA_CACHE_MAX_ENTRIES` | `1024` | Cache capacity |
+| `ZENAIPA_CACHE_TTL_SECONDS` | `300` | Cache TTL |
+| `ZENAIPA_TASK_MAX_ATTEMPTS` | `3` | Max attempts per background task |
+| `ZENAIPA_TASK_RETRY_INTERVAL_SECONDS` | `60` | Retry backoff interval |
 
-# 文件 / 缓存 / 任务
-ZENAIPA_UPLOAD_DIR=uploads
-ZENAIPA_UPLOAD_MAX_BYTES=10485760
-ZENAIPA_CACHE_MAX_ENTRIES=1024
-ZENAIPA_CACHE_TTL_SECONDS=300
-ZENAIPA_TASK_MAX_ATTEMPTS=3
-ZENAIPA_TASK_RETRY_INTERVAL_SECONDS=60
+## 📡 API Overview
+
+Every endpoint returns the envelope `{ code, msg, data }`; `code === 0` means success.
+
+| Method | Path | Access |
+| --- | --- | --- |
+| `POST` | `/api/v1/auth/register` · `/login` · `/logout` | Public (rate-limited) |
+| `POST` | `/api/v1/auth/forgot-password` · `/reset-password` · `/verify-email` | Public (rate-limited) |
+| `GET` | `/api/v1/auth/me` | Authenticated |
+| `POST` | `/api/v1/auth/send-verification` | Authenticated |
+| `PUT` | `/api/v1/auth/profile` · `/api/v1/auth/password` | Authenticated |
+| `GET/POST/PUT/DELETE` | `/api/v1/users` · `/api/v1/users/{id}` | Admin |
+| `GET/POST` | `/api/v1/tasks` · `/tasks/{id}/retry` · `/tasks/{id}/cancel` · `/tasks/purge` | Admin |
+| `GET` | `/api/v1/tasks/stats` · `/api/v1/system/info` | Admin |
+| `POST/GET/DELETE` | `/api/v1/files` · `/api/v1/files/{id}` | Authenticated (owner or admin) |
+| `GET/POST/DELETE` | `/api/v1/notifications` · `/notifications/{id}/read` · `/read-all` | Authenticated |
+| `GET` | `/health/live` · `/api/v1/health/live` · `/api/v1/health/ready` | Public |
+
+## 📁 Project Structure
+
+```
+src/
+├── main.zig               # Wiring: services, modules, HTTP server, dispatcher
+├── admin_cli.zig          # zenaipa-admin CLI (create/list administrators)
+├── schema.zig             # Shared zent schema graph + typed client
+├── config.zig             # Environment configuration
+├── db.zig                 # Store lifecycle: driver + auto-migrations
+├── jobs.zig               # Registered background task handlers
+├── scheduled.zig          # Interval jobs executed by the dispatcher
+├── middleware/            # CORS, JWT, rate limit, access log, security headers
+├── services/              # Mailer, cache
+└── modules/               # user, auth, task, file, notify, system
+web/
+└── src/
+    ├── api/               # Typed API clients (auth, user, task, file, notify)
+    ├── pages/             # SignIn, SignUp, VerifyEmail, Users, Tasks, Files, Profile…
+    ├── layouts/           # AuthLayout, MainLayout (nav + notification bell)
+    ├── providers/         # AuthProvider, toast/notification state
+    └── constants/         # Route paths
 ```
 
-## API 概览
+## ⏱️ Background Jobs & Scheduling
 
-所有接口返回统一信封 `{ code, msg, data }`（`code === 0` 成功）。
+Tasks are durable rows in the `Task` table. The dispatcher scans every second:
 
-- 公开：`POST /api/v1/auth/{register,login,logout,forgot-password,reset-password,verify-email}`
-- 登录后：`GET /auth/me`、`POST /auth/send-verification`、`PUT /auth/{profile,password}`
-- 管理员：`/users`（CRUD+分页）、`/tasks`（列表/统计/重试/取消/清理）、`/system/info`
-- 登录后：`/files`（上传/下载/删除）、`/notifications`（列表/未读数/已读/删除）
-- 健康：`GET /health/live`、`GET /api/v1/health/{live,ready}`
+1. **Claim** — picks the oldest due `pending` task and marks it `claimed`
+2. **Run** — invokes the registered handler (currently `mail.send`)
+3. **Finalize** — marks the task `done`, or schedules a retry with backoff until
+   `max_attempts` is reached (then `failed`)
 
-## 后台任务与定时任务
+Stale claims (a crashed worker) are automatically requeued. The same background thread
+also runs interval housekeeping: expired token cleanup (hourly) and notification
+pruning (daily).
 
-任务写入 `Task` 表，`Dispatcher` 每秒扫描一次：认领到期任务 → 执行注册的 handler（当前为 `mail.send`）→ 标记完成；失败按指数退避重试，达到 `max_attempts` 后标记失败。管理页"任务中心"可查看/重试/取消。
+> **Note:** zent's SQLite driver is a single connection, so all background database
+> work stays on one dispatcher thread. CPU-only workloads can safely use zigmodu's
+> `WorkerPool` or `cron.Scheduler` instead.
 
-> 注意：zent 的 SQLite 驱动是单连接，因此所有后台 DB 操作被收敛到 Dispatcher 单线程（`src/scheduled.zig`）。纯 CPU 任务可改用 zigmodu 的 `cron.Scheduler`/`WorkerPool`。
-
-## 测试
+## 🧪 Testing
 
 ```bash
-zig build test        # 16 个单元/集成测试（内存 SQLite + Testkit HTTP 派发）
-cd web && npm run typecheck && npm run build
+# Backend: unit + integration tests (in-memory SQLite + Testkit HTTP dispatch)
+zig build test
+
+# Frontend: type check and production build
+cd web
+npm run typecheck
+npm run build
 ```
 
-## 已知边界
+## 🚢 Deployment Notes
 
-- SMTP STARTTLS 默认不做证书链验证（`ca = .no_verification`），生产请自行加载 CA bundle。
-- 文件存储为本地磁盘（`ZENAIPA_UPLOAD_DIR`），上云可替换 `FileService` 的落盘实现。
-- HTTPS 终止建议由反向代理（Nginx/Caddy/云负载均衡）承担；zigmodu 也支持 HTTP/2 TLS 前置配置。
+- **TLS**: terminate HTTPS at a reverse proxy (Nginx, Caddy, or a cloud load balancer)
+  in front of the Zig server.
+- **PostgreSQL**: set `ZENAIPA_DB_DRIVER=postgres` and `ZENAIPA_PG_CONNINFO`; the schema
+  migrates automatically on startup.
+- **Email**: configure SMTP and a real `ZENAIPA_APP_HOST` so verification/reset links
+  point at your public origin.
+- **Secrets**: always override `ZENAIPA_JWT_SECRET` and SMTP credentials in production.
+- **File storage**: the default backend writes to the local disk
+  (`ZENAIPA_UPLOAD_DIR`); swap `FileService` for object storage when scaling out.
+
+## 🤝 Contributing
+
+Contributions are welcome! Please open an issue for bugs and feature requests, and
+submit pull requests against the `main` branch. Keep Zig code formatted with
+`zig fmt`, and make sure `zig build test` passes before opening a PR.
+
+## 📄 License
+
+[MIT](LICENSE) © Zenaipa contributors

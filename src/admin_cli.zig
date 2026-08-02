@@ -1,4 +1,4 @@
-//! zenaipa-admin — CLI counterpart of pagoda's `make admin`.
+//! zenaipa-admin — CLI for creating and listing administrator accounts.
 //!
 //! Commands:
 //!   create-admin --email you@example.com [--password secret123] [--name Admin]

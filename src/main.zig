@@ -1,4 +1,4 @@
-//! zenaipa — zigmodu + zent rewrite of pagoda (admin starter kit).
+//! zenaipa — a production-grade admin framework built on zigmodu + zent.
 //!
 //! Single binary serves the JSON admin API; the Solid SPA in `web/`
 //! talks to it over `/api/v1`. Run:
@@ -6,7 +6,7 @@
 //!   ZENAIPA_DB_DRIVER=postgres ZENAIPA_PG_CONNINFO='host=... dbname=zenaipa user=postgres password=...' zig build run
 //!   zig build admin -- --email you@example.com   # create the first admin
 //!
-//! Feature surface (pagoda parity + zigmodu-native extras):
+//! Feature surface:
 //!   auth (register/login/logout/reset/verify/me/profile/password), user CRUD,
 //!   durable background tasks + dispatcher, email (SMTP + console), cache,
 //!   file uploads, notifications, cron housekeeping, access logs, security
