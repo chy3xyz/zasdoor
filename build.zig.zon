@@ -1,0 +1,21 @@
+.{
+    .name = .zenaipa,
+    .version = "0.1.0",
+    .fingerprint = 0x7a594f2f77f13f58,
+    .minimum_zig_version = "0.17.0",
+    .dependencies = .{
+        // Sibling layout: w4_proj/zig_ws/{zent,zigmodu} · zmadmin under w4_proj/dev_machine/_adm_frame_
+        .zent = .{ .path = "../../../zig_ws/zent" },
+        .zigmodu = .{
+            .path = "../../../zig_ws/zigmodu",
+            .fingerprint = 0x7aa42d07b32f8d53,
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "db_link.zig",
+        "src",
+        "frontend",
+    },
+}

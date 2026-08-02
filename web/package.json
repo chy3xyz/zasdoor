@@ -1,0 +1,26 @@
+{
+  "name": "zenaipa-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "rsbuild build",
+    "dev": "rsbuild dev",
+    "preview": "rsbuild preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@solidjs/router": "^1.0.0",
+    "axios": "^1.19.0",
+    "solid-js": "^1.9.14"
+  },
+  "devDependencies": {
+    "@rsbuild/core": "^2.1.9",
+    "@rsbuild/plugin-babel": "^2.0.1",
+    "@rsbuild/plugin-solid": "^1.2.2",
+    "@tailwindcss/postcss": "^4.3.3",
+    "daisyui": "^5.7.13",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^7.0.2"
+  }
+}

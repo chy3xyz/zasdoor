@@ -1,0 +1,29 @@
+# Zig build artifacts
+.zig-cache/
+.zig-cache-global/
+.zig-global-cache/
+zig-out/
+
+# Frontend
+web/node_modules/
+web/dist/
+
+# Frontend env (use web/.env.example as template)
+web/.env
+
+# macOS
+.DS_Store
+
+# IDE / local state
+.cursor/
+.remember/
+
+# Reference materials (read-only inputs, not part of this project)
+_ref/
+
+# Local database (dev data)
+zenaipa.db
+*.db
+
+# Stray root package-lock (real lockfile lives in web/)
+package-lock.json

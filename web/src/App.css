@@ -1,0 +1,10 @@
+@import 'tailwindcss';
+@plugin 'daisyui' {
+  themes: light --default, dark --prefersdark;
+}
+
+@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
+
+body {
+  @apply bg-base-100 text-base-content;
+}
