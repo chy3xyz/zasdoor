@@ -20,6 +20,7 @@ const schema = @import("schema.zig");
 const cors_mw = @import("middleware/cors.zig");
 const access_log_mod = @import("middleware/access_log.zig");
 const sec_headers = @import("middleware/security_headers.zig");
+const metrics_mod = @import("middleware/metrics.zig");
 const mail = @import("services/mail.zig");
 const cache_svc = @import("services/cache.zig");
 const jobs = @import("jobs.zig");
@@ -204,6 +205,9 @@ pub fn main(init: std.process.Init) !void {
 
     var access_log = access_log_mod.AccessLog.init(allocator, 4096);
     defer access_log.deinit();
+    var metrics = metrics_mod.Metrics.init(io);
+    try server.addMiddleware(zigmodu.http.tracing_middleware.tracing());
+    try server.addMiddleware(metrics.middleware());
     try server.addMiddleware(sec_headers.securityHeaders());
     try server.addMiddleware(access_log.middleware());
     try server.addMiddleware(cors_mw.cors(origins));
@@ -246,12 +250,28 @@ pub fn main(init: std.process.Init) !void {
         .path = "api/v1/health/ready",
         .handler = struct {
             fn handle(ctx: *zigmodu.http.Context) !void {
-                var probe = Ready.user_store_ref.listUsers(1, 1, null, null) catch {
+                var probe = Ready.user_store_ref.listUsers(1, 1, null, null, null, false) catch {
                     try ctx.sendErrorResponse(503, 503, "数据库不可用");
                     return;
                 };
                 defer probe.free(ctx.allocator);
                 try ctx.json(200, "{\"code\":0,\"msg\":\"ok\",\"data\":{\"status\":\"READY\"}}");
+            }
+        }.handle,
+    });
+    // Prometheus metrics (public, like the health probes).
+    const MetricsRoute = struct {
+        var metrics_ref: *metrics_mod.Metrics = undefined;
+    };
+    MetricsRoute.metrics_ref = &metrics;
+    try server.addRoute(.{
+        .method = .GET,
+        .path = "metrics",
+        .handler = struct {
+            fn handle(ctx: *zigmodu.http.Context) !void {
+                const body = try MetricsRoute.metrics_ref.renderPrometheus(ctx.allocator, zigmodu.time.wallClockSeconds(ctx.io orelse return error.InternalError));
+                defer ctx.allocator.free(body);
+                try ctx.text(200, body);
             }
         }.handle,
     });

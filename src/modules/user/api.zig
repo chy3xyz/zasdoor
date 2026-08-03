@@ -98,6 +98,9 @@ pub fn UserApi(comptime Service: type) type {
             const keyword_raw = ctx.queryParam("keyword");
             const tenant_query = ctx.queryInt(i64, "tenant_id", 0);
             const tenant_filter: ?i64 = if (tenant_query > 0) tenant_query else null;
+            const sort = zigmodu.http.page.parseSort(ctx, &.{ "name", "email", "created_at" });
+            const sort_col: ?[]const u8 = if (sort) |s| s.column else null;
+            const sort_desc = if (sort) |s| s.desc else false;
 
             // zigmodu does not percent-decode query values; decode for
             // non-ASCII (e.g. CJK) searches.
@@ -111,7 +114,7 @@ pub fn UserApi(comptime Service: type) type {
                 }
             }
 
-            var result = self.svc.listUsers(params.page, params.page_size, keyword_decoded, tenant_filter) catch |err| {
+            var result = self.svc.listUsers(params.page, params.page_size, keyword_decoded, tenant_filter, sort_col, sort_desc) catch |err| {
                 try ctx.sendErrorResponse(500, 500, @errorName(err));
                 return;
             };

@@ -1,4 +1,4 @@
-import { For, Show, createMemo, createSignal, onMount } from 'solid-js';
+import { For, Show, createSignal } from 'solid-js';
 
 import {
   cancelTask,
@@ -11,6 +11,8 @@ import {
   type TaskItem,
   type TaskStats,
 } from '#ui/api';
+import DataTable, { type Column } from '#ui/components/DataTable';
+import { usePaged } from '#ui/hooks/usePaged';
 import { formatDateTime } from '#ui/utils';
 
 const PAGE_SIZE = 20;
@@ -32,49 +34,70 @@ const STATUS_CLASS: Record<string, string> = {
 };
 
 function Tasks() {
-  const [tasks, setTasks] = createSignal<TaskItem[]>([]);
   const [stats, setStats] = createSignal<TaskStats | null>(null);
-  const [total, setTotal] = createSignal(0);
-  const [page, setPage] = createSignal(1);
   const [status, setStatus] = createSignal('');
-  const [loading, setLoading] = createSignal(false);
-  const [error, setError] = createSignal<string | null>(null);
 
-  const totalPages = createMemo(() => Math.max(1, Math.ceil(total() / PAGE_SIZE)));
-  let requestSeq = 0;
+  const paged = usePaged<TaskItem>((page, pageSize) => listTasks(page, pageSize, status() || undefined), PAGE_SIZE);
 
-  const load = async (targetPage = page()) => {
-    const seq = ++requestSeq;
-    setLoading(true);
-    setError(null);
+  const loadStats = async () => {
     try {
-      const [result, st] = await Promise.all([
-        listTasks(targetPage, PAGE_SIZE, status() || undefined),
-        taskStats(),
-      ]);
-      if (seq !== requestSeq) return;
-      setTasks(result.list);
-      setTotal(result.total);
-      setPage(result.page);
-      setStats(st);
-    } catch (err) {
-      if (seq !== requestSeq) return;
-      setError(toApiError(err).message);
-    } finally {
-      if (seq === requestSeq) setLoading(false);
+      setStats(await taskStats());
+    } catch {
+      // stats are decorative; keep the last known values
     }
   };
 
-  onMount(() => void load(1));
+  const refresh = () => {
+    void loadStats();
+    void paged.reload();
+  };
 
   const run = async (fn: () => Promise<unknown>) => {
     try {
       await fn();
-      await load();
+      refresh();
     } catch (err) {
       window.alert(toApiError(err).message);
     }
   };
+
+  const columns: Column<TaskItem>[] = [
+    { key: 'id', title: 'ID', render: (t) => <span class="font-mono text-xs">{t.id}</span> },
+    {
+      key: 'name',
+      title: '任务',
+      render: (t) => (
+        <>
+          <p class="font-medium">{t.name}</p>
+          <p class="max-w-md truncate font-mono text-xs text-base-content/50">{t.payload}</p>
+        </>
+      ),
+    },
+    {
+      key: 'status',
+      title: '状态',
+      render: (t) => (
+        <span class={`badge badge-sm ${STATUS_CLASS[t.status] ?? 'badge-ghost'}`}>
+          {STATUS_LABEL[t.status] ?? t.status}
+        </span>
+      ),
+    },
+    {
+      key: 'attempts',
+      title: '尝试',
+      render: (t) => <span class="text-sm">{t.attempts}/{t.max_attempts}</span>,
+    },
+    {
+      key: 'last_error',
+      title: '错误信息',
+      render: (t) => <span class="max-w-xs truncate text-sm text-error">{t.last_error || '-'}</span>,
+    },
+    {
+      key: 'created_at',
+      title: '创建时间',
+      render: (t) => <span class="text-sm text-base-content/70">{formatDateTime(t.created_at)}</span>,
+    },
+  ];
 
   return (
     <div class="space-y-4">
@@ -84,14 +107,10 @@ function Tasks() {
           <p class="text-sm text-base-content/60">后台任务队列（邮件发送、定时清理等）</p>
         </div>
         <div class="flex gap-2">
-          <button
-            type="button"
-            class="btn btn-outline btn-sm"
-            onClick={() => run(purgeTasks)}
-          >
+          <button type="button" class="btn btn-outline btn-sm" onClick={() => run(purgeTasks)}>
             清理已完成
           </button>
-          <button type="button" class="btn btn-primary btn-sm" onClick={() => void load(1)}>
+          <button type="button" class="btn btn-primary btn-sm" onClick={refresh}>
             刷新
           </button>
         </div>
@@ -120,19 +139,13 @@ function Tasks() {
         </div>
       </Show>
 
-      <Show when={error()}>
-        <div role="alert" class="alert alert-error py-2 text-sm">
-          {error()}
-        </div>
-      </Show>
-
       <div class="flex items-center gap-2">
         <select
           class="select select-bordered select-sm"
           value={status()}
           onChange={(e) => {
             setStatus(e.currentTarget.value);
-            void load(1);
+            void paged.reload(1);
           }}
         >
           <option value="">全部状态</option>
@@ -144,89 +157,42 @@ function Tasks() {
         </select>
       </div>
 
-      <div class="overflow-x-auto rounded-lg border border-base-300">
-        <table class="table">
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>任务</th>
-              <th>状态</th>
-              <th>尝试</th>
-              <th>错误信息</th>
-              <th>创建时间</th>
-              <th class="text-right">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <Show when={tasks().length === 0 && !loading()}>
-              <tr>
-                <td colspan={7} class="py-10 text-center text-base-content/50">
-                  暂无任务
-                </td>
-              </tr>
+      <DataTable
+        columns={columns}
+        rows={paged.items()}
+        rowKey={(t) => t.id}
+        total={paged.total()}
+        page={paged.page()}
+        totalPages={paged.totalPages()}
+        loading={paged.loading()}
+        error={paged.error()}
+        emptyText="暂无任务"
+        onPageChange={(p) => void paged.reload(p)}
+        actions={(task) => (
+          <>
+            <Show when={task.status === 'failed'}>
+              <button type="button" class="btn btn-ghost btn-xs" onClick={() => run(() => retryTask(task.id))}>
+                重试
+              </button>
             </Show>
-            <For each={tasks()}>
-              {(task) => (
-                <tr>
-                  <td class="font-mono text-xs">{task.id}</td>
-                  <td>
-                    <p class="font-medium">{task.name}</p>
-                    <p class="max-w-md truncate font-mono text-xs text-base-content/50">
-                      {task.payload}
-                    </p>
-                  </td>
-                  <td>
-                    <span class={`badge badge-sm ${STATUS_CLASS[task.status] ?? 'badge-ghost'}`}>
-                      {STATUS_LABEL[task.status] ?? task.status}
-                    </span>
-                  </td>
-                  <td class="text-sm">{task.attempts}/{task.max_attempts}</td>
-                  <td class="max-w-xs truncate text-sm text-error">{task.last_error || '-'}</td>
-                  <td class="text-sm text-base-content/70">{formatDateTime(task.created_at)}</td>
-                  <td class="text-right">
-                    <div class="flex justify-end gap-1">
-                      <Show when={task.status === 'failed'}>
-                        <button type="button" class="btn btn-ghost btn-xs" onClick={() => run(() => retryTask(task.id))}>
-                          重试
-                        </button>
-                      </Show>
-                      <Show when={task.status === 'pending'}>
-                        <button type="button" class="btn btn-ghost btn-xs" onClick={() => run(() => cancelTask(task.id))}>
-                          取消
-                        </button>
-                      </Show>
-                      <button
-                        type="button"
-                        class="btn btn-ghost btn-xs text-error"
-                        onClick={() => {
-                          if (!window.confirm(`确定删除任务 #${task.id} 吗？`)) return;
-                          void run(() => deleteTask(task.id));
-                        }}
-                      >
-                        删除
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              )}
-            </For>
-          </tbody>
-        </table>
-      </div>
-
-      <div class="flex items-center justify-between">
-        <span class="text-sm text-base-content/60">
-          第 {page()} / {totalPages()} 页
-        </span>
-        <div class="join">
-          <button type="button" class="btn btn-sm join-item" disabled={page() <= 1 || loading()} onClick={() => void load(page() - 1)}>
-            上一页
-          </button>
-          <button type="button" class="btn btn-sm join-item" disabled={page() >= totalPages() || loading()} onClick={() => void load(page() + 1)}>
-            下一页
-          </button>
-        </div>
-      </div>
+            <Show when={task.status === 'pending'}>
+              <button type="button" class="btn btn-ghost btn-xs" onClick={() => run(() => cancelTask(task.id))}>
+                取消
+              </button>
+            </Show>
+            <button
+              type="button"
+              class="btn btn-ghost btn-xs text-error"
+              onClick={() => {
+                if (!window.confirm(`确定删除任务 #${task.id} 吗？`)) return;
+                void run(() => deleteTask(task.id));
+              }}
+            >
+              删除
+            </button>
+          </>
+        )}
+      />
     </div>
   );
 }

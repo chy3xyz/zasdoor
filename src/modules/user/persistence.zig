@@ -138,7 +138,7 @@ pub const UserStore = struct {
         return try self.allocator.dupe(u8, entity.password);
     }
 
-    pub fn listUsers(self: *UserStore, page: usize, page_size: usize, keyword: ?[]const u8, tenant_id: ?i64) !UserListResult {
+    pub fn listUsers(self: *UserStore, page: usize, page_size: usize, keyword: ?[]const u8, tenant_id: ?i64, sort_col: ?[]const u8, sort_desc: bool) !UserListResult {
         var q = self.client.user.Query();
         defer q.deinit();
         const preds = self.client.user.predicates;
@@ -152,7 +152,13 @@ pub const UserStore = struct {
                 _ = try q.Where(.{zent.sql.Or(&p1, &p2)});
             }
         }
-        _ = try q.OrderBy(&[_]zent.sql.Order{zent.sql.OrderAsc("email")});
+        const order: zent.sql.Order = if (sort_col) |col| blk: {
+            // Column whitelist — never interpolate caller input directly.
+            if (!(std.mem.eql(u8, col, "name") or std.mem.eql(u8, col, "email") or std.mem.eql(u8, col, "created_at")))
+                break :blk zent.sql.OrderAsc("email");
+            break :blk if (sort_desc) zent.sql.OrderDesc(col) else zent.sql.OrderAsc(col);
+        } else zent.sql.OrderAsc("email");
+        _ = try q.OrderBy(&.{order});
 
         // One call: count + limit/offset + entity release (zent paged()).
         var paged = try q.paged(page, page_size);

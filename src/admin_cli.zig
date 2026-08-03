@@ -144,7 +144,7 @@ fn cmdCreateAdmin(io: std.Io, allocator: std.mem.Allocator, svc: *user.service.U
 }
 
 fn cmdListAdmins(io: std.Io, allocator: std.mem.Allocator, store: *user.persistence.UserStore) !void {
-    var result = try store.listUsers(1, 1000, null, null);
+    var result = try store.listUsers(1, 1000, null, null, null, false);
     defer result.free(allocator);
     for (result.items) |u| {
         if (u.admin) {

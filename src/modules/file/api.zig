@@ -106,8 +106,11 @@ pub fn FileApi(comptime Service: type, comptime UserService: type) type {
                 }
             else
                 current_tenant;
+            const sort = zigmodu.http.page.parseSort(ctx, &.{ "name", "size_bytes", "created_at" });
+            const sort_col: ?[]const u8 = if (sort) |s| s.column else null;
+            const sort_desc = if (sort) |s| s.desc else false;
 
-            var result = self.svc.list(params.page, params.page_size, owner, tenant_filter) catch |err| {
+            var result = self.svc.list(params.page, params.page_size, owner, tenant_filter, sort_col, sort_desc) catch |err| {
                 try ctx.sendErrorResponse(500, 500, @errorName(err));
                 return;
             };

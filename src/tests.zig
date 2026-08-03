@@ -73,7 +73,7 @@ test "sqlite store keyword search finds user" {
     _ = try store.createUser("Bob", "bob@example.com", "hash", false, false, 1, 200);
 
     // Substring search: "alice" matches only alice's row via name or email.
-    var result = try store.listUsers(1, 20, "alice", null);
+    var result = try store.listUsers(1, 20, "alice", null, null, false);
     defer store.freeList(&result);
     try std.testing.expectEqual(@as(i64, 1), result.total);
     try std.testing.expectEqualStrings("alice@example.com", result.items[0].email);
@@ -351,11 +351,11 @@ test "user list filters by tenant" {
     _ = try store.createUser("A2", "a2@example.com", "hash", false, false, 1, 101);
     _ = try store.createUser("B1", "b1@example.com", "hash", false, false, 2, 102);
 
-    var tenant1 = try store.listUsers(1, 20, null, 1);
+    var tenant1 = try store.listUsers(1, 20, null, 1, null, false);
     defer tenant1.free(allocator);
     try std.testing.expectEqual(@as(i64, 2), tenant1.total);
 
-    var tenant2 = try store.listUsers(1, 20, null, 2);
+    var tenant2 = try store.listUsers(1, 20, null, 2, null, false);
     defer tenant2.free(allocator);
     try std.testing.expectEqual(@as(i64, 1), tenant2.total);
     try std.testing.expectEqualStrings("b1@example.com", tenant2.items[0].email);
@@ -370,7 +370,7 @@ test "file list isolates tenants" {
     _ = try file_store.create("t1.txt", "k1", "text/plain", 3, 1, 1, 100);
     _ = try file_store.create("t2.txt", "k2", "text/plain", 3, 1, 2, 101);
 
-    var tenant1 = try file_store.list(1, 20, null, 1);
+    var tenant1 = try file_store.list(1, 20, null, 1, null, false);
     defer tenant1.free(allocator);
     try std.testing.expectEqual(@as(i64, 1), tenant1.total);
     try std.testing.expectEqualStrings("t1.txt", tenant1.items[0].name);

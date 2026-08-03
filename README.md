@@ -50,6 +50,8 @@ file uploads, notifications, caching, and an admin UI that covers all of it.
 - Task center: live queue stats, retry / cancel / purge failed work
 - Runtime diagnostics endpoint (`/api/v1/system/info`)
 - Health probes: liveness and DB-backed readiness
+- Prometheus metrics (`/metrics`) and per-request `x-trace-id` tracing
+- Whitelisted list sorting (`?sort=col&order=asc|desc`) and clamped pagination
 - Security headers, CORS allow-list, and redacted access logs
 
 ### Data layer
@@ -164,7 +166,7 @@ Every endpoint returns the envelope `{ code, msg, data }`; `code === 0` means su
 | `POST/GET/DELETE` | `/api/v1/files` · `/api/v1/files/{id}` | Authenticated (owner or admin) |
 | `GET/POST/DELETE` | `/api/v1/notifications` · `/notifications/{id}/read` · `/read-all` | Authenticated |
 | `GET/POST/PUT` | `/api/v1/tenants` · `/api/v1/tenants/{id}` | Admin |
-| `GET` | `/health/live` · `/api/v1/health/live` · `/api/v1/health/ready` | Public |
+| `GET` | `/health/live` · `/api/v1/health/live` · `/api/v1/health/ready` · `/metrics` | Public |
 
 > **Multi-tenancy:** every API response includes `tenant_id` on user/file records;
 > non-admin users can only reach rows of their own tenant. Platform admins can

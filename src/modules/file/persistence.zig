@@ -104,7 +104,7 @@ pub const FileStore = struct {
         return try self.dup(entity);
     }
 
-    pub fn list(self: *FileStore, page: usize, page_size: usize, uploader_id: ?i64, tenant_id: ?i64) !FileListResult {
+    pub fn list(self: *FileStore, page: usize, page_size: usize, uploader_id: ?i64, tenant_id: ?i64, sort_col: ?[]const u8, sort_desc: bool) !FileListResult {
         const preds = self.client.file.predicates;
         const owner_pred = if (uploader_id) |uid| preds.uploader_idEQ(.{ .int = uid }) else null;
         const tenant_pred = if (tenant_id) |tid| preds.tenant_idEQ(.{ .int = tid }) else null;
@@ -113,7 +113,12 @@ pub const FileStore = struct {
         defer q.deinit();
         if (owner_pred) |op| _ = try q.Where(.{op});
         if (tenant_pred) |tp| _ = try q.Where(.{tp});
-        _ = try q.OrderBy(&[_]zent.sql.Order{.{ .column = .{ .name = "created_at", .desc = true } }});
+        const order: zent.sql.Order = if (sort_col) |col| blk: {
+            if (!(std.mem.eql(u8, col, "name") or std.mem.eql(u8, col, "size_bytes") or std.mem.eql(u8, col, "created_at")))
+                break :blk zent.sql.Order{ .column = .{ .name = "created_at", .desc = true } };
+            break :blk if (sort_desc) zent.sql.OrderDesc(col) else zent.sql.OrderAsc(col);
+        } else zent.sql.Order{ .column = .{ .name = "created_at", .desc = true } };
+        _ = try q.OrderBy(&.{order});
 
         var paged = try q.paged(page, page_size);
         defer paged.deinit();

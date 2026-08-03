@@ -77,8 +77,8 @@ pub const FileService = struct {
         return .{ .row = row, .bytes = bytes };
     }
 
-    pub fn list(self: *FileService, page: usize, page_size: usize, uploader_id: ?i64, tenant_id: ?i64) !FileListResult {
-        return self.store.list(page, page_size, uploader_id, tenant_id);
+    pub fn list(self: *FileService, page: usize, page_size: usize, uploader_id: ?i64, tenant_id: ?i64, sort_col: ?[]const u8, sort_desc: bool) !FileListResult {
+        return self.store.list(page, page_size, uploader_id, tenant_id, sort_col, sort_desc);
     }
 
     pub fn get(self: *FileService, id: i64) !?FileRow {

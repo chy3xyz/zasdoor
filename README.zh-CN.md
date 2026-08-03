@@ -47,6 +47,8 @@ Zenaipa 是一个开箱即用的管理后台与内部平台脚手架：基于 **
 - 任务中心：实时队列统计，失败任务可重试 / 取消 / 清理
 - 运行时诊断接口（`/api/v1/system/info`）
 - 健康检查：存活探测 + 数据库就绪探测
+- Prometheus 指标（`/metrics`）与每请求 `x-trace-id` 追踪
+- 白名单列表排序（`?sort=col&order=asc|desc`）与分页钳制
 - 安全响应头、CORS 白名单、脱敏访问日志
 
 ### 数据层
@@ -159,7 +161,7 @@ npm run dev
 | `POST/GET/DELETE` | `/api/v1/files` · `/api/v1/files/{id}` | 登录（本人或管理员） |
 | `GET/POST/DELETE` | `/api/v1/notifications` · `/notifications/{id}/read` · `/read-all` | 登录 |
 | `GET/POST/PUT` | `/api/v1/tenants` · `/api/v1/tenants/{id}` | 管理员 |
-| `GET` | `/health/live` · `/api/v1/health/live` · `/api/v1/health/ready` | 公开 |
+| `GET` | `/health/live` · `/api/v1/health/live` · `/api/v1/health/ready` · `/metrics` | 公开 |
 
 > **多租户**：用户/文件等记录会返回 `tenant_id`；普通用户只能访问本租户数据，
 > 平台管理员可通过 `?tenant_id=` 查询参数跨租户筛选。

@@ -171,8 +171,8 @@ pub const UserService = struct {
         return try self.store.getUserByEmail(norm);
     }
 
-    pub fn listUsers(self: *UserService, page: usize, page_size: usize, keyword: ?[]const u8, tenant_id: ?i64) !persist.UserListResult {
-        return try self.store.listUsers(page, page_size, keyword, tenant_id);
+    pub fn listUsers(self: *UserService, page: usize, page_size: usize, keyword: ?[]const u8, tenant_id: ?i64, sort_col: ?[]const u8, sort_desc: bool) !persist.UserListResult {
+        return try self.store.listUsers(page, page_size, keyword, tenant_id, sort_col, sort_desc);
     }
 
     pub fn freeList(self: *UserService, result: *persist.UserListResult) void {
