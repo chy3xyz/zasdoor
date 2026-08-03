@@ -96,8 +96,7 @@ pub fn FileApi(comptime Service: type, comptime UserService: type) type {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
             const actor = (try authUser(ctx, self)) orelse return;
 
-            const page = ctx.queryInt(usize, "page", 1);
-            const page_size = ctx.queryInt(usize, "page_size", 20);
+            const params = zigmodu.http.PageParams.parse(ctx, .{ .max_page_size = 100 });
             const current_tenant = mw.authTenantId(ctx) orelse self.default_tenant_id;
             const owner: ?i64 = if (actor.admin) null else actor.id;
             const tenant_filter: ?i64 = if (actor.admin)
@@ -108,26 +107,14 @@ pub fn FileApi(comptime Service: type, comptime UserService: type) type {
             else
                 current_tenant;
 
-            var result = self.svc.list(page, page_size, owner, tenant_filter) catch |err| {
+            var result = self.svc.list(params.page, params.page_size, owner, tenant_filter) catch |err| {
                 try ctx.sendErrorResponse(500, 500, @errorName(err));
                 return;
             };
             defer result.free(ctx.allocator);
 
-            var items = std.ArrayList(FileDto).empty;
-            defer items.deinit(ctx.allocator);
-            for (result.items) |r| try items.append(ctx.allocator, toDto(r));
-
-            try ctx.jsonStruct(200, .{
-                .code = 0,
-                .msg = "",
-                .data = .{
-                    .list = items.items,
-                    .total = result.total,
-                    .page = page,
-                    .pageSize = page_size,
-                },
-            });
+            const dtos = try zigmodu.http.Extract.toDtoList(ctx.allocator, result.items, FileDto, toDto);
+            try zigmodu.http.sendPaged(ctx, dtos, @intCast(result.total), params, .ruoyi);
         }
 
         fn download(ctx: *http.Context) !void {

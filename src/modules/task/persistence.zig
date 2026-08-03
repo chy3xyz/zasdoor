@@ -131,33 +131,25 @@ pub const TaskStore = struct {
         const preds = self.client.task.predicates;
         const status_pred = if (status) |s| if (s.len > 0) preds.statusEQ(.{ .string = s }) else null else null;
 
-        var count_q = self.client.task.Query();
-        defer count_q.deinit();
-        if (status_pred) |sp| _ = try count_q.Where(.{sp});
-        const total: i64 = @intCast(try count_q.Count());
-
         var q = self.client.task.Query();
         defer q.deinit();
         if (status_pred) |sp| _ = try q.Where(.{sp});
-        if (page_size > 0) {
-            _ = q.Limit(page_size);
-            if (page > 1) _ = q.Offset((page - 1) * page_size);
-        }
         _ = try q.OrderBy(&[_]zent.sql.Order{zent.sql.OrderAsc("id")});
-        var found = try q.All();
-        defer {
-            for (found.items) |*e| zent.codegen.deinitEntity(infos, TaskInfo, e, self.allocator);
-            found.deinit();
-        }
 
-        var out = try self.allocator.alloc(TaskRow, found.items.len);
-        errdefer self.allocator.free(out);
+        var paged = try q.paged(page, page_size);
+        defer paged.deinit();
+
+        var out = try self.allocator.alloc(TaskRow, paged.items.items.len);
         var n: usize = 0;
-        for (found.items) |e| {
+        errdefer {
+            for (out[0..n]) |r| r.free(self.allocator);
+            self.allocator.free(out);
+        }
+        for (paged.items.items) |e| {
             out[n] = try self.dupTask(e);
             n += 1;
         }
-        return .{ .items = out[0..n], .total = total };
+        return .{ .items = out, .total = paged.total };
     }
 
     /// Oldest due task (`pending` and `available_at <= now`), or null.

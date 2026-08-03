@@ -109,35 +109,26 @@ pub const FileStore = struct {
         const owner_pred = if (uploader_id) |uid| preds.uploader_idEQ(.{ .int = uid }) else null;
         const tenant_pred = if (tenant_id) |tid| preds.tenant_idEQ(.{ .int = tid }) else null;
 
-        var count_q = self.client.file.Query();
-        defer count_q.deinit();
-        if (owner_pred) |op| _ = try count_q.Where(.{op});
-        if (tenant_pred) |tp| _ = try count_q.Where(.{tp});
-        const total: i64 = @intCast(try count_q.Count());
-
         var q = self.client.file.Query();
         defer q.deinit();
         if (owner_pred) |op| _ = try q.Where(.{op});
         if (tenant_pred) |tp| _ = try q.Where(.{tp});
-        if (page_size > 0) {
-            _ = q.Limit(page_size);
-            if (page > 1) _ = q.Offset((page - 1) * page_size);
-        }
         _ = try q.OrderBy(&[_]zent.sql.Order{.{ .column = .{ .name = "created_at", .desc = true } }});
-        var found = try q.All();
-        defer {
-            for (found.items) |*e| zent.codegen.deinitEntity(infos, FileInfo, e, self.allocator);
-            found.deinit();
-        }
 
-        var out = try self.allocator.alloc(FileRow, found.items.len);
-        errdefer self.allocator.free(out);
+        var paged = try q.paged(page, page_size);
+        defer paged.deinit();
+
+        var out = try self.allocator.alloc(FileRow, paged.items.items.len);
         var n: usize = 0;
-        for (found.items) |e| {
+        errdefer {
+            for (out[0..n]) |r| r.free(self.allocator);
+            self.allocator.free(out);
+        }
+        for (paged.items.items) |e| {
             out[n] = try self.dup(e);
             n += 1;
         }
-        return .{ .items = out[0..n], .total = total };
+        return .{ .items = out, .total = paged.total };
     }
 
     pub fn delete(self: *FileStore, id: i64) !void {

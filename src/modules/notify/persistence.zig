@@ -84,35 +84,26 @@ pub const NotificationStore = struct {
         const user_pred = preds.user_idEQ(.{ .int = user_id });
         const unread_pred = if (unread_only) preds.readEQ(.{ .bool = false }) else null;
 
-        var count_q = self.client.notification.Query();
-        defer count_q.deinit();
-        _ = try count_q.Where(.{user_pred});
-        if (unread_pred) |up| _ = try count_q.Where(.{up});
-        const total: i64 = @intCast(try count_q.Count());
-
         var q = self.client.notification.Query();
         defer q.deinit();
         _ = try q.Where(.{user_pred});
         if (unread_pred) |up| _ = try q.Where(.{up});
-        if (page_size > 0) {
-            _ = q.Limit(page_size);
-            if (page > 1) _ = q.Offset((page - 1) * page_size);
-        }
         _ = try q.OrderBy(&[_]zent.sql.Order{.{ .column = .{ .name = "created_at", .desc = true } }});
-        var found = try q.All();
-        defer {
-            for (found.items) |*e| zent.codegen.deinitEntity(infos, NotificationInfo, e, self.allocator);
-            found.deinit();
-        }
 
-        var out = try self.allocator.alloc(NotificationRow, found.items.len);
-        errdefer self.allocator.free(out);
+        var paged = try q.paged(page, page_size);
+        defer paged.deinit();
+
+        var out = try self.allocator.alloc(NotificationRow, paged.items.items.len);
         var n: usize = 0;
-        for (found.items) |e| {
+        errdefer {
+            for (out[0..n]) |r| r.free(self.allocator);
+            self.allocator.free(out);
+        }
+        for (paged.items.items) |e| {
             out[n] = try self.dup(e);
             n += 1;
         }
-        return .{ .items = out[0..n], .total = total };
+        return .{ .items = out, .total = paged.total };
     }
 
     pub fn unreadCount(self: *NotificationStore, user_id: i64) !i64 {

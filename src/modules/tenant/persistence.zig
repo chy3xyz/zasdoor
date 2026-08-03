@@ -79,31 +79,24 @@ pub const TenantStore = struct {
     }
 
     pub fn list(self: *TenantStore, page: usize, page_size: usize) !TenantListResult {
-        var count_q = self.client.tenant.Query();
-        defer count_q.deinit();
-        const total: i64 = @intCast(try count_q.Count());
-
         var q = self.client.tenant.Query();
         defer q.deinit();
-        if (page_size > 0) {
-            _ = q.Limit(page_size);
-            if (page > 1) _ = q.Offset((page - 1) * page_size);
-        }
         _ = try q.OrderBy(&[_]zent.sql.Order{zent.sql.OrderAsc("id")});
-        var found = try q.All();
-        defer {
-            for (found.items) |*e| zent.codegen.deinitEntity(infos, TenantInfo, e, self.allocator);
-            found.deinit();
-        }
 
-        var out = try self.allocator.alloc(TenantRow, found.items.len);
-        errdefer self.allocator.free(out);
+        var paged = try q.paged(page, page_size);
+        defer paged.deinit();
+
+        var out = try self.allocator.alloc(TenantRow, paged.items.items.len);
         var n: usize = 0;
-        for (found.items) |e| {
+        errdefer {
+            for (out[0..n]) |r| r.free(self.allocator);
+            self.allocator.free(out);
+        }
+        for (paged.items.items) |e| {
             out[n] = try self.dup(e);
             n += 1;
         }
-        return .{ .items = out[0..n], .total = total };
+        return .{ .items = out, .total = paged.total };
     }
 
     pub fn update(self: *TenantStore, id: i64, name: []const u8, status: []const u8, now: i64) !bool {

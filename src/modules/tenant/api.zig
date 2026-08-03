@@ -76,28 +76,15 @@ pub fn TenantApi(comptime Service: type, comptime UserService: type) type {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
             _ = (try requireAdmin(ctx, self)) orelse return;
 
-            const page = ctx.queryInt(usize, "page", 1);
-            const page_size = ctx.queryInt(usize, "page_size", 20);
-            var result = self.svc.list(page, page_size) catch |err| {
+            const params = zigmodu.http.PageParams.parse(ctx, .{ .max_page_size = 100 });
+            var result = self.svc.list(params.page, params.page_size) catch |err| {
                 try ctx.sendErrorResponse(500, 500, @errorName(err));
                 return;
             };
             defer result.free(ctx.allocator);
 
-            var items = std.ArrayList(TenantDto).empty;
-            defer items.deinit(ctx.allocator);
-            for (result.items) |r| try items.append(ctx.allocator, toDto(r));
-
-            try ctx.jsonStruct(200, .{
-                .code = 0,
-                .msg = "",
-                .data = .{
-                    .list = items.items,
-                    .total = result.total,
-                    .page = page,
-                    .pageSize = page_size,
-                },
-            });
+            const dtos = try zigmodu.http.Extract.toDtoList(ctx.allocator, result.items, TenantDto, toDto);
+            try zigmodu.http.sendPaged(ctx, dtos, @intCast(result.total), params, .ruoyi);
         }
 
         fn create(ctx: *http.Context) !void {

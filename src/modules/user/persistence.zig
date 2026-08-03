@@ -139,59 +139,36 @@ pub const UserStore = struct {
     }
 
     pub fn listUsers(self: *UserStore, page: usize, page_size: usize, keyword: ?[]const u8, tenant_id: ?i64) !UserListResult {
-        const preds = self.client.user.predicates;
-        const tenant_pred = if (tenant_id) |tid| preds.tenant_idEQ(.{ .int = tid }) else null;
-
-        // Build the keyword predicate once; zent's LIKE is exact-match, so
-        // wrap the term in % wildcards for substring search.
-        const pattern_opt = if (keyword) |kw|
-            if (kw.len > 0) try std.fmt.allocPrint(self.allocator, "%{s}%", .{kw}) else null
-        else
-            null;
-        defer if (pattern_opt) |p| self.allocator.free(p);
-        const or_pred = if (pattern_opt) |pat| blk: {
-            const p1 = preds.nameContains(pat);
-            const p2 = preds.emailContains(pat);
-            break :blk zent.sql.Or(&p1, &p2);
-        } else null;
-
-        // Count
-        var count_q = self.client.user.Query();
-        defer count_q.deinit();
-        if (or_pred) |op| {
-            _ = try count_q.Where(.{op});
-        }
-        if (tenant_pred) |tp| _ = try count_q.Where(.{tp});
-        const total: i64 = @intCast(try count_q.Count());
-
-        // Page
         var q = self.client.user.Query();
         defer q.deinit();
-        if (or_pred) |op| {
-            _ = try q.Where(.{op});
-        }
-        if (tenant_pred) |tp| _ = try q.Where(.{tp});
-        if (page_size > 0) {
-            _ = q.Limit(page_size);
-            if (page > 1) _ = q.Offset((page - 1) * page_size);
+        const preds = self.client.user.predicates;
+        if (tenant_id) |tid| _ = try q.Where(.{preds.tenant_idEQ(.{ .int = tid })});
+        // ContainsEscaped renders LIKE '%…%' with wildcard/quote escaping —
+        // user input stays literal, no temporary pattern allocation needed.
+        if (keyword) |kw| {
+            if (kw.len > 0) {
+                const p1 = preds.nameContainsEscaped(kw);
+                const p2 = preds.emailContainsEscaped(kw);
+                _ = try q.Where(.{zent.sql.Or(&p1, &p2)});
+            }
         }
         _ = try q.OrderBy(&[_]zent.sql.Order{zent.sql.OrderAsc("email")});
-        var found = try q.All();
-        defer {
-            for (found.items) |*e| {
-                zent.codegen.deinitEntity(infos, UserInfo, e, self.allocator);
-            }
-            found.deinit();
-        }
 
-        var out = try self.allocator.alloc(UserRow, found.items.len);
-        errdefer self.allocator.free(out);
+        // One call: count + limit/offset + entity release (zent paged()).
+        var paged = try q.paged(page, page_size);
+        defer paged.deinit();
+
+        var out = try self.allocator.alloc(UserRow, paged.items.items.len);
         var n: usize = 0;
-        for (found.items) |e| {
+        errdefer {
+            for (out[0..n]) |r| r.free(self.allocator);
+            self.allocator.free(out);
+        }
+        for (paged.items.items) |e| {
             out[n] = try self.dupUser(e);
             n += 1;
         }
-        return .{ .items = out[0..n], .total = total };
+        return .{ .items = out, .total = paged.total };
     }
 
     /// Update a user's name/email/profile fields. Sensitive updates are

@@ -56,30 +56,17 @@ pub fn NotificationApi(comptime Service: type, comptime UserService: type) type 
                 try ctx.sendErrorResponse(401, 401, "未登录或登录已过期");
                 return;
             };
-            const page = ctx.queryInt(usize, "page", 1);
-            const page_size = ctx.queryInt(usize, "page_size", 20);
+            const params = zigmodu.http.PageParams.parse(ctx, .{ .max_page_size = 100 });
             const unread = ctx.queryInt(usize, "unread", 0) == 1;
 
-            var result = self.svc.list(uid, page, page_size, unread) catch |err| {
+            var result = self.svc.list(uid, params.page, params.page_size, unread) catch |err| {
                 try ctx.sendErrorResponse(500, 500, @errorName(err));
                 return;
             };
             defer result.free(ctx.allocator);
 
-            var items = std.ArrayList(NotificationDto).empty;
-            defer items.deinit(ctx.allocator);
-            for (result.items) |r| try items.append(ctx.allocator, toDto(r));
-
-            try ctx.jsonStruct(200, .{
-                .code = 0,
-                .msg = "",
-                .data = .{
-                    .list = items.items,
-                    .total = result.total,
-                    .page = page,
-                    .pageSize = page_size,
-                },
-            });
+            const dtos = try zigmodu.http.Extract.toDtoList(ctx.allocator, result.items, NotificationDto, toDto);
+            try zigmodu.http.sendPaged(ctx, dtos, @intCast(result.total), params, .ruoyi);
         }
 
         fn unreadCount(ctx: *http.Context) !void {

@@ -94,8 +94,7 @@ pub fn UserApi(comptime Service: type) type {
             const admin_id = (try requireAdmin(ctx, self)) orelse return;
             _ = admin_id;
 
-            const page = ctx.queryInt(usize, "page", 1);
-            const page_size = ctx.queryInt(usize, "page_size", 20);
+            const params = zigmodu.http.PageParams.parse(ctx, .{ .max_page_size = 100 });
             const keyword_raw = ctx.queryParam("keyword");
             const tenant_query = ctx.queryInt(i64, "tenant_id", 0);
             const tenant_filter: ?i64 = if (tenant_query > 0) tenant_query else null;
@@ -112,26 +111,14 @@ pub fn UserApi(comptime Service: type) type {
                 }
             }
 
-            var result = self.svc.listUsers(page, page_size, keyword_decoded, tenant_filter) catch |err| {
+            var result = self.svc.listUsers(params.page, params.page_size, keyword_decoded, tenant_filter) catch |err| {
                 try ctx.sendErrorResponse(500, 500, @errorName(err));
                 return;
             };
             defer self.svc.freeList(&result);
 
-            var list = std.ArrayList(UserDto).empty;
-            defer list.deinit(ctx.allocator);
-            for (result.items) |r| try list.append(ctx.allocator, toDto(r));
-
-            try ctx.jsonStruct(200, .{
-                .code = 0,
-                .msg = "",
-                .data = .{
-                    .list = list.items,
-                    .total = result.total,
-                    .page = page,
-                    .pageSize = page_size,
-                },
-            });
+            const dtos = try zigmodu.http.Extract.toDtoList(ctx.allocator, result.items, UserDto, toDto);
+            try zigmodu.http.sendPaged(ctx, dtos, @intCast(result.total), params, .ruoyi);
         }
 
         fn getUser(ctx: *http.Context) !void {
