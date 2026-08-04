@@ -20,7 +20,8 @@ platforms. It pairs a modular **Zig** backend (built on
 [zigmodu](https://github.com/zigmodu) and [zent](https://github.com/zent)) with a
 **SolidJS + TypeScript** single-page app, and ships everything you need to go from
 `git clone` to a deployed product: authentication, email verification, background jobs,
-file uploads, notifications, caching, and an admin UI that covers all of it.
+file uploads, notifications, caching, and an admin UI that covers all of it — plus
+audit logging, platform dashboards and configurable email templates.
 
 ## ✨ Features
 
@@ -32,7 +33,8 @@ file uploads, notifications, caching, and an admin UI that covers all of it.
 
 ### Platform services
 - **Background jobs** — durable task queue with automatic retries and a management UI
-- **Email** — SMTP transport (STARTTLS + AUTH PLAIN) with a console sink for development
+- **Email** — SMTP transport (STARTTLS with system CA verification + AUTH PLAIN) and a
+  console sink for development
 - **File management** — upload, download and delete with per-user access control
 - **Notifications** — per-user inbox with an unread badge in the header
 - **Caching** — in-memory LRU with configurable TTL and capacity
@@ -46,9 +48,12 @@ file uploads, notifications, caching, and an admin UI that covers all of it.
   default tenant, so single-tenant deployments are unchanged)
 
 ### Admin & operations
-- **Dashboard** — live platform stats: users (with 7-day registration trend), task queue, files, notifications, tenants, cache
-- **Audit log** — who did what, when, from where: login/register, user/task/tenant/file operations with filters
-- **Email templates** — configurable verification & password-reset mail (variable rendering, built-in defaults)
+- **Dashboard** — live platform stats: users (with a 7-day registration trend), task
+  queue, files, notifications, tenants and cache entries
+- **Audit log** — who did what, when and from where: login/register, user/task/tenant/
+  file operations with actor / action / keyword filters
+- **Email templates** — configurable verification & password-reset mail with variable
+  rendering and built-in defaults
 - User management: CRUD, pagination, keyword search, self-protection guards
 - Task center: live queue stats, retry / cancel / purge failed work
 - Runtime diagnostics endpoint (`/api/v1/system/info`)
@@ -66,7 +71,7 @@ file uploads, notifications, caching, and an admin UI that covers all of it.
 
 | Layer | Technology |
 | --- | --- |
-| Backend | [Zig](https://ziglang.org) 0.17, [zigmodu](https://github.com/zigmodu) (HTTP, security, rate limiting, cache), [zent](https://github.com/zent) (ORM, schema, migrations) |
+| Backend | [Zig](https://ziglang.org) 0.17, [zigmodu](https://github.com/zigmodu) (HTTP, security, rate limiting, cache, Application lifecycle), [zent](https://github.com/zent) (ORM, schema, migrations) |
 | Frontend | [SolidJS](https://www.solidjs.com), TypeScript, [Rsbuild](https://rsbuild.dev), [Tailwind CSS](https://tailwindcss.com) 4, [DaisyUI](https://daisyui.com) |
 | Database | SQLite (default), PostgreSQL (runtime switch) |
 
@@ -152,6 +157,69 @@ All settings are environment variables with the `ZENAIPA_` prefix. See
 | `ZENAIPA_TASK_MAX_ATTEMPTS` | `3` | Max attempts per background task |
 | `ZENAIPA_TASK_RETRY_INTERVAL_SECONDS` | `60` | Retry backoff interval |
 
+## 🛠️ Operations Guide
+
+### 📊 Dashboard
+
+The admin **概览 / Dashboard** page (and `GET /api/v1/system/dashboard`) aggregates
+live counts across the platform:
+
+```jsonc
+{
+  "users": { "total": 128, "registered_last_7d": [3, 5, 2, 8, 4, 6, 7] },  // oldest day first
+  "tasks": { "pending": 2, "claimed": 1, "done": 512, "failed": 3, "canceled": 0 },
+  "files": 84,
+  "notifications": 960,
+  "tenants": 4,
+  "cache_entries": 37
+}
+```
+
+### 📋 Audit log
+
+Every sensitive operation is recorded in the `AuditLog` table — actor, action, target,
+detail, IP, success flag and timestamp. Recorded actions:
+
+| Action | Meaning |
+| --- | --- |
+| `auth.login` / `auth.login.fail` | Successful / failed login |
+| `auth.register` | New account created |
+| `user.create` / `user.update` / `user.delete` | Admin user management |
+| `task.retry` / `task.cancel` / `task.purge` / `task.delete` | Task queue operations |
+| `tenant.create` / `tenant.update` | Tenant management |
+| `file.delete` | File deletion |
+
+Query via `GET /api/v1/audit-logs` (admin only) with optional filters:
+
+| Query param | Description |
+| --- | --- |
+| `page`, `page_size` | Pagination (clamped, max 200) |
+| `actor` | Operator user id (exact) |
+| `action` | Action prefix, substring match (e.g. `user.`) |
+| `keyword` | Detail substring search |
+
+### 💌 Email templates
+
+Verification and password-reset mail is rendered from admin-editable templates
+(`GET/PUT /api/v1/email-templates`, admin only). Built-in codes and defaults:
+
+| Code | Default subject | Default body |
+| --- | --- | --- |
+| `verify_email` | `验证你的 {app_name} 邮箱` | greeting + `{link}` |
+| `reset_password` | `重置你的 {app_name} 密码` | greeting + `{link}` |
+
+Available variables (also usable in the subject):
+
+| Variable | Value |
+| --- | --- |
+| `{app_name}` | `zenaipa` |
+| `{link}` | The one-click action URL (verification / reset) |
+| `{email}` | Recipient address |
+
+When no admin template exists for a code, the built-in default is used, so the app
+works out of the box. Template content is JSON-serialized before enqueueing, so
+quotes/newlines in your edits can never corrupt the mail payload.
+
 ## 📡 API Overview
 
 Every endpoint returns the envelope `{ code, msg, data }`; `code === 0` means success.
@@ -176,6 +244,10 @@ Every endpoint returns the envelope `{ code, msg, data }`; `code === 0` means su
 > **Multi-tenancy:** every API response includes `tenant_id` on user/file records;
 > non-admin users can only reach rows of their own tenant. Platform admins can
 > filter cross-tenant data with the `?tenant_id=` query parameter.
+>
+> **Authorization:** admin-only routes enforce the role in the backend
+> (`requireAdmin`, checked against the database — not just the JWT claim), so hiding
+> the UI links is never the only line of defense.
 
 ## 📁 Project Structure
 
@@ -188,15 +260,18 @@ src/
 ├── db.zig                 # Store lifecycle: driver + auto-migrations
 ├── jobs.zig               # Registered background task handlers
 ├── scheduled.zig          # Interval jobs executed by the dispatcher
-├── middleware/            # CORS, JWT, rate limit, access log, security headers
-├── services/              # Mailer, cache
+├── middleware/            # auth helpers (JWT attrs), access log, metrics, security headers
+├── services/              # Mailer (SMTP + console), cache
 └── modules/               # tenant, user, auth, task, file, notify, system, audit, mail_template
 web/
 └── src/
-    ├── api/               # Typed API clients (auth, user, task, file, notify)
-    ├── pages/             # SignIn, SignUp, VerifyEmail, Users, Tasks, Files, Profile…
+    ├── api/               # Typed API clients (auth, user, task, file, notify, tenant, audit, system, mailTemplate)
+    ├── pages/             # SignIn, SignUp, VerifyEmail, Users, Tasks, Files, Tenants,
+    │                      # Profile, Dashboard, AuditLogs, MailTemplates
     ├── layouts/           # AuthLayout, MainLayout (nav + notification bell)
     ├── providers/         # AuthProvider, toast/notification state
+    ├── hooks/             # usePaged (data-driven pagination), useAuth
+    ├── components/        # DataTable, UserFormModal
     └── constants/         # Route paths
 ```
 
@@ -221,6 +296,8 @@ pruning (daily).
 
 ```bash
 # Backend: unit + integration tests (in-memory SQLite + Testkit HTTP dispatch)
+# covers stores, services, JWT/multi-tenancy, audit, dashboard counts, mail
+# templates, and the admin-gate (401/403/200) HTTP flow
 zig build test
 
 # Frontend: type check and production build
@@ -236,7 +313,8 @@ npm run build
 - **PostgreSQL**: set `ZENAIPA_DB_DRIVER=postgres` and `ZENAIPA_PG_CONNINFO`; the schema
   migrates automatically on startup.
 - **Email**: configure SMTP and a real `ZENAIPA_APP_HOST` so verification/reset links
-  point at your public origin.
+  point at your public origin. STARTTLS verifies the server certificate against the
+  system CA bundle (falls back to unverified with a warning if no CA store is found).
 - **Secrets**: always override `ZENAIPA_JWT_SECRET` and SMTP credentials in production.
 - **File storage**: the default backend writes to the local disk
   (`ZENAIPA_UPLOAD_DIR`); swap `FileService` for object storage when scaling out.
