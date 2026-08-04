@@ -8,3 +8,5 @@ export { default as NotFound } from './NotFound';
 export { default as Dashboard } from './Dashboard';
 export { default as AuditLogs } from './AuditLogs';
 export { default as MailTemplates } from './MailTemplates';
+export { default as AiChat } from './AiChat';
+export { default as AiAdmin } from './AiAdmin';

@@ -153,6 +153,22 @@ function MainLayout(props: { children?: JSX.Element }) {
               用户管理
             </A>
           </Show>
+          <A
+            href={ROUTE_PATH.aiChat}
+            class="block rounded-lg px-3 py-2 text-sm hover:bg-base-300 [&.active]:bg-primary [&.active]:text-primary-content"
+            activeClass="active"
+          >
+            AI 助手
+          </A>
+          <Show when={auth.user?.admin}>
+            <A
+              href={ROUTE_PATH.aiAdmin}
+              class="block rounded-lg px-3 py-2 text-sm hover:bg-base-300 [&.active]:bg-primary [&.active]:text-primary-content"
+              activeClass="active"
+            >
+              AI 管理
+            </A>
+          </Show>
           <Show when={auth.user?.admin}>
             <A
               href={ROUTE_PATH.auditLogs}

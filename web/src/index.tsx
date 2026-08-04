@@ -35,6 +35,8 @@ const Profile = lazy(() => import('#ui/pages/Profile'));
 const Dashboard = lazy(() => import('#ui/pages/Dashboard'));
 const AuditLogs = lazy(() => import('#ui/pages/AuditLogs'));
 const MailTemplates = lazy(() => import('#ui/pages/MailTemplates'));
+const AiChat = lazy(() => import('#ui/pages/AiChat'));
+const AiAdmin = lazy(() => import('#ui/pages/AiAdmin'));
 const NotFound = lazy(() => import('#ui/pages/NotFound'));
 
 function BootFallback() {
@@ -175,6 +177,15 @@ if (root) {
             component={() => (
               <AdminGate>
                 <AuditLogs />
+              </AdminGate>
+            )}
+          />
+          <Route path={ROUTE_PATH.aiChat} component={AiChat} />
+          <Route
+            path={ROUTE_PATH.aiAdmin}
+            component={() => (
+              <AdminGate>
+                <AiAdmin />
               </AdminGate>
             )}
           />

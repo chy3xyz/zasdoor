@@ -21,7 +21,8 @@ platforms. It pairs a modular **Zig** backend (built on
 **SolidJS + TypeScript** single-page app, and ships everything you need to go from
 `git clone` to a deployed product: authentication, email verification, background jobs,
 file uploads, notifications, caching, and an admin UI that covers all of it — plus
-audit logging, platform dashboards and configurable email templates.
+audit logging, platform dashboards, configurable email templates and a full
+agentic AI assistant (providers, skills, chat, approvals, workflow).
 
 ## ✨ Features
 
@@ -61,6 +62,18 @@ audit logging, platform dashboards and configurable email templates.
 - Prometheus metrics (`/metrics`) and per-request `x-trace-id` tracing
 - Whitelisted list sorting (`?sort=col&order=asc|desc`) and clamped pagination
 - Security headers, CORS allow-list, and redacted access logs
+
+### AI assistant
+- **Providers** — admin-managed OpenAI-compatible providers; API keys encrypted
+  at rest (AES-256-GCM, master key via `ZENAIPA_AI_KEY_SECRET`)
+- **Skills** — LLM-callable platform tools (user search, task stats, audit
+  search, tenant list) guarded by admin permission + a write skill
+  (`notify.send`) that goes through human approval
+- **Chat** — per-user sessions with message history (`/api/v1/ai/sessions`)
+- **Approvals & quota** — human-in-the-loop queue for write skills; per-user
+  rolling 24h run limit
+- **Workflow** — zigmodu.ai orchestration (health-report workflow demo) and
+  run audit (`/api/v1/ai/runs`) + Prometheus AI metrics
 
 ### Data layer
 - Schema-as-code migrations run automatically at startup
@@ -156,6 +169,8 @@ All settings are environment variables with the `ZENAIPA_` prefix. See
 | `ZENAIPA_CACHE_TTL_SECONDS` | `300` | Cache TTL |
 | `ZENAIPA_TASK_MAX_ATTEMPTS` | `3` | Max attempts per background task |
 | `ZENAIPA_TASK_RETRY_INTERVAL_SECONDS` | `60` | Retry backoff interval |
+| `ZENAIPA_AI_KEY_SECRET` | _(empty)_ | Master key encrypting stored AI provider keys (required to save providers) |
+| `ZENAIPA_AI_DAILY_RUN_LIMIT` | `100` | Max agent runs per user per rolling 24h |
 
 ## 🛠️ Operations Guide
 
@@ -220,6 +235,23 @@ When no admin template exists for a code, the built-in default is used, so the a
 works out of the box. Template content is JSON-serialized before enqueueing, so
 quotes/newlines in your edits can never corrupt the mail payload.
 
+### 🤖 AI assistant
+
+Configure a provider (admin): **AI 管理 → Provider** — an OpenAI-compatible
+`endpoint`, a JSON array of `api_keys`, and comma-separated `models`. Keys are
+encrypted before storage; set `ZENAIPA_AI_KEY_SECRET` first (saving providers
+fails without it). Then chat with the agent in **AI 助手**:
+
+- Built-in skills (admin-only, LLM can call them):
+  `zenaipa.user.search`, `zenaipa.task.stats`, `zenaipa.audit.search`,
+  `zenaipa.tenant.list` (read-only) and `zenaipa.notify.send` (write — goes to
+  the **审批** queue; approving it performs the send)
+- Per-user sessions persist message history; a rolling 24h quota caps runs
+  (`ZENAIPA_AI_DAILY_RUN_LIMIT`)
+- **AI 管理 → 运行记录** lists every agent run; **AI 管理 → 工作流** runs the
+  read-only health-report workflow; `GET /api/v1/ai/metrics` exposes
+  Prometheus agent metrics
+
 ## 📡 API Overview
 
 Every endpoint returns the envelope `{ code, msg, data }`; `code === 0` means success.
@@ -239,6 +271,10 @@ Every endpoint returns the envelope `{ code, msg, data }`; `code === 0` means su
 | `GET/POST/DELETE` | `/api/v1/notifications` · `/notifications/{id}/read` · `/read-all` | Authenticated |
 | `GET/POST/PUT` | `/api/v1/tenants` · `/api/v1/tenants/{id}` | Admin |
 | `GET/PUT` | `/api/v1/email-templates` · `/api/v1/email-templates/{code}` | Admin |
+| `GET/POST/DELETE` | `/api/v1/ai/sessions` · `/ai/sessions/{id}/chat` · `/messages` | Authenticated (owner) |
+| `GET/POST/PUT/DELETE` | `/api/v1/ai/providers` | Admin |
+| `GET/POST` | `/api/v1/ai/approvals` · `/ai/approvals/{id}/approve` · `/reject` | Admin |
+| `GET/POST/GET` | `/api/v1/ai/runs` · `/ai/workflow/run` · `/ai/metrics` · `/ai/skills` | Admin |
 | `GET` | `/health/live` · `/api/v1/health/live` · `/api/v1/health/ready` · `/metrics` | Public |
 
 > **Multi-tenancy:** every API response includes `tenant_id` on user/file records;
@@ -262,7 +298,7 @@ src/
 ├── scheduled.zig          # Interval jobs executed by the dispatcher
 ├── middleware/            # auth helpers (JWT attrs), access log, metrics, security headers
 ├── services/              # Mailer (SMTP + console), cache
-└── modules/               # tenant, user, auth, task, file, notify, system, audit, mail_template
+└── modules/               # tenant, user, auth, task, file, notify, system, audit, mail_template, ai
 web/
 └── src/
     ├── api/               # Typed API clients (auth, user, task, file, notify, tenant, audit, system, mailTemplate)

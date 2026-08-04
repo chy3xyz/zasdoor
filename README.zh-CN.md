@@ -19,7 +19,7 @@ Zenaipa 是一个开箱即用的管理后台与内部平台脚手架：基于 **
 （[zigmodu](https://github.com/zigmodu) + [zent](https://github.com/zent)），搭配
 **SolidJS + TypeScript** 单页应用，从 `git clone` 到上线所需的组件一应俱全：
 认证、邮箱验证、后台任务、文件上传、通知、缓存，以及覆盖所有这些能力的后台界面
-——另有审计日志、平台概览与可配置的邮件模板。
+——另有审计日志、平台概览、可配置的邮件模板，以及完整的智能助手（Provider / 技能 / 聊天 / 审批 / 工作流）。
 
 ## ✨ 功能特性
 
@@ -54,6 +54,13 @@ Zenaipa 是一个开箱即用的管理后台与内部平台脚手架：基于 **
 - Prometheus 指标（`/metrics`）与每请求 `x-trace-id` 追踪
 - 白名单列表排序（`?sort=col&order=asc|desc`）与分页钳制
 - 安全响应头、CORS 白名单、脱敏访问日志
+
+### 智能助手
+- **Provider**：管理员维护 OpenAI 兼容端点；API 密钥加密存储（AES-256-GCM，主密钥 `ZENAIPA_AI_KEY_SECRET`）
+- **技能**：可供 LLM 调用的平台工具（用户搜索、任务统计、审计检索、租户列表，仅管理员），写技能（`notify.send`）走人工审批
+- **聊天**：按用户的会话与消息历史（`/api/v1/ai/sessions`）
+- **审批与配额**：写技能的人工审批队列；每用户滚动 24 小时调用上限
+- **工作流**：zigmodu.ai 编排（健康报告演示）+ 运行审计（`/api/v1/ai/runs`）+ Prometheus AI 指标
 
 ### 数据层
 - Schema-as-code 迁移，启动时自动执行
@@ -148,6 +155,8 @@ npm run dev
 | `ZENAIPA_CACHE_TTL_SECONDS` | `300` | 缓存 TTL |
 | `ZENAIPA_TASK_MAX_ATTEMPTS` | `3` | 后台任务最大重试次数 |
 | `ZENAIPA_TASK_RETRY_INTERVAL_SECONDS` | `60` | 重试退避间隔 |
+| `ZENAIPA_AI_KEY_SECRET` | _(空)_ | 加密 AI Provider 密钥的主密钥（保存 Provider 前必须设置） |
+| `ZENAIPA_AI_DAILY_RUN_LIMIT` | `100` | 每用户滚动 24 小时 Agent 调用上限 |
 
 ## 🛠️ 操作指南
 
@@ -208,6 +217,19 @@ npm run dev
 当某个 code 没有管理员模板时使用内置默认，因此开箱即用。模板内容入队前会经过
 JSON 序列化，你编辑中的引号/换行永远不会破坏邮件载荷。
 
+### 🤖 智能助手
+
+管理员在 **AI 管理 → Provider** 配置 Provider：OpenAI 兼容 `endpoint`、JSON 数组形式的
+`api_keys` 与逗号分隔的 `models`。密钥先加密再入库，需先设置 `ZENAIPA_AI_KEY_SECRET`
+（否则无法保存）。随后可在 **AI 助手** 中与 Agent 对话：
+
+- 内置技能（仅管理员，LLM 可调用）：`zenaipa.user.search`、`zenaipa.task.stats`、
+  `zenaipa.audit.search`、`zenaipa.tenant.list`（只读）与 `zenaipa.notify.send`
+  （写操作——进入**审批**队列，批准后才会真正发送）
+- 会话按用户持久化消息历史；滚动 24 小时配额限制调用次数（`ZENAIPA_AI_DAILY_RUN_LIMIT`）
+- **AI 管理 → 运行记录** 展示每次 Agent 运行；**AI 管理 → 工作流** 运行只读健康报告
+  工作流；`GET /api/v1/ai/metrics` 暴露 Prometheus Agent 指标
+
 ## 📡 API 概览
 
 所有端点返回信封 `{ code, msg, data }`；`code === 0` 表示成功。
@@ -227,6 +249,10 @@ JSON 序列化，你编辑中的引号/换行永远不会破坏邮件载荷。
 | `GET/POST/DELETE` | `/api/v1/notifications` · `/notifications/{id}/read` · `/read-all` | 已登录 |
 | `GET/POST/PUT` | `/api/v1/tenants` · `/api/v1/tenants/{id}` | 管理员 |
 | `GET/PUT` | `/api/v1/email-templates` · `/api/v1/email-templates/{code}` | 管理员 |
+| `GET/POST/DELETE` | `/api/v1/ai/sessions` · `/ai/sessions/{id}/chat` · `/messages` | 已登录（属主） |
+| `GET/POST/PUT/DELETE` | `/api/v1/ai/providers` | 管理员 |
+| `GET/POST` | `/api/v1/ai/approvals` · `/ai/approvals/{id}/approve` · `/reject` | 管理员 |
+| `GET/POST/GET` | `/api/v1/ai/runs` · `/ai/workflow/run` · `/ai/metrics` · `/ai/skills` | 管理员 |
 | `GET` | `/health/live` · `/api/v1/health/live` · `/api/v1/health/ready` · `/metrics` | 公开 |
 
 > **多租户：** 用户/文件记录的响应都包含 `tenant_id`；非管理员只能访问自己租户的行。
@@ -248,7 +274,7 @@ src/
 ├── scheduled.zig          # 调度器执行的定时任务
 ├── middleware/            # auth 辅助（JWT 属性）、访问日志、指标、安全响应头
 ├── services/              # Mailer（SMTP + 控制台）、缓存
-└── modules/               # tenant, user, auth, task, file, notify, system, audit, mail_template
+└── modules/               # tenant, user, auth, task, file, notify, system, audit, mail_template, ai
 web/
 └── src/
     ├── api/               # 类型化 API 客户端（auth, user, task, file, notify, tenant, audit, system, mailTemplate）

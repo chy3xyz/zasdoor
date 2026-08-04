@@ -13,6 +13,7 @@ const notify_model = @import("modules/notify/model.zig");
 const tenant_model = @import("modules/tenant/model.zig");
 const audit_model = @import("modules/audit/model.zig");
 const mail_template_model = @import("modules/mail_template/model.zig");
+const ai_model = @import("modules/ai/model.zig");
 
 // zent's `buildGraph` comptime edge-resolution has a per-call branch quota;
 // keeping the graph small avoids it, so the app schema and the standalone
@@ -28,6 +29,13 @@ const graph = zent.codegen.graph.buildGraph(&.{
     audit_model.AuditLog,
 });
 const template_graph = zent.codegen.graph.buildGraph(&.{mail_template_model.EmailTemplate});
+const ai_graph = zent.codegen.graph.buildGraph(&.{
+    ai_model.AiProvider,
+    ai_model.AiSession,
+    ai_model.AiMessage,
+    ai_model.AiApproval,
+    ai_model.AiRun,
+});
 
-pub const infos = graph.types ++ template_graph.types;
+pub const infos = graph.types ++ template_graph.types ++ ai_graph.types;
 pub const Client = zent.codegen.client.Client(infos);

@@ -44,6 +44,11 @@ pub const Config = struct {
     task_workers: usize = 2,
     task_max_attempts: i64 = 3,
     task_retry_interval_seconds: i64 = 60,
+    /// Master key used to encrypt AI provider API keys at rest
+    /// (ZENAIPA_AI_KEY_SECRET). Providers cannot be saved without it.
+    ai_key_secret: []const u8 = "",
+    /// Max agent runs per user per rolling 24h.
+    ai_daily_run_limit: i64 = 100,
 
     pub fn fromEnv(environ: *const std.process.Environ.Map) Config {
         var cfg: Config = .{};
@@ -71,6 +76,8 @@ pub const Config = struct {
         cfg.task_workers = parseIntUsize(environ.get("ZENAIPA_TASK_WORKERS") orelse "2", 2);
         cfg.task_max_attempts = parseInt64(environ.get("ZENAIPA_TASK_MAX_ATTEMPTS") orelse "3", 3);
         cfg.task_retry_interval_seconds = parseInt64(environ.get("ZENAIPA_TASK_RETRY_INTERVAL_SECONDS") orelse "60", 60);
+        cfg.ai_key_secret = environ.get("ZENAIPA_AI_KEY_SECRET") orelse "";
+        cfg.ai_daily_run_limit = parseInt64(environ.get("ZENAIPA_AI_DAILY_RUN_LIMIT") orelse "100", 100);
         return cfg;
     }
 };

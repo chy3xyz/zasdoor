@@ -14,5 +14,7 @@ export const ROUTE_PATH = {
   dashboard: '/dashboard',
   auditLogs: '/audit-logs',
   mailTemplates: '/mail-templates',
+  aiChat: '/ai/chat',
+  aiAdmin: '/ai/admin',
   notFound: '/404',
 } as const;

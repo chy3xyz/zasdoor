@@ -33,6 +33,7 @@ const system = @import("modules/system/root.zig");
 const tenant = @import("modules/tenant/root.zig");
 const audit = @import("modules/audit/root.zig");
 const mail_template = @import("modules/mail_template/root.zig");
+const ai = @import("modules/ai/root.zig");
 
 /// Shared state for scheduled housekeeping jobs (single background thread —
 /// zent's SQLite driver is a single connection).
@@ -76,6 +77,11 @@ pub fn main(init: std.process.Init) !void {
         notify.persistence.infos,
         audit.persistence.infos,
         mail_template.persistence.infos,
+        ai.persistence.provider_infos,
+        ai.persistence.session_infos,
+        ai.persistence.message_infos,
+        ai.persistence.approval_infos,
+        ai.persistence.run_infos,
     }).open(allocator, kind, dsn);
     defer store_env.deinit();
     std.log.info("[zent] migrated schema via {s} ({s})", .{ @tagName(kind), dsn });
@@ -126,6 +132,20 @@ pub fn main(init: std.process.Init) !void {
     var template_store = mail_template.persistence.TemplateStore.init(allocator, store_env.client);
     var template_svc = mail_template.service.MailTemplateService.init(allocator, io, &template_store);
 
+    var ai_store = ai.persistence.AiStore.init(allocator, store_env.client);
+    var ai_svc = try ai.service.AiService.init(allocator, io, &ai_store, .{
+        .key_secret = cfg.ai_key_secret,
+        .daily_run_limit = cfg.ai_daily_run_limit,
+    }, .{
+        .user_store = &store,
+        .task_store = &task_store,
+        .audit_store = &audit_store,
+        .tenant_store = &tenant_store,
+        .ai_store = &ai_store,
+        .notify_svc = &notify_svc,
+    });
+    defer ai_svc.deinit();
+
     // ── ZigModu module lifecycle (Application API: scan + validate + start/stop) ──
     var app = try zigmodu.Application.init(io, allocator, "zenaipa", .{
         tenant.module,
@@ -137,6 +157,7 @@ pub fn main(init: std.process.Init) !void {
         system.module,
         audit.module,
         mail_template.module,
+        ai.module,
     }, .{});
     defer app.deinit();
     try app.start();
@@ -194,6 +215,7 @@ pub fn main(init: std.process.Init) !void {
     var tenant_api = tenant.api.TenantApi(@TypeOf(tenant_svc), @TypeOf(user_svc)).init(&tenant_svc, &user_svc, &audit_svc);
     var audit_api = audit.api.AuditApi(@TypeOf(audit_svc), @TypeOf(user_svc)).init(&audit_svc, &user_svc);
     var mail_template_api = mail_template.api.MailTemplateApi(@TypeOf(template_svc), @TypeOf(user_svc)).init(&template_svc, &user_svc);
+    var ai_api = ai.api.AiApi(@TypeOf(ai_svc), @TypeOf(user_svc)).init(&ai_svc, &user_svc);
     var system_api = system.api.SystemApi(@TypeOf(cache), @TypeOf(task_svc)).init(
         &cache,
         &task_svc,
@@ -238,6 +260,7 @@ pub fn main(init: std.process.Init) !void {
     try tenant_api.registerRoutes(&v1);
     try audit_api.registerRoutes(&v1);
     try mail_template_api.registerRoutes(&v1);
+    try ai_api.registerRoutes(&v1);
     try system_api.registerRoutes(&v1);
 
     // Health: liveness at the server root (probe convention) and readiness

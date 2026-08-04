@@ -15,6 +15,7 @@ const notify = @import("modules/notify/root.zig");
 const tenant = @import("modules/tenant/root.zig");
 const audit = @import("modules/audit/root.zig");
 const mail_template = @import("modules/mail_template/root.zig");
+const ai = @import("modules/ai/root.zig");
 const cache_svc = @import("services/cache.zig");
 const mail = @import("services/mail.zig");
 
@@ -27,6 +28,11 @@ fn openMemory(allocator: std.mem.Allocator) !db_mod.StoreEnv(schema.infos, .{
     notify.persistence.infos,
     audit.persistence.infos,
     mail_template.persistence.infos,
+    ai.persistence.provider_infos,
+    ai.persistence.session_infos,
+    ai.persistence.message_infos,
+    ai.persistence.approval_infos,
+    ai.persistence.run_infos,
 }) {
     return db_mod.StoreEnv(schema.infos, .{
         tenant.persistence.infos,
@@ -36,6 +42,11 @@ fn openMemory(allocator: std.mem.Allocator) !db_mod.StoreEnv(schema.infos, .{
         notify.persistence.infos,
         audit.persistence.infos,
         mail_template.persistence.infos,
+        ai.persistence.provider_infos,
+        ai.persistence.session_infos,
+        ai.persistence.message_infos,
+        ai.persistence.approval_infos,
+        ai.persistence.run_infos,
     }).open(allocator, .sqlite, ":memory:");
 }
 
@@ -522,4 +533,132 @@ test "admin-only endpoints reject missing/non-admin tokens" {
     var anon_put = try zigmodu.http.Testkit.dispatch(&server, .PUT, "/api/v1/email-templates/verify_email", null);
     defer anon_put.deinit(allocator);
     try std.testing.expectEqual(@as(u16, 401), anon_put.status_code);
+}
+
+test "ai: provider key encryption round-trip + tamper detection" {
+    const allocator = std.testing.allocator;
+    var env = try openMemory(allocator);
+    defer env.deinit();
+    var ai_store = ai.persistence.AiStore.init(allocator, env.client);
+    var user_store = user.persistence.UserStore.init(allocator, env.client);
+    var task_store = task.persistence.TaskStore.init(allocator, env.client);
+    var audit_store = audit.persistence.AuditStore.init(allocator, env.client);
+    var tenant_store = tenant.persistence.TenantStore.init(allocator, env.client);
+    var notify_store = notify.persistence.NotificationStore.init(allocator, env.client);
+    var notify_svc = notify.service.NotificationService.init(allocator, std.testing.io, &notify_store);
+
+    const RefA = struct {
+        var user_store_ref: *user.persistence.UserStore = undefined;
+        var task_store_ref: *task.persistence.TaskStore = undefined;
+        var audit_store_ref: *audit.persistence.AuditStore = undefined;
+        var tenant_store_ref: *tenant.persistence.TenantStore = undefined;
+        var ai_store_ref: *ai.persistence.AiStore = undefined;
+        var notify_ref: *notify.service.NotificationService = undefined;
+    };
+    RefA.user_store_ref = &user_store;
+    RefA.task_store_ref = &task_store;
+    RefA.audit_store_ref = &audit_store;
+    RefA.tenant_store_ref = &tenant_store;
+    RefA.ai_store_ref = &ai_store;
+    RefA.notify_ref = &notify_svc;
+    const refs = ai.service.SkillsRefs{
+        .user_store = RefA.user_store_ref,
+        .task_store = RefA.task_store_ref,
+        .audit_store = RefA.audit_store_ref,
+        .tenant_store = RefA.tenant_store_ref,
+        .ai_store = RefA.ai_store_ref,
+        .notify_svc = RefA.notify_ref,
+    };
+
+    var svc = try ai.service.AiService.init(allocator, std.testing.io, &ai_store, .{ .key_secret = "master-secret" }, refs);
+    defer svc.deinit();
+
+    // 加密 → 解密 round-trip。
+    const enc = try svc.encryptKeys(allocator, "[\"sk-abc\"]");
+    defer allocator.free(enc);
+    const dec = try svc.decryptKeys(allocator, enc);
+    defer allocator.free(dec);
+    try std.testing.expectEqualStrings("[\"sk-abc\"]", dec);
+
+    // 错误主密钥 → 认证失败(防篡改/防错配)。
+    var svc2 = try ai.service.AiService.init(allocator, std.testing.io, &ai_store, .{ .key_secret = "wrong-secret" }, refs);
+    defer svc2.deinit();
+    try std.testing.expectError(error.AuthenticationFailed, svc2.decryptKeys(allocator, enc));
+
+    // 未配置主密钥 → MissingKeySecret。
+    var svc3 = try ai.service.AiService.init(allocator, std.testing.io, &ai_store, .{ .key_secret = "" }, refs);
+    defer svc3.deinit();
+    try std.testing.expectError(error.MissingKeySecret, svc3.encryptKeys(allocator, "x"));
+}
+
+test "ai: notify.send approval pending → approve executes, double-resolve rejected" {
+    const allocator = std.testing.allocator;
+    var env = try openMemory(allocator);
+    defer env.deinit();
+    var ai_store = ai.persistence.AiStore.init(allocator, env.client);
+    var user_store = user.persistence.UserStore.init(allocator, env.client);
+    var task_store = task.persistence.TaskStore.init(allocator, env.client);
+    var audit_store = audit.persistence.AuditStore.init(allocator, env.client);
+    var tenant_store = tenant.persistence.TenantStore.init(allocator, env.client);
+    var notify_store = notify.persistence.NotificationStore.init(allocator, env.client);
+    var notify_svc = notify.service.NotificationService.init(allocator, std.testing.io, &notify_store);
+    const refs = ai.service.SkillsRefs{
+        .user_store = &user_store,
+        .task_store = &task_store,
+        .audit_store = &audit_store,
+        .tenant_store = &tenant_store,
+        .ai_store = &ai_store,
+        .notify_svc = &notify_svc,
+    };
+    var svc = try ai.service.AiService.init(allocator, std.testing.io, &ai_store, .{ .key_secret = "master-secret" }, refs);
+    defer svc.deinit();
+
+    _ = try user_store.createUser("Alice", "a@x.com", "hash", false, false, 1, 100);
+    const approval_id = try ai_store.createApproval(1, 7, "zenaipa.notify.send", "{\"user_id\":1,\"title\":\"hi\",\"body\":\"hello\",\"kind\":\"info\"}", 100);
+    try std.testing.expectEqual(@as(i64, 0), try notify_svc.unreadCount(1));
+
+    // 批准 → 实际发送通知。
+    try std.testing.expect(try svc.approve(allocator, approval_id, 1, true));
+    try std.testing.expectEqual(@as(i64, 1), try notify_svc.unreadCount(1));
+
+    // 重复处理 → false。
+    try std.testing.expect(!try svc.approve(allocator, approval_id, 1, true));
+    const row = (try ai_store.getApproval(approval_id)).?;
+    defer row.free(allocator);
+    try std.testing.expectEqualStrings("approved", row.status);
+}
+
+test "ai: run quota counts within rolling window + health workflow" {
+    const allocator = std.testing.allocator;
+    var env = try openMemory(allocator);
+    defer env.deinit();
+    var ai_store = ai.persistence.AiStore.init(allocator, env.client);
+    var user_store = user.persistence.UserStore.init(allocator, env.client);
+    var task_store = task.persistence.TaskStore.init(allocator, env.client);
+    var audit_store = audit.persistence.AuditStore.init(allocator, env.client);
+    var tenant_store = tenant.persistence.TenantStore.init(allocator, env.client);
+    var notify_store = notify.persistence.NotificationStore.init(allocator, env.client);
+    var notify_svc = notify.service.NotificationService.init(allocator, std.testing.io, &notify_store);
+    const refs = ai.service.SkillsRefs{
+        .user_store = &user_store,
+        .task_store = &task_store,
+        .audit_store = &audit_store,
+        .tenant_store = &tenant_store,
+        .ai_store = &ai_store,
+        .notify_svc = &notify_svc,
+    };
+    var svc = try ai.service.AiService.init(allocator, std.testing.io, &ai_store, .{ .key_secret = "master-secret" }, refs);
+    defer svc.deinit();
+
+    _ = try ai_store.createRun(0, 7, 1, "chat", "hi", 0, 0, "ok", "", 100);
+    _ = try ai_store.createRun(0, 7, 1, "chat", "hi", 0, 0, "ok", "", 200);
+    _ = try ai_store.createRun(0, 8, 1, "chat", "hi", 0, 0, "ok", "", 300);
+    try std.testing.expectEqual(@as(i64, 2), try ai_store.runCountForUser(7, 50));
+
+    // 无 LLM 的健康工作流:两个只读技能按序执行。
+    var result = try svc.runHealthWorkflow(allocator, 1, 1);
+    defer result.deinit();
+    try std.testing.expectEqual(@as(usize, 2), result.steps.items.len);
+    try std.testing.expectEqualStrings("task_stats", result.steps.items[0].name);
+    try std.testing.expectEqualStrings("tenant_list", result.steps.items[1].name);
 }
