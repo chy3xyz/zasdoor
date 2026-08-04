@@ -38,7 +38,7 @@ pub fn NotificationApi(comptime Service: type, comptime UserService: type) type 
         }
 
         pub fn registerRoutes(self: *Self, group: *http.RouteGroup) !void {
-            var g = try group.use(mw.jwtAuth(self.user_svc.sec));
+            var g = try group.use(zigmodu.http.http_middleware.jwtAuthWithSecurity(&self.user_svc.sec.module));
             try g.get("/notifications/unread-count", unreadCount, @ptrCast(@alignCast(self)));
             try g.get("/notifications", list, @ptrCast(@alignCast(self)));
             try g.post("/notifications/read-all", markAllRead, @ptrCast(@alignCast(self)));
@@ -63,7 +63,7 @@ pub fn NotificationApi(comptime Service: type, comptime UserService: type) type 
                 try ctx.sendErrorResponse(500, 500, @errorName(err));
                 return;
             };
-            defer result.free(ctx.allocator);
+            defer result.free(self.svc.allocator);
 
             const dtos = try zigmodu.http.Extract.toDtoList(ctx.allocator, result.items, NotificationDto, toDto);
             try zigmodu.http.sendPaged(ctx, dtos, @intCast(result.total), params, .ruoyi);

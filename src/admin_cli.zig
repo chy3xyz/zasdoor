@@ -122,7 +122,7 @@ fn cmdCreateAdmin(io: std.Io, allocator: std.mem.Allocator, svc: *user.service.U
         try svc.setAdmin(existing.id, true);
         try svc.setVerified(existing.id, true);
         if (password != null) {
-            try svc.setPassword(allocator, existing.id, final_password);
+            try svc.setPassword(existing.id, final_password);
         }
         const line = try std.fmt.allocPrint(allocator, "admin promoted: {s} (id={d})\n", .{ existing.email, existing.id });
         defer allocator.free(line);

@@ -137,11 +137,38 @@ function MainLayout(props: { children?: JSX.Element }) {
         <nav class="flex-1 space-y-1 p-3">
           <Show when={auth.user?.admin}>
             <A
+              href={ROUTE_PATH.dashboard}
+              class="block rounded-lg px-3 py-2 text-sm hover:bg-base-300 [&.active]:bg-primary [&.active]:text-primary-content"
+              activeClass="active"
+            >
+              概览
+            </A>
+          </Show>
+          <Show when={auth.user?.admin}>
+            <A
               href={ROUTE_PATH.users}
               class="block rounded-lg px-3 py-2 text-sm hover:bg-base-300 [&.active]:bg-primary [&.active]:text-primary-content"
               activeClass="active"
             >
               用户管理
+            </A>
+          </Show>
+          <Show when={auth.user?.admin}>
+            <A
+              href={ROUTE_PATH.auditLogs}
+              class="block rounded-lg px-3 py-2 text-sm hover:bg-base-300 [&.active]:bg-primary [&.active]:text-primary-content"
+              activeClass="active"
+            >
+              审计日志
+            </A>
+          </Show>
+          <Show when={auth.user?.admin}>
+            <A
+              href={ROUTE_PATH.mailTemplates}
+              class="block rounded-lg px-3 py-2 text-sm hover:bg-base-300 [&.active]:bg-primary [&.active]:text-primary-content"
+              activeClass="active"
+            >
+              邮件模板
             </A>
           </Show>
           <Show when={auth.user?.admin}>

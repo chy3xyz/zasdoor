@@ -1,50 +1,21 @@
-//! JWT auth middleware + context helpers for zenaipa HTTP handlers.
+//! Auth helpers for zenaipa HTTP handlers.
+//!
+//! JWT verification uses zigmodu's built-in `jwtAuthWithSecurity` middleware
+//! (mounted per route group in the module `api.zig` files). The helpers here
+//! read the context attributes that middleware sets: `user_id` (JWT `sub`)
+//! and `tenant_id` (JWT `aud`).
 
 const std = @import("std");
-const zigmodu = @import("zigmodu");
-const http = zigmodu.http;
+const http = @import("zigmodu").http;
 
-pub const auth_user_id_attr = "auth_user_id";
+/// Context attribute names set by zigmodu's built-in JWT middleware
+/// (`verifyJwtLoadPermsAndNext` in `api/Middleware.zig`).
+pub const user_id_attr = "user_id";
 pub const tenant_id_attr = "tenant_id";
-
-/// Parses `Authorization: Bearer <token>`, verifies the JWT and stores the
-/// subject (user id) as a context attribute. Responds 401 on any failure.
-/// The security module is kept in module-scope storage because Zig inner
-/// functions cannot capture enclosing function parameters.
-pub fn jwtAuth(sec: *zigmodu.security.AppSecurity) http.Middleware {
-    const S = struct {
-        var stored: *zigmodu.security.AppSecurity = undefined;
-    };
-    S.stored = sec;
-    return .{ .func = struct {
-        fn mw(ctx: *http.Context, next: http.HandlerFn, _: ?*anyopaque) anyerror!void {
-            const header = ctx.header("Authorization") orelse "";
-            const token = zigmodu.security.SecurityModule.extractBearerToken(header) orelse {
-                try ctx.sendErrorResponse(401, 401, "未登录或登录已过期");
-                return;
-            };
-            const payload = S.stored.module.verifyToken(token) catch {
-                try ctx.sendErrorResponse(401, 401, "未登录或登录已过期");
-                return;
-            };
-            defer S.stored.module.freePayload(payload);
-            try ctx.setAttr(auth_user_id_attr, payload.sub);
-            // zenaipa puts the tenant id in the JWT `aud` claim (issued via
-            // generateTokenWithTenant). Legacy tokens without a numeric aud
-            // leave the attr unset; handlers fall back to the default tenant.
-            if (std.fmt.parseInt(i64, payload.aud, 10) catch null) |tid| {
-                var buf: [32]u8 = undefined;
-                const tid_str = try std.fmt.bufPrint(&buf, "{d}", .{tid});
-                try ctx.setAttr(tenant_id_attr, tid_str);
-            }
-            try next(ctx);
-        }
-    }.mw };
-}
 
 /// The authenticated user id, or null when the JWT middleware did not run.
 pub fn authUserId(ctx: *http.Context) ?i64 {
-    const id_str = ctx.getAttr(auth_user_id_attr) orelse return null;
+    const id_str = ctx.getAttr(user_id_attr) orelse return null;
     return std.fmt.parseInt(i64, id_str, 10) catch null;
 }
 

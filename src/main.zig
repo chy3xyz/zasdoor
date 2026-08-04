@@ -17,7 +17,6 @@ const zigmodu = @import("zigmodu");
 const config_mod = @import("config.zig");
 const db_mod = @import("db.zig");
 const schema = @import("schema.zig");
-const cors_mw = @import("middleware/cors.zig");
 const access_log_mod = @import("middleware/access_log.zig");
 const sec_headers = @import("middleware/security_headers.zig");
 const metrics_mod = @import("middleware/metrics.zig");
@@ -32,6 +31,8 @@ const file = @import("modules/file/root.zig");
 const notify = @import("modules/notify/root.zig");
 const system = @import("modules/system/root.zig");
 const tenant = @import("modules/tenant/root.zig");
+const audit = @import("modules/audit/root.zig");
+const mail_template = @import("modules/mail_template/root.zig");
 
 /// Shared state for scheduled housekeeping jobs (single background thread —
 /// zent's SQLite driver is a single connection).
@@ -73,6 +74,8 @@ pub fn main(init: std.process.Init) !void {
         task.persistence.infos,
         file.persistence.infos,
         notify.persistence.infos,
+        audit.persistence.infos,
+        mail_template.persistence.infos,
     }).open(allocator, kind, dsn);
     defer store_env.deinit();
     std.log.info("[zent] migrated schema via {s} ({s})", .{ @tagName(kind), dsn });
@@ -94,6 +97,7 @@ pub fn main(init: std.process.Init) !void {
         cfg.smtp_starttls,
         cfg.mail_console,
     );
+    defer mailer.deinit();
     var cache = cache_svc.CacheService.init(allocator, cfg.cache_max_entries, cfg.cache_ttl_seconds);
     defer cache.deinit();
 
@@ -116,8 +120,14 @@ pub fn main(init: std.process.Init) !void {
     const default_tenant_id = try tenant_svc.ensureDefault();
     std.log.info("[tenant] default tenant ready (id={d})", .{default_tenant_id});
 
-    // ── ZigModu module lifecycle ──
-    var modules = try zigmodu.scanModules(allocator, .{
+    var audit_store = audit.persistence.AuditStore.init(allocator, store_env.client);
+    var audit_svc = audit.service.AuditService.init(allocator, io, &audit_store);
+
+    var template_store = mail_template.persistence.TemplateStore.init(allocator, store_env.client);
+    var template_svc = mail_template.service.MailTemplateService.init(allocator, io, &template_store);
+
+    // ── ZigModu module lifecycle (Application API: scan + validate + start/stop) ──
+    var app = try zigmodu.Application.init(io, allocator, "zenaipa", .{
         tenant.module,
         user.module,
         auth.module,
@@ -125,12 +135,13 @@ pub fn main(init: std.process.Init) !void {
         file.module,
         notify.module,
         system.module,
-    });
-    defer modules.deinit();
-    try zigmodu.validateModules(&modules);
-    try zigmodu.startAll(&modules);
-    defer zigmodu.stopAll(&modules);
-    const module_count = modules.modules.count();
+        audit.module,
+        mail_template.module,
+    }, .{});
+    defer app.deinit();
+    try app.start();
+    defer app.stop();
+    const module_count = app.modules.modules.count();
 
     // ── Background: task dispatcher + scheduled housekeeping ──
     var cleanup_ctx = CleanupCtx{
@@ -175,16 +186,22 @@ pub fn main(init: std.process.Init) !void {
     var login_limiter = try zigmodu.RateLimiter.init(allocator, "auth-public", 20, 1);
     defer login_limiter.deinit();
 
-    var user_api = user.api.UserApi(@TypeOf(user_svc)).init(&user_svc, default_tenant_id);
-    var auth_api = auth.api.AuthApi(@TypeOf(user_svc)).init(&user_svc, cfg.app_host, &login_limiter, &mailer, &task_svc, &notify_svc, default_tenant_id);
-    var task_api = task.api.TaskApi(@TypeOf(task_svc), @TypeOf(user_svc)).init(&task_svc, &user_svc);
-    var file_api = file.api.FileApi(@TypeOf(file_svc), @TypeOf(user_svc)).init(&file_svc, &user_svc, default_tenant_id);
+    var user_api = user.api.UserApi(@TypeOf(user_svc)).init(&user_svc, default_tenant_id, &audit_svc);
+    var auth_api = auth.api.AuthApi(@TypeOf(user_svc)).init(&user_svc, cfg.app_host, &login_limiter, &mailer, &task_svc, &notify_svc, &audit_svc, &template_svc, default_tenant_id);
+    var task_api = task.api.TaskApi(@TypeOf(task_svc), @TypeOf(user_svc)).init(&task_svc, &user_svc, &audit_svc);
+    var file_api = file.api.FileApi(@TypeOf(file_svc), @TypeOf(user_svc)).init(&file_svc, &user_svc, &audit_svc, default_tenant_id);
     var notify_api = notify.api.NotificationApi(@TypeOf(notify_svc), @TypeOf(user_svc)).init(&notify_svc, &user_svc);
-    var tenant_api = tenant.api.TenantApi(@TypeOf(tenant_svc), @TypeOf(user_svc)).init(&tenant_svc, &user_svc);
+    var tenant_api = tenant.api.TenantApi(@TypeOf(tenant_svc), @TypeOf(user_svc)).init(&tenant_svc, &user_svc, &audit_svc);
+    var audit_api = audit.api.AuditApi(@TypeOf(audit_svc), @TypeOf(user_svc)).init(&audit_svc, &user_svc);
+    var mail_template_api = mail_template.api.MailTemplateApi(@TypeOf(template_svc), @TypeOf(user_svc)).init(&template_svc, &user_svc);
     var system_api = system.api.SystemApi(@TypeOf(cache), @TypeOf(task_svc)).init(
         &cache,
         &task_svc,
         &user_svc,
+        &store,
+        &file_store,
+        &notify_store,
+        &tenant_store,
         io,
         zigmodu.time.wallClockSeconds(io),
         @tagName(kind),
@@ -206,11 +223,11 @@ pub fn main(init: std.process.Init) !void {
     var access_log = access_log_mod.AccessLog.init(allocator, 4096);
     defer access_log.deinit();
     var metrics = metrics_mod.Metrics.init(io);
-    try server.addMiddleware(zigmodu.http.tracing_middleware.tracing());
+    try server.addMiddleware(zigmodu.http.tracingMiddleware());
     try server.addMiddleware(metrics.middleware());
     try server.addMiddleware(sec_headers.securityHeaders());
     try server.addMiddleware(access_log.middleware());
-    try server.addMiddleware(cors_mw.cors(origins));
+    try server.addMiddleware(zigmodu.http.http_middleware.cors(.{ .allow_origins = origins }));
 
     var v1 = server.group("/api/v1");
     try auth_api.registerRoutes(&v1);
@@ -219,6 +236,8 @@ pub fn main(init: std.process.Init) !void {
     try file_api.registerRoutes(&v1);
     try notify_api.registerRoutes(&v1);
     try tenant_api.registerRoutes(&v1);
+    try audit_api.registerRoutes(&v1);
+    try mail_template_api.registerRoutes(&v1);
     try system_api.registerRoutes(&v1);
 
     // Health: liveness at the server root (probe convention) and readiness

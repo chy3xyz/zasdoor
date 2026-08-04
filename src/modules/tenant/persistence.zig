@@ -110,4 +110,10 @@ pub const TenantStore = struct {
         _ = try upd.Save();
         return true;
     }
+    /// Total tenant count (dashboard stats).
+    pub fn countAll(self: *TenantStore) !i64 {
+        var q = self.client.tenant.Query();
+        defer q.deinit();
+        return @intCast(try q.Count());
+    }
 };

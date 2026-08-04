@@ -6,6 +6,7 @@ const zigmodu = @import("zigmodu");
 const http = zigmodu.http;
 const mw = @import("../../middleware/auth.zig");
 const user_svc = @import("../user/service.zig");
+const audit_svc = @import("../audit/service.zig");
 const service = @import("service.zig");
 
 const FileDto = struct {
@@ -35,14 +36,15 @@ pub fn FileApi(comptime Service: type, comptime UserService: type) type {
         const Self = @This();
         svc: *Service,
         user_svc: *UserService,
+        audit: *audit_svc.AuditService,
         default_tenant_id: i64,
 
-        pub fn init(svc: *Service, users: *UserService, default_tenant_id: i64) Self {
-            return .{ .svc = svc, .user_svc = users, .default_tenant_id = default_tenant_id };
+        pub fn init(svc: *Service, users: *UserService, audit: *audit_svc.AuditService, default_tenant_id: i64) Self {
+            return .{ .svc = svc, .user_svc = users, .audit = audit, .default_tenant_id = default_tenant_id };
         }
 
         pub fn registerRoutes(self: *Self, group: *http.RouteGroup) !void {
-            var g = try group.use(mw.jwtAuth(self.user_svc.sec));
+            var g = try group.use(zigmodu.http.http_middleware.jwtAuthWithSecurity(&self.user_svc.sec.module));
             try g.post("/files", upload, @ptrCast(@alignCast(self)));
             try g.get("/files", list, @ptrCast(@alignCast(self)));
             try g.get("/files/{id}", download, @ptrCast(@alignCast(self)));
@@ -62,7 +64,8 @@ pub fn FileApi(comptime Service: type, comptime UserService: type) type {
                 try ctx.sendErrorResponse(401, 401, "未登录或登录已过期");
                 return null;
             };
-            defer row.free(ctx.allocator);
+            defer row.free(self.svc.allocator);
+            try ctx.setAttr("audit_actor", row.name);
             return .{ .id = uid, .admin = row.admin };
         }
 
@@ -88,7 +91,7 @@ pub fn FileApi(comptime Service: type, comptime UserService: type) type {
                     return;
                 },
             };
-            defer row.free(ctx.allocator);
+            defer row.free(self.svc.allocator);
             try ctx.jsonStruct(201, .{ .code = 0, .msg = "上传成功", .data = toDto(row) });
         }
 
@@ -114,7 +117,7 @@ pub fn FileApi(comptime Service: type, comptime UserService: type) type {
                 try ctx.sendErrorResponse(500, 500, @errorName(err));
                 return;
             };
-            defer result.free(ctx.allocator);
+            defer result.free(self.svc.allocator);
 
             const dtos = try zigmodu.http.Extract.toDtoList(ctx.allocator, result.items, FileDto, toDto);
             try zigmodu.http.sendPaged(ctx, dtos, @intCast(result.total), params, .ruoyi);
@@ -136,7 +139,7 @@ pub fn FileApi(comptime Service: type, comptime UserService: type) type {
                 try ctx.sendErrorResponse(404, 404, "文件不存在");
                 return;
             };
-            defer loaded.free(ctx.allocator);
+            defer loaded.free(self.svc.allocator);
 
             const current_tenant = mw.authTenantId(ctx) orelse self.default_tenant_id;
             if (!actor.admin and (loaded.row.uploader_id != actor.id or loaded.row.tenant_id != current_tenant)) {
@@ -167,7 +170,7 @@ pub fn FileApi(comptime Service: type, comptime UserService: type) type {
                 try ctx.sendErrorResponse(404, 404, "文件不存在");
                 return;
             };
-            defer row.free(ctx.allocator);
+            defer row.free(self.svc.allocator);
             const current_tenant = mw.authTenantId(ctx) orelse self.default_tenant_id;
             if (!actor.admin and (row.uploader_id != actor.id or row.tenant_id != current_tenant)) {
                 try ctx.sendErrorResponse(403, 403, "无权删除该文件");
@@ -177,6 +180,9 @@ pub fn FileApi(comptime Service: type, comptime UserService: type) type {
                 try ctx.sendErrorResponse(500, 500, @errorName(err));
                 return;
             };
+            var d5: [96]u8 = undefined;
+            const det5 = try std.fmt.bufPrint(&d5, "删除文件 #{d}", .{id});
+            self.audit.log(actor.id, ctx.getAttr("audit_actor") orelse "", "file.delete", "file", id, det5, zigmodu.http.RequestUtil.getRealIp(ctx), true, row.tenant_id);
             try ctx.jsonStruct(200, .{ .code = 0, .msg = "ok", .data = null });
         }
     };

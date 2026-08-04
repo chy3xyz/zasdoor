@@ -367,4 +367,20 @@ pub const UserStore = struct {
         _ = try d.Exec();
         return 0;
     }
+    /// Total user count (dashboard stats).
+    pub fn countAll(self: *UserStore) !i64 {
+        var q = self.client.user.Query();
+        defer q.deinit();
+        return @intCast(try q.Count());
+    }
+
+    /// Users registered in [start, end) — dashboard daily trend buckets.
+    pub fn countRegisteredBetween(self: *UserStore, start: i64, end: i64) !i64 {
+        const preds = self.client.user.predicates;
+        var q = self.client.user.Query();
+        defer q.deinit();
+        _ = try q.Where(.{preds.created_atGTE(.{ .int = start })});
+        _ = try q.Where(.{preds.created_atLT(.{ .int = end })});
+        return @intCast(try q.Count());
+    }
 };

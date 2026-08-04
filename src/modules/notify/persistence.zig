@@ -155,4 +155,10 @@ pub const NotificationStore = struct {
         _ = try d.Exec();
         return 0;
     }
+    /// Total notification count (dashboard stats).
+    pub fn countAll(self: *NotificationStore) !i64 {
+        var q = self.client.notification.Query();
+        defer q.deinit();
+        return @intCast(try q.Count());
+    }
 };

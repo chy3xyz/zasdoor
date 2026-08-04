@@ -7,7 +7,7 @@ const task_svc = @import("modules/task/service.zig");
 /// `mail.send` — payload is JSON: {"to": "...", "subject": "...", "text": "..."}.
 pub fn mailSend(ctx: ?*anyopaque, allocator: std.mem.Allocator, io: std.Io, payload: []const u8) void {
     _ = io;
-    const mailer: *const mail.Mailer = @ptrCast(@alignCast(ctx orelse return));
+    const mailer: *mail.Mailer = @ptrCast(@alignCast(ctx orelse return));
     const parsed = std.json.parseFromSlice(std.json.Value, allocator, payload, .{}) catch return;
     defer parsed.deinit();
     const obj = parsed.value.object;

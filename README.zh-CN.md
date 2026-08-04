@@ -43,6 +43,9 @@ Zenaipa 是一个开箱即用的管理后台与内部平台脚手架：基于 **
 - 注册通过 `X-Tenant-ID` 请求头绑定租户（缺省落到默认租户，单租户部署零改动）
 
 ### 管理与运维
+- **概览面板** — 平台实时统计：用户（含近 7 天注册趋势）、任务队列、文件、通知、租户、缓存
+- **审计日志** — 谁在何时做了什么：登录/注册、用户/任务/租户/文件操作全记录，支持筛选
+- **邮件模板** — 可配置的验证与重置邮件（变量渲染，未配置时回退内置默认）
 - 用户管理：CRUD、分页、关键词搜索、自我保护（不可删除/降级自己）
 - 任务中心：实时队列统计，失败任务可重试 / 取消 / 清理
 - 运行时诊断接口（`/api/v1/system/info`）
@@ -156,11 +159,13 @@ npm run dev
 | `POST` | `/api/v1/auth/send-verification` | 登录 |
 | `PUT` | `/api/v1/auth/profile` · `/api/v1/auth/password` | 登录 |
 | `GET/POST/PUT/DELETE` | `/api/v1/users` · `/api/v1/users/{id}` | 管理员 |
+| `GET` | `/api/v1/audit-logs` | 管理员 |
 | `GET/POST` | `/api/v1/tasks` · `/tasks/{id}/retry` · `/tasks/{id}/cancel` · `/tasks/purge` | 管理员 |
-| `GET` | `/api/v1/tasks/stats` · `/api/v1/system/info` | 管理员 |
+| `GET` | `/api/v1/tasks/stats` · `/api/v1/system/info` · `/api/v1/system/dashboard` | 管理员 |
 | `POST/GET/DELETE` | `/api/v1/files` · `/api/v1/files/{id}` | 登录（本人或管理员） |
 | `GET/POST/DELETE` | `/api/v1/notifications` · `/notifications/{id}/read` · `/read-all` | 登录 |
 | `GET/POST/PUT` | `/api/v1/tenants` · `/api/v1/tenants/{id}` | 管理员 |
+| `GET/PUT` | `/api/v1/email-templates` · `/api/v1/email-templates/{code}` | 管理员 |
 | `GET` | `/health/live` · `/api/v1/health/live` · `/api/v1/health/ready` · `/metrics` | 公开 |
 
 > **多租户**：用户/文件等记录会返回 `tenant_id`；普通用户只能访问本租户数据，

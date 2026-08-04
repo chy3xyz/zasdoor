@@ -11,5 +11,8 @@ export const ROUTE_PATH = {
   tasks: '/tasks',
   files: '/files',
   tenants: '/tenants',
+  dashboard: '/dashboard',
+  auditLogs: '/audit-logs',
+  mailTemplates: '/mail-templates',
   notFound: '/404',
 } as const;

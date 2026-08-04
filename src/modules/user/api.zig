@@ -6,6 +6,7 @@ const zigmodu = @import("zigmodu");
 const http = zigmodu.http;
 const mw = @import("../../middleware/auth.zig");
 const service = @import("service.zig");
+const audit_svc = @import("../audit/service.zig");
 
 const UserRow = service.UserRow;
 
@@ -53,13 +54,14 @@ pub fn UserApi(comptime Service: type) type {
         const Self = @This();
         svc: *Service,
         default_tenant_id: i64,
+        audit: *audit_svc.AuditService,
 
-        pub fn init(svc: *Service, default_tenant_id: i64) Self {
-            return .{ .svc = svc, .default_tenant_id = default_tenant_id };
+        pub fn init(svc: *Service, default_tenant_id: i64, audit: *audit_svc.AuditService) Self {
+            return .{ .svc = svc, .default_tenant_id = default_tenant_id, .audit = audit };
         }
 
         pub fn registerRoutes(self: *Self, group: *http.RouteGroup) !void {
-            var g = try group.use(mw.jwtAuth(self.svc.sec));
+            var g = try group.use(zigmodu.http.http_middleware.jwtAuthWithSecurity(&self.svc.sec.module));
             try g.get("/users", listUsers, @ptrCast(@alignCast(self)));
             try g.get("/users/{id}", getUser, @ptrCast(@alignCast(self)));
             try g.post("/users", createUser, @ptrCast(@alignCast(self)));
@@ -81,18 +83,18 @@ pub fn UserApi(comptime Service: type) type {
                 try ctx.sendErrorResponse(401, 401, "未登录或登录已过期");
                 return null;
             };
-            defer row.free(ctx.allocator);
+            defer row.free(self.svc.store.allocator);
             if (!row.admin) {
                 try ctx.sendErrorResponse(403, 403, "需要管理员权限");
                 return null;
             }
+            try ctx.setAttr("audit_actor", row.name);
             return uid;
         }
 
         fn listUsers(ctx: *http.Context) !void {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
-            const admin_id = (try requireAdmin(ctx, self)) orelse return;
-            _ = admin_id;
+            _ = (try requireAdmin(ctx, self)) orelse return;
 
             const params = zigmodu.http.PageParams.parse(ctx, .{ .max_page_size = 100 });
             const keyword_raw = ctx.queryParam("keyword");
@@ -102,19 +104,9 @@ pub fn UserApi(comptime Service: type) type {
             const sort_col: ?[]const u8 = if (sort) |s| s.column else null;
             const sort_desc = if (sort) |s| s.desc else false;
 
-            // zigmodu does not percent-decode query values; decode for
-            // non-ASCII (e.g. CJK) searches.
-            var keyword_decoded: ?[]u8 = null;
-            defer if (keyword_decoded) |d| ctx.allocator.free(d);
-            if (keyword_raw) |kw| {
-                if (kw.len > 0) {
-                    if (ctx.allocator.dupe(u8, kw)) |buf| {
-                        keyword_decoded = std.Uri.percentDecodeInPlace(buf);
-                    } else |_| {}
-                }
-            }
-
-            var result = self.svc.listUsers(params.page, params.page_size, keyword_decoded, tenant_filter, sort_col, sort_desc) catch |err| {
+            // zigmodu percent-decodes query values at parse time, so the
+            // keyword arrives already decoded (CJK searches included).
+            var result = self.svc.listUsers(params.page, params.page_size, keyword_raw, tenant_filter, sort_col, sort_desc) catch |err| {
                 try ctx.sendErrorResponse(500, 500, @errorName(err));
                 return;
             };
@@ -126,8 +118,7 @@ pub fn UserApi(comptime Service: type) type {
 
         fn getUser(ctx: *http.Context) !void {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
-            const admin_id = (try requireAdmin(ctx, self)) orelse return;
-            _ = admin_id;
+            _ = (try requireAdmin(ctx, self)) orelse return;
 
             const id = ctx.paramInt(i64, "id") catch {
                 try ctx.sendErrorResponse(400, 400, "无效的用户 ID");
@@ -141,14 +132,13 @@ pub fn UserApi(comptime Service: type) type {
                 try ctx.sendErrorResponse(404, 404, "用户不存在");
                 return;
             };
-            defer row.free(ctx.allocator);
+            defer row.free(self.svc.store.allocator);
             try ctx.jsonStruct(200, .{ .code = 0, .msg = "", .data = toDto(row) });
         }
 
         fn createUser(ctx: *http.Context) !void {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
             const admin_id = (try requireAdmin(ctx, self)) orelse return;
-            _ = admin_id;
 
             const req = ctx.bindJson(CreateUserReq) catch {
                 try ctx.sendErrorResponse(400, 400, "请求体格式错误");
@@ -164,7 +154,11 @@ pub fn UserApi(comptime Service: type) type {
                 try sendCreateError(ctx, err);
                 return;
             };
-            defer session.deinit(ctx.allocator);
+            defer session.deinit(self.svc.store.allocator);
+
+            var detail_buf: [160]u8 = undefined;
+            const detail = try std.fmt.bufPrint(&detail_buf, "创建用户 {s} ({s})", .{ req.name, req.email });
+            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "user.create", "user", session.row.id, detail, zigmodu.http.RequestUtil.getRealIp(ctx), true, tenant_id);
 
             try ctx.jsonStruct(201, .{
                 .code = 0,
@@ -217,7 +211,7 @@ pub fn UserApi(comptime Service: type) type {
                     try ctx.sendErrorResponse(404, 404, "用户不存在");
                     return;
                 };
-                defer cur.free(ctx.allocator);
+                defer cur.free(self.svc.store.allocator);
 
                 if (req.email) |new_email| {
                     const taken = self.svc.emailTakenByOther(ctx.allocator, id, new_email) catch {
@@ -247,6 +241,9 @@ pub fn UserApi(comptime Service: type) type {
                     return;
                 };
             }
+            var detail_buf: [160]u8 = undefined;
+            const detail = try std.fmt.bufPrint(&detail_buf, "更新用户 #{d}", .{id});
+            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "user.update", "user", id, detail, zigmodu.http.RequestUtil.getRealIp(ctx), true, 0);
             try ctx.jsonStruct(200, .{ .code = 0, .msg = "ok", .data = null });
         }
 
@@ -266,6 +263,9 @@ pub fn UserApi(comptime Service: type) type {
                 try ctx.sendErrorResponse(500, 500, @errorName(err));
                 return;
             };
+            var detail_buf: [160]u8 = undefined;
+            const detail = try std.fmt.bufPrint(&detail_buf, "删除用户 #{d}", .{id});
+            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "user.delete", "user", id, detail, zigmodu.http.RequestUtil.getRealIp(ctx), true, 0);
             try ctx.jsonStruct(200, .{ .code = 0, .msg = "ok", .data = null });
         }
 

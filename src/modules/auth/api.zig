@@ -7,11 +7,12 @@ const std = @import("std");
 const zigmodu = @import("zigmodu");
 const http = zigmodu.http;
 const mw = @import("../../middleware/auth.zig");
-const rl = @import("../../middleware/rate_limit.zig");
 const user_service = @import("../user/service.zig");
 const task_service = @import("../task/service.zig");
 const notify_service = @import("../notify/service.zig");
 const mail = @import("../../services/mail.zig");
+const audit_svc = @import("../audit/service.zig");
+const mail_template_svc = @import("../mail_template/service.zig");
 
 const RegisterReq = struct {
     name: []const u8,
@@ -84,6 +85,8 @@ pub fn AuthApi(comptime Service: type) type {
         mailer: *const mail.Mailer,
         task_svc: *task_service.TaskService,
         notify_svc: *notify_service.NotificationService,
+        audit: *audit_svc.AuditService,
+        templates: *mail_template_svc.MailTemplateService,
         default_tenant_id: i64,
 
         pub fn init(
@@ -93,6 +96,8 @@ pub fn AuthApi(comptime Service: type) type {
             mailer: *const mail.Mailer,
             task_svc: *task_service.TaskService,
             notify_svc: *notify_service.NotificationService,
+            audit: *audit_svc.AuditService,
+            templates: *mail_template_svc.MailTemplateService,
             default_tenant_id: i64,
         ) Self {
             return .{
@@ -102,6 +107,8 @@ pub fn AuthApi(comptime Service: type) type {
                 .mailer = mailer,
                 .task_svc = task_svc,
                 .notify_svc = notify_svc,
+                .audit = audit,
+                .templates = templates,
                 .default_tenant_id = default_tenant_id,
             };
         }
@@ -109,7 +116,7 @@ pub fn AuthApi(comptime Service: type) type {
         pub fn registerRoutes(self: *Self, group: *http.RouteGroup) !void {
             // Public routes are rate-limited to blunt credential stuffing /
             // reset-token brute force.
-            var limited = try group.use(rl.rateLimit(self.limiter));
+            var limited = try group.use(zigmodu.http.rateLimitMiddleware(self.limiter));
             try limited.post("/auth/register", register, @ptrCast(@alignCast(self)));
             try limited.post("/auth/login", login, @ptrCast(@alignCast(self)));
             try limited.post("/auth/logout", logout, @ptrCast(@alignCast(self)));
@@ -117,7 +124,7 @@ pub fn AuthApi(comptime Service: type) type {
             try limited.post("/auth/reset-password", resetPassword, @ptrCast(@alignCast(self)));
             try limited.post("/auth/verify-email", verifyEmail, @ptrCast(@alignCast(self)));
 
-            var g = try group.use(mw.jwtAuth(self.svc.sec));
+            var g = try group.use(zigmodu.http.http_middleware.jwtAuthWithSecurity(&self.svc.sec.module));
             try g.get("/auth/me", me, @ptrCast(@alignCast(self)));
             try g.post("/auth/send-verification", sendVerification, @ptrCast(@alignCast(self)));
             try g.put("/auth/profile", updateProfile, @ptrCast(@alignCast(self)));
@@ -157,10 +164,13 @@ pub fn AuthApi(comptime Service: type) type {
                     return;
                 },
             };
-            defer session.deinit(ctx.allocator);
+            defer session.deinit(self.svc.store.allocator);
             // Email verification is a background courtesy: never block the
             // registration response on mail delivery.
             if (!session.row.verified) self.sendVerificationMail(ctx, session.row.id);
+            var d1: [128]u8 = undefined;
+            const det1 = try std.fmt.bufPrint(&d1, "注册账号 {s}", .{req.email});
+            self.audit.log(session.row.id, session.row.name, "auth.register", "user", session.row.id, det1, zigmodu.http.RequestUtil.getRealIp(ctx), true, tenant_id);
             try ctx.jsonStruct(201, .{
                 .code = 0,
                 .msg = "注册成功",
@@ -182,15 +192,24 @@ pub fn AuthApi(comptime Service: type) type {
 
             const session_opt = self.svc.login(ctx.allocator, req.email, req.password) catch |err| switch (err) {
                 error.InvalidCredentials => {
+                    var d2: [160]u8 = undefined;
+                    const det2 = try std.fmt.bufPrint(&d2, "登录失败: {s}", .{req.email});
+                    self.audit.log(0, "", "auth.login.fail", "user", 0, det2, zigmodu.http.RequestUtil.getRealIp(ctx), false, 0);
                     try ctx.sendErrorResponse(401, 401, "邮箱或密码错误");
                     return;
                 },
             };
             const session = session_opt orelse {
+                var d3: [160]u8 = undefined;
+                const det3 = try std.fmt.bufPrint(&d3, "登录失败: {s}", .{req.email});
+                self.audit.log(0, "", "auth.login.fail", "user", 0, det3, zigmodu.http.RequestUtil.getRealIp(ctx), false, 0);
                 try ctx.sendErrorResponse(401, 401, "邮箱或密码错误");
                 return;
             };
-            defer session.deinit(ctx.allocator);
+            defer session.deinit(self.svc.store.allocator);
+            var d4: [128]u8 = undefined;
+            const det4 = try std.fmt.bufPrint(&d4, "登录成功: {s}", .{req.email});
+            self.audit.log(session.row.id, session.row.name, "auth.login", "user", session.row.id, det4, zigmodu.http.RequestUtil.getRealIp(ctx), true, session.row.tenant_id);
             try ctx.jsonStruct(200, .{
                 .code = 0,
                 .msg = "登录成功",
@@ -222,7 +241,7 @@ pub fn AuthApi(comptime Service: type) type {
                 try ctx.sendErrorResponse(401, 401, "用户不存在");
                 return;
             };
-            defer row.free(ctx.allocator);
+            defer row.free(self.svc.store.allocator);
             try ctx.jsonStruct(200, .{ .code = 0, .msg = "", .data = toDto(row) });
         }
 
@@ -242,7 +261,9 @@ pub fn AuthApi(comptime Service: type) type {
                 defer ctx.allocator.free(raw.raw);
                 var link_buf: [1024]u8 = undefined;
                 const link = std.fmt.bufPrint(&link_buf, "{s}/reset-password?user_id={d}&token={s}", .{ self.app_host, raw.user_id, raw.raw }) catch return;
-                const payload = jsonPayload(ctx.allocator, req.email, "重置你的 zenaipa 密码", link) catch return;
+                const rendered = (try self.templates.render("reset_password", .{ .link = link, .email = req.email })) orelse return;
+                defer rendered.free(self.svc.store.allocator);
+                const payload = jsonPayload(ctx.allocator, req.email, rendered.subject, rendered.body) catch return;
                 defer ctx.allocator.free(payload);
                 _ = self.task_svc.enqueue("mail.send", payload, 0, self.default_tenant_id) catch {};
             }
@@ -259,7 +280,7 @@ pub fn AuthApi(comptime Service: type) type {
             defer ctx.allocator.free(req.token);
             defer ctx.allocator.free(req.new_password);
 
-            self.svc.resetPassword(ctx.allocator, req.user_id, req.token, req.new_password) catch |err| switch (err) {
+            self.svc.resetPassword(req.user_id, req.token, req.new_password) catch |err| switch (err) {
                 error.InvalidPassword => {
                     try ctx.sendErrorResponse(400, 400, "密码至少 8 位");
                     return;
@@ -295,7 +316,7 @@ pub fn AuthApi(comptime Service: type) type {
             };
             defer ctx.allocator.free(req.token);
 
-            self.svc.verifyEmail(ctx.allocator, req.user_id, req.token) catch |err| switch (err) {
+            self.svc.verifyEmail(req.user_id, req.token) catch |err| switch (err) {
                 error.InvalidToken => {
                     try ctx.sendErrorResponse(400, 400, "验证链接无效");
                     return;
@@ -334,7 +355,7 @@ pub fn AuthApi(comptime Service: type) type {
                 try ctx.sendErrorResponse(401, 401, "用户不存在");
                 return;
             };
-            defer cur.free(ctx.allocator);
+            defer cur.free(self.svc.store.allocator);
 
             if (req.email) |new_email| {
                 const taken = self.svc.emailTakenByOther(ctx.allocator, uid, new_email) catch {
@@ -369,7 +390,7 @@ pub fn AuthApi(comptime Service: type) type {
                 try ctx.sendErrorResponse(500, 500, "服务器错误");
                 return;
             };
-            defer fresh.free(ctx.allocator);
+            defer fresh.free(self.svc.store.allocator);
             try ctx.jsonStruct(200, .{ .code = 0, .msg = "ok", .data = toDto(fresh) });
         }
 
@@ -387,7 +408,7 @@ pub fn AuthApi(comptime Service: type) type {
             defer ctx.allocator.free(req.old_password);
             defer ctx.allocator.free(req.new_password);
 
-            self.svc.changePassword(ctx.allocator, uid, req.old_password, req.new_password) catch |err| switch (err) {
+            self.svc.changePassword(uid, req.old_password, req.new_password) catch |err| switch (err) {
                 error.InvalidCredentials => {
                     try ctx.sendErrorResponse(400, 400, "当前密码不正确");
                     return;
@@ -410,11 +431,13 @@ pub fn AuthApi(comptime Service: type) type {
 
             const row_opt = self.svc.getUserById(user_id) catch return;
             const row = row_opt orelse return;
-            defer row.free(ctx.allocator);
+            defer row.free(self.svc.store.allocator);
 
             var link_buf: [1024]u8 = undefined;
             const link = std.fmt.bufPrint(&link_buf, "{s}/verify-email?user_id={d}&token={s}", .{ self.app_host, user_id, raw.raw }) catch return;
-            const payload = jsonPayload(ctx.allocator, row.email, "验证你的 zenaipa 邮箱", link) catch return;
+            const rendered = (self.templates.render("verify_email", .{ .link = link, .email = row.email }) catch return) orelse return;
+            defer rendered.free(self.svc.store.allocator);
+            const payload = jsonPayload(ctx.allocator, row.email, rendered.subject, rendered.body) catch return;
             defer ctx.allocator.free(payload);
             _ = self.task_svc.enqueue("mail.send", payload, 0, row.tenant_id) catch {};
             _ = self.notify_svc.notify(user_id, "验证邮件已发送", "请查收邮件并点击验证链接。", "info") catch {};
@@ -427,10 +450,11 @@ fn parseTenantHeader(ctx: *http.Context) ?i64 {
     return std.fmt.parseInt(i64, raw, 10) catch null;
 }
 
-/// Build the JSON payload the `mail.send` task handler expects. Values are
-/// escaped minimally (our inputs are emails/fixed subjects — no quotes).
+/// Build the JSON payload the `mail.send` task handler expects. Subjects and
+/// bodies come from admin-editable templates, so values are JSON-serialized
+/// (quotes/newlines in template content must not break the payload).
 fn jsonPayload(allocator: std.mem.Allocator, to: []const u8, subject: []const u8, text: []const u8) ![]const u8 {
-    return std.fmt.allocPrint(allocator, "{{\"to\":\"{s}\",\"subject\":\"{s}\",\"text\":\"{s}\"}}", .{ to, subject, text });
+    return try std.fmt.allocPrint(allocator, "{f}", .{std.json.fmt(.{ .to = to, .subject = subject, .text = text }, .{})});
 }
 
 pub const DefaultAuthApi = AuthApi(user_service.UserService);

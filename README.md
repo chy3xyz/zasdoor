@@ -46,6 +46,9 @@ file uploads, notifications, caching, and an admin UI that covers all of it.
   default tenant, so single-tenant deployments are unchanged)
 
 ### Admin & operations
+- **Dashboard** — live platform stats: users (with 7-day registration trend), task queue, files, notifications, tenants, cache
+- **Audit log** — who did what, when, from where: login/register, user/task/tenant/file operations with filters
+- **Email templates** — configurable verification & password-reset mail (variable rendering, built-in defaults)
 - User management: CRUD, pagination, keyword search, self-protection guards
 - Task center: live queue stats, retry / cancel / purge failed work
 - Runtime diagnostics endpoint (`/api/v1/system/info`)
@@ -161,11 +164,13 @@ Every endpoint returns the envelope `{ code, msg, data }`; `code === 0` means su
 | `POST` | `/api/v1/auth/send-verification` | Authenticated |
 | `PUT` | `/api/v1/auth/profile` · `/api/v1/auth/password` | Authenticated |
 | `GET/POST/PUT/DELETE` | `/api/v1/users` · `/api/v1/users/{id}` | Admin |
+| `GET` | `/api/v1/audit-logs` | Admin |
 | `GET/POST` | `/api/v1/tasks` · `/tasks/{id}/retry` · `/tasks/{id}/cancel` · `/tasks/purge` | Admin |
-| `GET` | `/api/v1/tasks/stats` · `/api/v1/system/info` | Admin |
+| `GET` | `/api/v1/tasks/stats` · `/api/v1/system/info` · `/api/v1/system/dashboard` | Admin |
 | `POST/GET/DELETE` | `/api/v1/files` · `/api/v1/files/{id}` | Authenticated (owner or admin) |
 | `GET/POST/DELETE` | `/api/v1/notifications` · `/notifications/{id}/read` · `/read-all` | Authenticated |
 | `GET/POST/PUT` | `/api/v1/tenants` · `/api/v1/tenants/{id}` | Admin |
+| `GET/PUT` | `/api/v1/email-templates` · `/api/v1/email-templates/{code}` | Admin |
 | `GET` | `/health/live` · `/api/v1/health/live` · `/api/v1/health/ready` · `/metrics` | Public |
 
 > **Multi-tenancy:** every API response includes `tenant_id` on user/file records;
@@ -185,7 +190,7 @@ src/
 ├── scheduled.zig          # Interval jobs executed by the dispatcher
 ├── middleware/            # CORS, JWT, rate limit, access log, security headers
 ├── services/              # Mailer, cache
-└── modules/               # tenant, user, auth, task, file, notify, system
+└── modules/               # tenant, user, auth, task, file, notify, system, audit, mail_template
 web/
 └── src/
     ├── api/               # Typed API clients (auth, user, task, file, notify)

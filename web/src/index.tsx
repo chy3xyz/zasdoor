@@ -32,6 +32,9 @@ const Tasks = lazy(() => import('#ui/pages/Tasks'));
 const Files = lazy(() => import('#ui/pages/Files'));
 const Tenants = lazy(() => import('#ui/pages/Tenants'));
 const Profile = lazy(() => import('#ui/pages/Profile'));
+const Dashboard = lazy(() => import('#ui/pages/Dashboard'));
+const AuditLogs = lazy(() => import('#ui/pages/AuditLogs'));
+const MailTemplates = lazy(() => import('#ui/pages/MailTemplates'));
 const NotFound = lazy(() => import('#ui/pages/NotFound'));
 
 function BootFallback() {
@@ -152,10 +155,34 @@ if (root) {
         />
         <Route path={ROUTE_PATH.root} component={Protected}>
           <Route
+            path={ROUTE_PATH.dashboard}
+            component={() => (
+              <AdminGate>
+                <Dashboard />
+              </AdminGate>
+            )}
+          />
+          <Route
             path={ROUTE_PATH.users}
             component={() => (
               <AdminGate>
                 <Users />
+              </AdminGate>
+            )}
+          />
+          <Route
+            path={ROUTE_PATH.auditLogs}
+            component={() => (
+              <AdminGate>
+                <AuditLogs />
+              </AdminGate>
+            )}
+          />
+          <Route
+            path={ROUTE_PATH.mailTemplates}
+            component={() => (
+              <AdminGate>
+                <MailTemplates />
               </AdminGate>
             )}
           />

@@ -22,6 +22,14 @@ pub const Mailer = struct {
     from: []const u8,
     starttls: bool,
     console: bool,
+    /// System CA bundle for STARTTLS server-certificate verification,
+    /// loaded once in `init` (lazily skipped for console-only mailers).
+    /// Read during the TLS handshake only — `tls.Client` does not retain it.
+    ca_bundle: std.crypto.Certificate.Bundle = .empty,
+    ca_lock: std.Io.RwLock = .init,
+    /// True when the system CA bundle loaded successfully; otherwise the
+    /// handshake falls back to `no_verification` (dev / unreachable CA).
+    ca_verified: bool = false,
 
     pub fn init(
         allocator: std.mem.Allocator,
@@ -34,7 +42,7 @@ pub const Mailer = struct {
         starttls: bool,
         console: bool,
     ) Mailer {
-        return .{
+        var self = Mailer{
             .allocator = allocator,
             .io = io,
             .host = host,
@@ -45,12 +53,30 @@ pub const Mailer = struct {
             .starttls = starttls,
             .console = console,
         };
+        if (host.len > 0 and starttls) {
+            const now = std.Io.Timestamp.now(io, .real);
+            self.ca_bundle.rescan(allocator, io, now) catch |err| {
+                // Deliberate fail-open: mail delivery is best-effort by design
+                // (`send` swallows transport errors), so a missing/unsupported
+                // system CA store must not block the app. A warn is emitted so
+                // production operators notice the degraded trust posture; to
+                // force verification, run behind a proxy or patch this site.
+                std.log.warn("[mail] system CA bundle unavailable ({s}) — STARTTLS will not verify the server certificate", .{@errorName(err)});
+                return self;
+            };
+            self.ca_verified = true;
+        }
+        return self;
+    }
+
+    pub fn deinit(self: *Mailer) void {
+        self.ca_bundle.deinit(self.allocator);
     }
 
     /// Deliver a message: log (console sink) and/or SMTP. Never fails the
     /// caller on transport errors — mail is best-effort and the caller
     /// already stored the token. Errors are logged and swallowed.
-    pub fn send(self: *const Mailer, msg: MailMessage) void {
+    pub fn send(self: *Mailer, msg: MailMessage) void {
         if (self.console) {
             std.log.info("[mail] to={s} subject=\"{s}\"\n{s}", .{ msg.to, msg.subject, msg.text });
         }
@@ -60,13 +86,13 @@ pub const Mailer = struct {
         };
     }
 
-    fn sendSmtp(self: *const Mailer, msg: MailMessage) !void {
+    fn sendSmtp(self: *Mailer, msg: MailMessage) !void {
         var conn = try SmtpConnection.connect(self);
         defer conn.close();
 
         try conn.ehlo(self.host);
         if (self.starttls and self.port != 465) {
-            try conn.startTls(self.host);
+            try conn.startTls();
             try conn.ehlo(self.host);
         }
         if (self.username.len > 0) {
@@ -83,15 +109,18 @@ const SmtpConnection = struct {
     io: std.Io,
     stream: ?std.Io.net.Stream = null,
     tls: ?std.crypto.tls.Client = null,
+    /// Borrowed from the Mailer for the duration of this session (STARTTLS
+    /// handshake only — `tls.Client` releases the bundle before init returns).
+    mailer: *Mailer = undefined,
     read_buf: [4096]u8 = undefined,
     write_buf: [4096]u8 = undefined,
 
-    fn connect(self: *const Mailer) !SmtpConnection {
+    fn connect(self: *Mailer) !SmtpConnection {
         const addr = try std.Io.net.IpAddress.resolve(self.io, self.host, self.port);
         const stream = try addr.connect(self.io, .{ .mode = .stream });
         errdefer stream.close(self.io);
 
-        var conn = SmtpConnection{ .io = self.io, .stream = stream };
+        var conn = SmtpConnection{ .io = self.io, .stream = stream, .mailer = self };
         try conn.expectCode('2', "connect greeting");
         return conn;
     }
@@ -164,7 +193,9 @@ const SmtpConnection = struct {
         _ = hostname;
     }
 
-    fn startTls(self: *SmtpConnection, host: []const u8) !void {
+    fn startTls(self: *SmtpConnection) !void {
+        const mailer = self.mailer;
+        const host = mailer.host;
         try self.sendLine("STARTTLS");
         try self.expectCode('2', "STARTTLS");
 
@@ -173,12 +204,16 @@ const SmtpConnection = struct {
         try fillEntropy(self.io, &entropy);
         var plain_reader = stream.reader(self.io, &self.read_buf);
         var plain_writer = stream.writer(self.io, &self.write_buf);
+
         const tls_client = try std.crypto.tls.Client.init(
             &plain_reader.interface,
             &plain_writer.interface,
             .{
                 .host = .{ .explicit = host },
-                .ca = .no_verification, // TODO: load system CA bundle for prod
+                .ca = if (mailer.ca_verified)
+                    .{ .bundle = .{ .gpa = mailer.allocator, .io = mailer.io, .lock = &mailer.ca_lock, .bundle = &mailer.ca_bundle } }
+                else
+                    .no_verification,
                 .write_buffer = &self.write_buf,
                 .read_buffer = &self.read_buf,
                 .entropy = &entropy,

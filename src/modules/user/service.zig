@@ -108,19 +108,19 @@ pub const UserService = struct {
         defer allocator.free(norm_email);
 
         if (self.store.getUserByEmail(norm_email) catch return error.EmailTaken) |existing| {
-            existing.free(allocator);
+            existing.free(self.store.allocator);
             return error.EmailTaken;
         }
 
         const hash = self.sec.module.hashPassword(password) catch return error.InvalidPassword;
-        defer allocator.free(hash);
+        defer self.sec.module.allocator.free(hash);
 
         const now = zigmodu.time.wallClockSeconds(self.io);
         // A prior `getUserByEmail` guard makes a create failure most likely
         // a unique-constraint race; re-check before blaming the DB.
         _ = self.store.createUser(trimmed_name, norm_email, hash, false, admin, tenant_id, now) catch {
             if (self.store.getUserByEmail(norm_email) catch null) |existing| {
-                existing.free(allocator);
+                existing.free(self.store.allocator);
                 return error.EmailTaken;
             }
             return error.Unexpected;
@@ -136,7 +136,7 @@ pub const UserService = struct {
 
         const row_opt = self.store.getUserByEmail(norm_email) catch return error.InvalidCredentials;
         const row = row_opt orelse return null;
-        defer row.free(allocator);
+        defer row.free(self.store.allocator);
 
         const hash_opt = self.store.getPasswordHashById(row.id) catch return error.InvalidCredentials;
         const hash = hash_opt orelse return null;
@@ -149,7 +149,7 @@ pub const UserService = struct {
     fn issueSession(self: *UserService, allocator: std.mem.Allocator, email: []const u8, admin: bool, tenant_id: i64) !Session {
         const row_opt = try self.store.getUserByEmail(email);
         const row = row_opt orelse return error.InvalidCredentials;
-        errdefer row.free(allocator);
+        errdefer row.free(self.store.allocator);
 
         const id_str = try std.fmt.allocPrint(allocator, "{d}", .{row.id});
         defer allocator.free(id_str);
@@ -195,7 +195,7 @@ pub const UserService = struct {
         defer allocator.free(norm);
         const row_opt = try self.store.getUserByEmail(norm);
         const row = row_opt orelse return false;
-        defer row.free(allocator);
+        defer row.free(self.store.allocator);
         return row.id != id;
     }
 
@@ -209,10 +209,10 @@ pub const UserService = struct {
         try self.store.setAdmin(id, admin, now);
     }
 
-    pub fn setPassword(self: *UserService, allocator: std.mem.Allocator, id: i64, password: []const u8) !void {
+    pub fn setPassword(self: *UserService, id: i64, password: []const u8) !void {
         if (password.len < 8) return error.InvalidPassword;
         const hash = try self.sec.module.hashPassword(password);
-        defer allocator.free(hash);
+        defer self.sec.module.allocator.free(hash);
         const now = zigmodu.time.wallClockSeconds(self.io);
         try self.store.setPasswordHash(id, hash, now);
     }
@@ -230,7 +230,7 @@ pub const UserService = struct {
         defer allocator.free(norm);
         const row_opt = try self.store.getUserByEmail(norm);
         const row = row_opt orelse return null;
-        defer row.free(allocator);
+        defer row.free(self.store.allocator);
 
         const raw = try randomToken(allocator, self.io, 32);
         errdefer allocator.free(raw);
@@ -246,10 +246,10 @@ pub const UserService = struct {
 
     /// Validate a raw reset token against the user's stored (hashed) token
     /// and its age. Returns the user id on success.
-    pub fn validatePasswordResetToken(self: *UserService, allocator: std.mem.Allocator, user_id: i64, raw_token: []const u8) ResetTokenError!void {
+    pub fn validatePasswordResetToken(self: *UserService, user_id: i64, raw_token: []const u8) ResetTokenError!void {
         const tok_opt = self.store.getLatestPasswordToken(user_id) catch return error.InvalidToken;
         const tok = tok_opt orelse return error.InvalidToken;
-        defer tok.free(allocator);
+        defer tok.free(self.store.allocator);
 
         const now = zigmodu.time.wallClockSeconds(self.io);
         if (now - tok.created_at > self.password_token_expiration_seconds) {
@@ -261,10 +261,10 @@ pub const UserService = struct {
     }
 
     /// Reset a user's password after a valid token; clears all their tokens.
-    pub fn resetPassword(self: *UserService, allocator: std.mem.Allocator, user_id: i64, raw_token: []const u8, new_password: []const u8) ResetTokenError!void {
+    pub fn resetPassword(self: *UserService, user_id: i64, raw_token: []const u8, new_password: []const u8) ResetTokenError!void {
         if (new_password.len < 8) return error.InvalidPassword;
-        try self.validatePasswordResetToken(allocator, user_id, raw_token);
-        self.setPassword(allocator, user_id, new_password) catch return error.InvalidPassword;
+        try self.validatePasswordResetToken(user_id, raw_token);
+        self.setPassword(user_id, new_password) catch return error.InvalidPassword;
         self.store.deleteTokensForUser(user_id) catch return error.InvalidToken;
     }
 
@@ -275,7 +275,7 @@ pub const UserService = struct {
     pub fn createEmailVerification(self: *UserService, allocator: std.mem.Allocator, user_id: i64) !?VerificationInfo {
         const row_opt = try self.store.getUserById(user_id);
         const row = row_opt orelse return null;
-        defer row.free(allocator);
+        defer row.free(self.store.allocator);
         if (row.verified) return null;
 
         const raw = try randomToken(allocator, self.io, 32);
@@ -290,10 +290,10 @@ pub const UserService = struct {
     }
 
     /// Validate a raw verification token and mark the user verified.
-    pub fn verifyEmail(self: *UserService, allocator: std.mem.Allocator, user_id: i64, raw_token: []const u8) VerificationError!void {
+    pub fn verifyEmail(self: *UserService, user_id: i64, raw_token: []const u8) VerificationError!void {
         const tok_opt = self.store.getLatestEmailVerification(user_id) catch return error.InvalidToken;
         const tok = tok_opt orelse return error.InvalidToken;
-        defer tok.free(allocator);
+        defer tok.free(self.store.allocator);
 
         const now = zigmodu.time.wallClockSeconds(self.io);
         if (now - tok.created_at > self.verification_token_expiration_seconds) {
@@ -308,13 +308,13 @@ pub const UserService = struct {
 
     /// Self-service password change: verify the current password, then set
     /// the new one.
-    pub fn changePassword(self: *UserService, allocator: std.mem.Allocator, id: i64, old_password: []const u8, new_password: []const u8) ChangePasswordError!void {
+    pub fn changePassword(self: *UserService, id: i64, old_password: []const u8, new_password: []const u8) ChangePasswordError!void {
         if (new_password.len < 8) return error.InvalidPassword;
         const hash_opt = self.store.getPasswordHashById(id) catch return error.InvalidCredentials;
         const hash = hash_opt orelse return error.InvalidCredentials;
-        defer allocator.free(hash);
+        defer self.sec.module.allocator.free(hash);
         if (!self.sec.module.verifyPassword(old_password, hash)) return error.InvalidCredentials;
-        self.setPassword(allocator, id, new_password) catch return error.InvalidPassword;
+        self.setPassword(id, new_password) catch return error.InvalidPassword;
     }
 };
 

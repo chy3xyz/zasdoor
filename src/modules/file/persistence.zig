@@ -143,4 +143,10 @@ pub const FileStore = struct {
         _ = try d.Where(.{preds.idEQ(.{ .int = id })});
         _ = try d.Exec();
     }
+    /// Total file count (dashboard stats).
+    pub fn countAll(self: *FileStore) !i64 {
+        var q = self.client.file.Query();
+        defer q.deinit();
+        return @intCast(try q.Count());
+    }
 };

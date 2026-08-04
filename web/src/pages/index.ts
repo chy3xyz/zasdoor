@@ -5,3 +5,6 @@ export { default as ResetPassword } from './ResetPassword';
 export { default as Users } from './Users';
 export { default as Profile } from './Profile';
 export { default as NotFound } from './NotFound';
+export { default as Dashboard } from './Dashboard';
+export { default as AuditLogs } from './AuditLogs';
+export { default as MailTemplates } from './MailTemplates';
