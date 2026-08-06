@@ -27,7 +27,7 @@ pub fn handlers(mailer: *const mail.Mailer) [1]task_svc.Handler {
     return .{
         .{
             .name = "mail.send",
-            .ctx = @ptrCast(@constCast(@alignCast(mailer))),
+            .ctx = @ptrCast(@alignCast(@constCast(mailer))),
             .run = mailSend,
         },
     };

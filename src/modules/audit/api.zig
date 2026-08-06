@@ -46,7 +46,8 @@ pub fn AuditApi(comptime AuditServiceT: type, comptime UserService: type) type {
 
         pub fn registerRoutes(self: *Self, group: *http.RouteGroup) !void {
             var g = try group.use(zigmodu.http.http_middleware.jwtAuthWithSecurity(&self.user_svc.sec.module));
-            g = try g.use(mw.tokenVersionGuard(self.user_svc.sec, self.user_svc.store));            try g.get("/audit-logs", listLogs, @ptrCast(@alignCast(self)));
+            g = try g.use(mw.tokenVersionGuard(self.user_svc.sec, self.user_svc.store));
+            try g.get("/audit-logs", listLogs, @ptrCast(@alignCast(self)));
             try g.get("/audit-logs/export", exportLogs, @ptrCast(@alignCast(self)));
         }
 

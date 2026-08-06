@@ -39,7 +39,8 @@ pub fn MailTemplateApi(comptime TemplateServiceT: type, comptime UserService: ty
 
         pub fn registerRoutes(self: *Self, group: *http.RouteGroup) !void {
             var g = try group.use(zigmodu.http.http_middleware.jwtAuthWithSecurity(&self.user_svc.sec.module));
-            g = try g.use(mw.tokenVersionGuard(self.user_svc.sec, self.user_svc.store));            try g.get("/email-templates", listTemplates, @ptrCast(@alignCast(self)));
+            g = try g.use(mw.tokenVersionGuard(self.user_svc.sec, self.user_svc.store));
+            try g.get("/email-templates", listTemplates, @ptrCast(@alignCast(self)));
             try g.put("/email-templates/{code}", upsertTemplate, @ptrCast(@alignCast(self)));
         }
 

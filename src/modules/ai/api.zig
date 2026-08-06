@@ -143,7 +143,8 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
         pub fn registerRoutes(self: *Self, group: *http.RouteGroup) !void {
             // 认证用户可用 AI 助手。
             var g = try group.use(zigmodu.http.http_middleware.jwtAuthWithSecurity(&self.user_svc.sec.module));
-            g = try g.use(mw.tokenVersionGuard(self.user_svc.sec, self.user_svc.store));            try g.get("/ai/sessions", listSessions, @ptrCast(@alignCast(self)));
+            g = try g.use(mw.tokenVersionGuard(self.user_svc.sec, self.user_svc.store));
+            try g.get("/ai/sessions", listSessions, @ptrCast(@alignCast(self)));
             try g.post("/ai/sessions", createSession, @ptrCast(@alignCast(self)));
             try g.get("/ai/sessions/{id}/messages", listMessages, @ptrCast(@alignCast(self)));
             try g.post("/ai/sessions/{id}/chat", chat, @ptrCast(@alignCast(self)));

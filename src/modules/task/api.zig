@@ -9,7 +9,6 @@ const user_svc = @import("../user/service.zig");
 const service = @import("service.zig");
 const audit_svc = @import("../audit/service.zig");
 
-
 const TaskDto = struct {
     id: i64,
     name: []const u8,
@@ -57,7 +56,8 @@ pub fn TaskApi(comptime Service: type, comptime UserService: type) type {
 
         pub fn registerRoutes(self: *Self, group: *http.RouteGroup) !void {
             var g = try group.use(zigmodu.http.http_middleware.jwtAuthWithSecurity(&self.user_svc.sec.module));
-            g = try g.use(mw.tokenVersionGuard(self.user_svc.sec, self.user_svc.store));            try g.get("/tasks/stats", stats, @ptrCast(@alignCast(self)));
+            g = try g.use(mw.tokenVersionGuard(self.user_svc.sec, self.user_svc.store));
+            try g.get("/tasks/stats", stats, @ptrCast(@alignCast(self)));
             try g.get("/tasks", list, @ptrCast(@alignCast(self)));
             try g.get("/tasks/{id}", get, @ptrCast(@alignCast(self)));
             try g.post("/tasks/{id}/retry", retry, @ptrCast(@alignCast(self)));
