@@ -62,12 +62,13 @@ pub fn UserApi(comptime Service: type) type {
 
         pub fn registerRoutes(self: *Self, group: *http.RouteGroup) !void {
             var g = try group.use(zigmodu.http.http_middleware.jwtAuthWithSecurity(&self.svc.sec.module));
-            try g.get("/users", listUsers, @ptrCast(@alignCast(self)));
+            g = try g.use(mw.tokenVersionGuard(self.svc.sec, self.svc.store));            try g.get("/users", listUsers, @ptrCast(@alignCast(self)));
             try g.get("/users/export", exportUsers, @ptrCast(@alignCast(self)));
             try g.get("/users/{id}", getUser, @ptrCast(@alignCast(self)));
             try g.post("/users", createUser, @ptrCast(@alignCast(self)));
             try g.put("/users/{id}", updateUser, @ptrCast(@alignCast(self)));
             try g.delete("/users/{id}", deleteUser, @ptrCast(@alignCast(self)));
+            try g.post("/users/{id}/revoke-sessions", revokeSessions, @ptrCast(@alignCast(self)));
         }
 
         /// Returns the authenticated admin user id, or null after responding.
@@ -278,6 +279,34 @@ pub fn UserApi(comptime Service: type) type {
             const detail = try std.fmt.bufPrint(&detail_buf, "更新用户 #{d}", .{id});
             self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "user.update", "user", id, detail, zigmodu.http.RequestUtil.getRealIp(ctx), true, 0);
             try ctx.jsonStruct(200, .{ .code = 0, .msg = "ok", .data = null });
+        }
+
+        /// 踢下线:递增用户凭证版本,该用户所有已签发 JWT 立即失效。
+        fn revokeSessions(ctx: *http.Context) !void {
+            const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
+            const admin_id = (try requireAdmin(ctx, self)) orelse return;
+
+            const id = ctx.paramInt(i64, "id") catch {
+                try ctx.sendErrorResponse(400, 400, "无效的用户 ID");
+                return;
+            };
+            if (id == admin_id) {
+                try ctx.sendErrorResponse(400, 400, "不能踢下线当前登录账号");
+                return;
+            }
+            const now = zigmodu.time.wallClockSeconds(self.svc.io);
+            self.svc.store.bumpTokenVersion(id, now) catch |err| switch (err) {
+                error.UserNotFound => {
+                    try ctx.sendErrorResponse(404, 404, "用户不存在");
+                    return;
+                },
+                else => {
+                    std.log.err("internal error: {s}", .{@errorName(err)});
+                    try ctx.sendErrorResponse(500, 500, "服务器内部错误");
+                    return;
+                },
+            };
+            try ctx.jsonStruct(200, .{ .code = 0, .msg = "已踢下线", .data = null });
         }
 
         fn deleteUser(ctx: *http.Context) !void {

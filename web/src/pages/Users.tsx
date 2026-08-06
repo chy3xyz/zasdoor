@@ -1,7 +1,7 @@
 import { createSignal, Show } from 'solid-js';
 import { useToast } from '#ui/components';
 
-import { deleteUser, listUsers, toApiError, type AuthUser } from '#ui/api';
+import { deleteUser, listUsers, revokeUserSessions, toApiError, type AuthUser } from '#ui/api';
 import DataTable, { type Column } from '#ui/components/DataTable';
 import UserFormModal, { type UserFormTarget } from '#ui/components/UserFormModal';
 import { useAuth } from '#ui/hooks';
@@ -45,6 +45,16 @@ function Users() {
     try {
       await deleteUser(user.id);
       void paged.reload();
+    } catch (err) {
+      toast.show(toApiError(err).message, 'error');
+    }
+  };
+
+  const onRevoke = async (user: AuthUser) => {
+    if (!window.confirm(`确定踢下线「${user.name}」?其所有登录将立即失效`)) return;
+    try {
+      await revokeUserSessions(user.id);
+      toast.show('已踢下线', 'success');
     } catch (err) {
       toast.show(toApiError(err).message, 'error');
     }
@@ -150,6 +160,14 @@ function Users() {
               disabled={user.id === auth.user?.id}
             >
               删除
+            </button>
+            <button
+              type="button"
+              class="btn btn-ghost btn-xs text-warning"
+              onClick={() => void onRevoke(user)}
+              disabled={user.id === auth.user?.id}
+            >
+              踢下线
             </button>
           </>
         )}

@@ -16,6 +16,8 @@ pub const User = Schema("User", .{
         field.Bool("verified").Default(false),
         field.Bool("admin").Default(false),
         field.Int("tenant_id").Default(1),
+        // 凭证版本:改密/踢下线时递增,旧 JWT(ver 更小)立即失效。
+        field.Int("token_version").Default(0),
     },
     .mixins = &.{zent.core.mixin.TimeMixin},
 });

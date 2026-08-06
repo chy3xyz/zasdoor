@@ -45,7 +45,7 @@ pub fn FileApi(comptime Service: type, comptime UserService: type) type {
 
         pub fn registerRoutes(self: *Self, group: *http.RouteGroup) !void {
             var g = try group.use(zigmodu.http.http_middleware.jwtAuthWithSecurity(&self.user_svc.sec.module));
-            try g.post("/files", upload, @ptrCast(@alignCast(self)));
+            g = try g.use(mw.tokenVersionGuard(self.user_svc.sec, self.user_svc.store));            try g.post("/files", upload, @ptrCast(@alignCast(self)));
             try g.get("/files", list, @ptrCast(@alignCast(self)));
             try g.get("/files/{id}", download, @ptrCast(@alignCast(self)));
             try g.delete("/files/{id}", delete, @ptrCast(@alignCast(self)));

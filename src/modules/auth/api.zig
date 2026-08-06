@@ -126,7 +126,7 @@ pub fn AuthApi(comptime Service: type) type {
             try limited.post("/auth/verify-email", verifyEmail, @ptrCast(@alignCast(self)));
 
             var g = try group.use(zigmodu.http.http_middleware.jwtAuthWithSecurity(&self.svc.sec.module));
-            try g.get("/auth/me", me, @ptrCast(@alignCast(self)));
+            g = try g.use(mw.tokenVersionGuard(self.svc.sec, self.svc.store));            try g.get("/auth/me", me, @ptrCast(@alignCast(self)));
             try g.post("/auth/send-verification", sendVerification, @ptrCast(@alignCast(self)));
             try g.put("/auth/profile", updateProfile, @ptrCast(@alignCast(self)));
             try g.put("/auth/password", changePassword, @ptrCast(@alignCast(self)));

@@ -157,7 +157,7 @@ pub const UserService = struct {
         defer allocator.free(tenant_str);
 
         const roles = if (admin) &[_][]const u8{"admin"} else &[_][]const u8{"user"};
-        const token = try self.sec.module.generateTokenWithTenant(id_str, roles, tenant_str);
+        const token = try self.sec.module.generateTokenWithTenantAndVersion(id_str, roles, tenant_str, row.token_version);
         return .{ .row = row, .token = token };
     }
 
@@ -315,6 +315,8 @@ pub const UserService = struct {
         defer self.sec.module.allocator.free(hash);
         if (!self.sec.module.verifyPassword(old_password, hash)) return error.InvalidCredentials;
         self.setPassword(id, new_password) catch return error.InvalidPassword;
+        const now_s = zigmodu.time.wallClockSeconds(self.io);
+        self.store.bumpTokenVersion(id, now_s) catch {}; // 使旧 JWT 全部失效
     }
 };
 

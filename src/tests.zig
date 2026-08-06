@@ -729,3 +729,48 @@ test "ai: approval resolve writes audit log" {
     try std.testing.expectEqual(@as(i64, 1), logs.total);
     try std.testing.expectEqualStrings("ai.approval", logs.items[0].action);
 }
+
+test "session revocation: token_version bump invalidates old JWTs" {
+    const allocator = std.testing.allocator;
+    var env = try openMemory(allocator);
+    defer env.deinit();
+    var store = user.persistence.UserStore.init(allocator, env.client);
+    var sec = zigmodu.security.AppSecurity.init(allocator, std.testing.io, .{ .jwt_secret = "testkit-secret" });
+    const uid = try store.createUser("Alice", "a@x.com", "hash", false, false, 1, 100);
+
+    const Whoami = struct {
+        fn h(ctx: *zigmodu.http.Context) !void {
+            const mw_mod = @import("middleware/auth.zig");
+            const uid_ = mw_mod.authUserId(ctx) orelse {
+                try ctx.sendErrorResponse(401, 401, "未登录或登录已过期");
+                return;
+            };
+            try ctx.jsonStruct(200, .{ .code = 0, .msg = "", .data = .{ .uid = uid_ } });
+        }
+    };
+
+    var server = zigmodu.http.Server.init(std.testing.io, allocator, 0);
+    defer server.deinit();
+    var g = server.group("/api/v1");
+    var guarded = try g.use(zigmodu.http.http_middleware.jwtAuthWithSecurity(&sec.module));
+    guarded = try guarded.use(@import("middleware/auth.zig").tokenVersionGuard(&sec, &store));
+    try guarded.get("/whoami", Whoami.h, null);
+
+    var uid_buf: [32]u8 = undefined;
+    const token = try sec.module.generateTokenWithTenantAndVersion(try std.fmt.bufPrint(&uid_buf, "{d}", .{uid}), &.{}, "1", 0);
+    defer allocator.free(token);
+    var hdr: [512]u8 = undefined;
+    const auth_header = try std.fmt.bufPrint(&hdr, "Bearer {s}", .{token});
+
+    // 版本未递增 → 正常访问。
+    var ok = try zigmodu.http.Testkit.dispatchOpts(&server, .GET, "/api/v1/whoami", .{ .headers = &.{.{ "authorization", auth_header }} });
+    defer ok.deinit(allocator);
+    try std.testing.expectEqual(@as(u16, 200), ok.status_code);
+
+    // 改密/踢下线(版本 +1)→ 旧 token 立即失效。
+    const now = zigmodu.time.wallClockSeconds(std.testing.io);
+    try store.bumpTokenVersion(uid, now);
+    var denied = try zigmodu.http.Testkit.dispatchOpts(&server, .GET, "/api/v1/whoami", .{ .headers = &.{.{ "authorization", auth_header }} });
+    defer denied.deinit(allocator);
+    try std.testing.expectEqual(@as(u16, 401), denied.status_code);
+}

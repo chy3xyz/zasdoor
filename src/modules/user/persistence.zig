@@ -23,6 +23,7 @@ pub const UserRow = struct {
     verified: bool,
     admin: bool,
     tenant_id: i64,
+    token_version: i64,
     created_at: i64,
     updated_at: i64,
 
@@ -73,6 +74,7 @@ pub const UserStore = struct {
             .verified = e.verified,
             .admin = e.admin,
             .tenant_id = e.tenant_id,
+            .token_version = e.token_version,
             .created_at = e.created_at orelse 0,
             .updated_at = e.updated_at orelse 0,
         };
@@ -382,5 +384,18 @@ pub const UserStore = struct {
         _ = try q.Where(.{preds.created_atGTE(.{ .int = start })});
         _ = try q.Where(.{preds.created_atLT(.{ .int = end })});
         return @intCast(try q.Count());
+    }
+
+    /// 递增凭证版本(改密/踢下线),使之前签发的 JWT 全部失效。
+    pub fn bumpTokenVersion(self: *UserStore, id: i64, now: i64) !void {
+        const preds = self.client.user.predicates;
+        const cur = (try self.getUserById(id)) orelse return error.UserNotFound;
+        defer cur.free(self.allocator);
+        var upd = self.client.user.Update();
+        defer upd.deinit();
+        _ = try upd.setFieldValue("token_version", cur.token_version + 1);
+        _ = try upd.setFieldValue("updated_at", now);
+        _ = try upd.Where(.{preds.idEQ(.{ .int = id })});
+        _ = try upd.Save();
     }
 };

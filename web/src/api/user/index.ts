@@ -1,4 +1,4 @@
-export { createUser, deleteUser, listUsers, updateUser } from './query';
+export { createUser, deleteUser, listUsers, revokeUserSessions, updateUser } from './query';
 export type {
   CreateUserRequest,
   UpdateUserRequest,

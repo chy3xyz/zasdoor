@@ -44,6 +44,11 @@ export async function updateUser(id: number, body: UpdateUserRequest): Promise<v
   await putEnvelope<null>(userDetail(id), body);
 }
 
+export async function revokeUserSessions(id: number): Promise<void> {
+  const { data } = await http.post<{ code: number; msg: string; data: null }>(`${userDetail(id)}/revoke-sessions`);
+  unwrapEnvelope(data);
+}
+
 export async function deleteUser(id: number): Promise<void> {
   await deleteEnvelope<null>(userDetail(id));
 }
