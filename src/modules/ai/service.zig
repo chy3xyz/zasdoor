@@ -69,6 +69,8 @@ pub const AiService = struct {
     registry: ai.SkillRegistry,
     agent_metrics: ai.AgentMetrics,
     bulkhead: zigmodu.Bulkhead,
+    /// AI provider 熔断:连续失败达到阈值后快速失败,避免拖垮上游。
+    breaker: zigmodu.CircuitBreaker,
     refs: SkillsRefs,
 
     pub fn init(
@@ -87,6 +89,12 @@ pub const AiService = struct {
             .registry = ai.SkillRegistry.init(allocator, io),
             .agent_metrics = .{},
             .bulkhead = try zigmodu.Bulkhead.init(allocator, "ai-chat", 4, 16),
+            .breaker = try zigmodu.CircuitBreaker.init(allocator, "ai-provider", .{
+                .failure_threshold = 5,
+                .success_threshold = 2,
+                .timeout_seconds = 60,
+                .half_open_max_calls = 2,
+            }),
             .refs = refs,
         };
         errdefer self.registry.deinit();
@@ -98,6 +106,7 @@ pub const AiService = struct {
         self.registry.deinit();
         self.http.deinit();
         self.bulkhead.deinit();
+        self.breaker.deinit();
     }
 
     // ── Key encryption ─────────────────────────────────────────────────────
@@ -440,10 +449,37 @@ pub const AiService = struct {
             .metrics = self.agent_metrics,
         };
 
-        var result = agent.run(allocator, prompt, &skill_ctx, self.cfg.default_max_steps) catch |err| {
-            _ = self.store.createRun(session_id, user_id, tenant_id, "chat", prompt, "", 0, 0, "error", @errorName(err), now) catch {};
-            return err;
+        // 熔断保护:连续失败后快速失败(callWithContext 经 ctx 传状态,无闭包捕获)。
+        const RunCtx = struct {
+            agent: *ai.Agent,
+            allocator: std.mem.Allocator,
+            prompt: []const u8,
+            skill_ctx: *ai.SkillContext,
+            max_steps: usize,
+            result: ?ai.AgentResult = null,
         };
+        var run_ctx = RunCtx{
+            .agent = &agent,
+            .allocator = allocator,
+            .prompt = prompt,
+            .skill_ctx = &skill_ctx,
+            .max_steps = self.cfg.default_max_steps,
+        };
+        const br = self.breaker.callWithContext(&run_ctx, struct {
+            fn op(c: ?*anyopaque) anyerror!void {
+                const r: *RunCtx = @ptrCast(@alignCast(c.?));
+                r.result = r.agent.run(r.allocator, r.prompt, r.skill_ctx, r.max_steps) catch return;
+            }
+        }.op);
+        var result: ai.AgentResult = undefined;
+        switch (br) {
+            .circuit_open => return error.AiCircuitOpen,
+            .failure => |e| {
+                _ = self.store.createRun(session_id, user_id, tenant_id, "chat", prompt, "", 0, 0, "error", @errorName(e), now) catch {};
+                return e;
+            },
+            .success => result = run_ctx.result orelse return error.AiRunFailed,
+        }
         defer result.deinit(allocator);
         self.agent_metrics = agent.metrics;
 

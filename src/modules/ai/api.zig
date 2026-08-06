@@ -425,6 +425,10 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
                     try ctx.sendErrorResponse(429, 429, "今日 AI 调用次数已达上限");
                     return;
                 },
+                error.AiCircuitOpen => {
+                    try ctx.sendErrorResponse(503, 503, "AI 服务暂不可用(熔断保护中)");
+                    return;
+                },
                 else => {
                     const msg = try std.fmt.allocPrint(ctx.allocator, "AI 服务调用失败: {s}", .{@errorName(err)});
                     defer ctx.allocator.free(msg);
