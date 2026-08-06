@@ -45,7 +45,7 @@ Zenaipa 是一个开箱即用的管理后台与内部平台脚手架：基于 **
 
 ### 管理与运维
 - **概览面板** — 平台实时统计：用户（含近 7 天注册趋势）、任务队列、文件、通知、租户、缓存
-- **审计日志** — 谁在何时做了什么、来自哪里：登录/注册、用户/任务/租户/文件操作全记录，支持按操作者 / 操作类型 / 关键词筛选
+- **审计日志** — 谁在何时做了什么、来自哪里：登录/注册、用户/任务/租户/文件操作全记录，支持筛选、CSV 导出与按保留期自动清理
 - **邮件模板** — 可配置的验证与重置邮件（变量渲染，未配置时回退内置默认）
 - 用户管理：CRUD、分页、关键词搜索、自我保护（不可删除/降级自己）
 - 任务中心：实时队列统计，失败任务可重试 / 取消 / 清理
@@ -242,8 +242,8 @@ JSON 序列化，你编辑中的引号/换行永远不会破坏邮件载荷。
 | `GET` | `/api/v1/auth/me` | 已登录 |
 | `POST` | `/api/v1/auth/send-verification` | 已登录 |
 | `PUT` | `/api/v1/auth/profile` · `/api/v1/auth/password` | 已登录 |
-| `GET/POST/PUT/DELETE` | `/api/v1/users` · `/api/v1/users/{id}` | 管理员 |
-| `GET` | `/api/v1/audit-logs` | 管理员 |
+| `GET/POST/PUT/DELETE` | `/api/v1/users` · `/api/v1/users/{id}` · `/users/export`（CSV） | 管理员 |
+| `GET` | `/api/v1/audit-logs` · `/api/v1/audit-logs/export`（CSV） | 管理员 |
 | `GET/POST` | `/api/v1/tasks` · `/tasks/{id}/retry` · `/tasks/{id}/cancel` · `/tasks/purge` | 管理员 |
 | `GET` | `/api/v1/tasks/stats` · `/api/v1/system/info` · `/api/v1/system/dashboard` | 管理员 |
 | `POST/GET/DELETE` | `/api/v1/files` · `/api/v1/files/{id}` | 已登录（属主或管理员） |

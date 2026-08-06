@@ -1,5 +1,6 @@
 //! Admin audit-log API — query the audit trail (write side is the service).
 
+const std = @import("std");
 const zigmodu = @import("zigmodu");
 const http = zigmodu.http;
 const mw = @import("../../middleware/auth.zig");
@@ -46,6 +47,7 @@ pub fn AuditApi(comptime AuditServiceT: type, comptime UserService: type) type {
         pub fn registerRoutes(self: *Self, group: *http.RouteGroup) !void {
             var g = try group.use(zigmodu.http.http_middleware.jwtAuthWithSecurity(&self.user_svc.sec.module));
             try g.get("/audit-logs", listLogs, @ptrCast(@alignCast(self)));
+            try g.get("/audit-logs/export", exportLogs, @ptrCast(@alignCast(self)));
         }
 
         /// Returns the authenticated admin user id, or null after responding.
@@ -68,6 +70,33 @@ pub fn AuditApi(comptime AuditServiceT: type, comptime UserService: type) type {
                 return null;
             }
             return uid;
+        }
+
+        fn exportLogs(ctx: *http.Context) !void {
+            const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
+            _ = (try requireAdmin(ctx, self)) orelse return;
+
+            var result = self.svc.list(1, 10000, .{}) catch |err| {
+                try ctx.sendErrorResponse(500, 500, @errorName(err));
+                return;
+            };
+            defer result.free(ctx.allocator);
+
+            var csv = zigmodu.csv.Writer.init(ctx.allocator);
+            defer csv.deinit();
+            try csv.writeHeader(&.{ "id", "action", "actor_user_id", "actor_name", "target_type", "target_id", "detail", "ip", "success", "created_at" });
+            for (result.items) |r| {
+                var buf: [64]u8 = undefined;
+                const id_s = try std.fmt.bufPrint(&buf, "{d}", .{r.id});
+                const aid_s = try std.fmt.bufPrint(&buf, "{d}", .{r.actor_user_id});
+                const tid_s = try std.fmt.bufPrint(&buf, "{d}", .{r.target_id});
+                const ts_s = try std.fmt.bufPrint(&buf, "{d}", .{r.created_at});
+                const ok_s = if (r.success) "true" else "false";
+                try csv.writeRow(&.{ id_s, r.action, aid_s, r.actor_name, r.target_type, tid_s, r.detail, r.ip, ok_s, ts_s });
+            }
+            try ctx.setHeader("Content-Type", "text/csv; charset=utf-8");
+            try ctx.setHeader("Content-Disposition", "attachment; filename=audit-logs.csv");
+            try ctx.text(200, csv.buf.items);
         }
 
         fn listLogs(ctx: *http.Context) !void {

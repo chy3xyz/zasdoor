@@ -297,8 +297,8 @@ test "HTTP dispatch: public auth flow (register -> me) via Testkit" {
     var store = user.persistence.UserStore.init(allocator, env.client);
     var sec = zigmodu.security.AppSecurity.init(allocator, std.testing.io, .{ .jwt_secret = "testkit-secret" });
     var svc = user.service.UserService.init(&store, &sec, std.testing.io, 3600, 86400);
-    var limiter = try zigmodu.RateLimiter.init(allocator, "test", 100, 1);
-    defer limiter.deinit();
+    var registry = zigmodu.RateLimiterRegistry.init(allocator, 100, 1);
+    defer registry.deinit();
     var mailer = mail.Mailer.init(allocator, std.testing.io, "", 587, "", "", "test@localhost", true, false);
     var task_store = task.persistence.TaskStore.init(allocator, env.client);
     var task_svc = task.service.TaskService.init(&task_store, std.testing.io, 3);
@@ -308,7 +308,7 @@ test "HTTP dispatch: public auth flow (register -> me) via Testkit" {
     var audit_svc = audit.service.AuditService.init(allocator, std.testing.io, &audit_store);
     var template_store = mail_template.persistence.TemplateStore.init(allocator, env.client);
     var template_svc = mail_template.service.MailTemplateService.init(allocator, std.testing.io, &template_store);
-    var auth_api = auth.api.AuthApi(@TypeOf(svc)).init(&svc, "http://localhost:3001", &limiter, &mailer, &task_svc, &notify_svc, &audit_svc, &template_svc, 1);
+    var auth_api = auth.api.AuthApi(@TypeOf(svc)).init(&svc, "http://localhost:3001", &registry, &mailer, &task_svc, &notify_svc, &audit_svc, &template_svc, 1);
 
     var server = zigmodu.http.Server.init(std.testing.io, allocator, 0);
     defer server.deinit();

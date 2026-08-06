@@ -81,7 +81,7 @@ pub fn AuthApi(comptime Service: type) type {
         const Self = @This();
         svc: *Service,
         app_host: []const u8,
-        limiter: *zigmodu.RateLimiter,
+        registry: *zigmodu.RateLimiterRegistry,
         mailer: *const mail.Mailer,
         task_svc: *task_service.TaskService,
         notify_svc: *notify_service.NotificationService,
@@ -92,7 +92,7 @@ pub fn AuthApi(comptime Service: type) type {
         pub fn init(
             svc: *Service,
             app_host: []const u8,
-            limiter: *zigmodu.RateLimiter,
+            registry: *zigmodu.RateLimiterRegistry,
             mailer: *const mail.Mailer,
             task_svc: *task_service.TaskService,
             notify_svc: *notify_service.NotificationService,
@@ -103,7 +103,7 @@ pub fn AuthApi(comptime Service: type) type {
             return .{
                 .svc = svc,
                 .app_host = app_host,
-                .limiter = limiter,
+                .registry = registry,
                 .mailer = mailer,
                 .task_svc = task_svc,
                 .notify_svc = notify_svc,
@@ -116,7 +116,8 @@ pub fn AuthApi(comptime Service: type) type {
         pub fn registerRoutes(self: *Self, group: *http.RouteGroup) !void {
             // Public routes are rate-limited to blunt credential stuffing /
             // reset-token brute force.
-            var limited = try group.use(zigmodu.http.rateLimitMiddleware(self.limiter));
+            // per-IP 限流(攻击者无法耗尽全局桶误伤他人)。
+            var limited = try group.use(zigmodu.http.tracing_middleware.rateLimitPerClient(self.registry, clientIpKey));
             try limited.post("/auth/register", register, @ptrCast(@alignCast(self)));
             try limited.post("/auth/login", login, @ptrCast(@alignCast(self)));
             try limited.post("/auth/logout", logout, @ptrCast(@alignCast(self)));
@@ -443,6 +444,11 @@ pub fn AuthApi(comptime Service: type) type {
             _ = self.notify_svc.notify(user_id, "验证邮件已发送", "请查收邮件并点击验证链接。", "info") catch {};
         }
     };
+}
+
+/// 按客户端 IP 限流的 key(优先级 X-Real-IP > X-Forwarded-For > 远端地址)。
+fn clientIpKey(ctx: *http.Context) []const u8 {
+    return zigmodu.http.RequestUtil.getRealIp(ctx);
 }
 
 fn parseTenantHeader(ctx: *http.Context) ?i64 {

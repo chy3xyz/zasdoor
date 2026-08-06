@@ -68,6 +68,7 @@ pub const AiService = struct {
     http: zigmodu.http.HttpClient,
     registry: ai.SkillRegistry,
     agent_metrics: ai.AgentMetrics,
+    bulkhead: zigmodu.Bulkhead,
     refs: SkillsRefs,
 
     pub fn init(
@@ -85,6 +86,7 @@ pub const AiService = struct {
             .http = zigmodu.http.HttpClient.init(allocator, io, 4, 30_000),
             .registry = ai.SkillRegistry.init(allocator, io),
             .agent_metrics = .{},
+            .bulkhead = try zigmodu.Bulkhead.init(allocator, "ai-chat", 4, 16),
             .refs = refs,
         };
         errdefer self.registry.deinit();
@@ -95,6 +97,7 @@ pub const AiService = struct {
     pub fn deinit(self: *AiService) void {
         self.registry.deinit();
         self.http.deinit();
+        self.bulkhead.deinit();
     }
 
     // ── Key encryption ─────────────────────────────────────────────────────
@@ -392,6 +395,9 @@ pub const AiService = struct {
         const now = zigmodu.time.wallClockSeconds(self.io);
         const used = try self.store.runCountForUser(user_id, now - 24 * 3600);
         if (used >= self.cfg.daily_run_limit) return error.QuotaExceeded;
+
+        if (!self.bulkhead.tryAcquire()) return error.AiBusy;
+        defer self.bulkhead.release();
 
         var permissions: []const []const u8 = &.{};
         if (try self.refs.user_store.getUserById(user_id)) |row| {

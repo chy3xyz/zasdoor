@@ -41,9 +41,11 @@ const CleanupCtx = struct {
     io: std.Io,
     user_store: *user.persistence.UserStore,
     notify_store: *notify.persistence.NotificationStore,
+    audit_store: *audit.persistence.AuditStore,
     password_token_max_age: i64,
     verification_token_max_age: i64,
     notification_max_age: i64,
+    audit_retention_seconds: i64,
 };
 
 fn jobTokensCleanup(ctx: ?*anyopaque) void {
@@ -57,6 +59,12 @@ fn jobNotifyPrune(ctx: ?*anyopaque) void {
     const c: *CleanupCtx = @ptrCast(@alignCast(ctx orelse return));
     const now = zigmodu.time.wallClockSeconds(c.io);
     _ = c.notify_store.purgeOlderThan(now, c.notification_max_age) catch {};
+}
+
+fn jobAuditPrune(ctx: ?*anyopaque) void {
+    const c: *CleanupCtx = @ptrCast(@alignCast(ctx orelse return));
+    const now = zigmodu.time.wallClockSeconds(c.io);
+    _ = c.audit_store.purgeOlderThan(now, c.audit_retention_seconds) catch {};
 }
 
 pub fn main(init: std.process.Init) !void {
@@ -169,9 +177,11 @@ pub fn main(init: std.process.Init) !void {
         .io = io,
         .user_store = &store,
         .notify_store = &notify_store,
+        .audit_store = &audit_store,
         .password_token_max_age = cfg.password_token_expiration_seconds,
         .verification_token_max_age = cfg.verification_token_expiration_seconds,
         .notification_max_age = 30 * 24 * 3600,
+        .audit_retention_seconds = cfg.audit_retention_days * 24 * 3600,
     };
     var scheduled_jobs = [_]scheduled.ScheduledJob{
         .{
@@ -184,6 +194,12 @@ pub fn main(init: std.process.Init) !void {
             .name = "notify.prune",
             .interval_seconds = 24 * 3600,
             .run = jobNotifyPrune,
+            .ctx = &cleanup_ctx,
+        },
+        .{
+            .name = "audit.prune",
+            .interval_seconds = 24 * 3600,
+            .run = jobAuditPrune,
             .ctx = &cleanup_ctx,
         },
     };
@@ -204,11 +220,12 @@ pub fn main(init: std.process.Init) !void {
     std.log.info("[task] dispatcher started ({d} handlers, {d} workers)", .{ handler_registry.len, cfg.task_workers });
 
     // ── HTTP API ──
-    var login_limiter = try zigmodu.RateLimiter.init(allocator, "auth-public", 20, 1);
-    defer login_limiter.deinit();
+    // per-IP 登录限流(而非全局单桶):每个客户端独立 20 token / 1 补。
+    var login_registry = zigmodu.RateLimiterRegistry.init(allocator, 20, 1);
+    defer login_registry.deinit();
 
     var user_api = user.api.UserApi(@TypeOf(user_svc)).init(&user_svc, default_tenant_id, &audit_svc);
-    var auth_api = auth.api.AuthApi(@TypeOf(user_svc)).init(&user_svc, cfg.app_host, &login_limiter, &mailer, &task_svc, &notify_svc, &audit_svc, &template_svc, default_tenant_id);
+    var auth_api = auth.api.AuthApi(@TypeOf(user_svc)).init(&user_svc, cfg.app_host, &login_registry, &mailer, &task_svc, &notify_svc, &audit_svc, &template_svc, default_tenant_id);
     var task_api = task.api.TaskApi(@TypeOf(task_svc), @TypeOf(user_svc)).init(&task_svc, &user_svc, &audit_svc);
     var file_api = file.api.FileApi(@TypeOf(file_svc), @TypeOf(user_svc)).init(&file_svc, &user_svc, &audit_svc, default_tenant_id);
     var notify_api = notify.api.NotificationApi(@TypeOf(notify_svc), @TypeOf(user_svc)).init(&notify_svc, &user_svc);

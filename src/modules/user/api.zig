@@ -63,6 +63,7 @@ pub fn UserApi(comptime Service: type) type {
         pub fn registerRoutes(self: *Self, group: *http.RouteGroup) !void {
             var g = try group.use(zigmodu.http.http_middleware.jwtAuthWithSecurity(&self.svc.sec.module));
             try g.get("/users", listUsers, @ptrCast(@alignCast(self)));
+            try g.get("/users/export", exportUsers, @ptrCast(@alignCast(self)));
             try g.get("/users/{id}", getUser, @ptrCast(@alignCast(self)));
             try g.post("/users", createUser, @ptrCast(@alignCast(self)));
             try g.put("/users/{id}", updateUser, @ptrCast(@alignCast(self)));
@@ -90,6 +91,32 @@ pub fn UserApi(comptime Service: type) type {
             }
             try ctx.setAttr("audit_actor", row.name);
             return uid;
+        }
+
+        fn exportUsers(ctx: *http.Context) !void {
+            const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
+            _ = (try requireAdmin(ctx, self)) orelse return;
+
+            var result = self.svc.listUsers(1, 10000, null, null, null, false) catch |err| {
+                try ctx.sendErrorResponse(500, 500, @errorName(err));
+                return;
+            };
+            defer result.free(ctx.allocator);
+
+            var csv = zigmodu.csv.Writer.init(ctx.allocator);
+            defer csv.deinit();
+            try csv.writeHeader(&.{ "id", "name", "email", "admin", "tenant_id", "created_at" });
+            for (result.items) |u| {
+                var buf: [64]u8 = undefined;
+                const id_s = try std.fmt.bufPrint(&buf, "{d}", .{u.id});
+                const tid_s = try std.fmt.bufPrint(&buf, "{d}", .{u.tenant_id});
+                const ts_s = try std.fmt.bufPrint(&buf, "{d}", .{u.created_at});
+                const admin_s = if (u.admin) "true" else "false";
+                try csv.writeRow(&.{ id_s, u.name, u.email, admin_s, tid_s, ts_s });
+            }
+            try ctx.setHeader("Content-Type", "text/csv; charset=utf-8");
+            try ctx.setHeader("Content-Disposition", "attachment; filename=users.csv");
+            try ctx.text(200, csv.buf.items);
         }
 
         fn listUsers(ctx: *http.Context) !void {

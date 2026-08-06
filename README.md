@@ -30,7 +30,7 @@ agentic AI assistant (providers, skills, chat, approvals, workflow).
 - Register / login / logout, forgot & reset password, `GET /me` (JWT + PBKDF2)
 - Email verification with one-click links and in-app banners for unverified users
 - Admin bootstrap CLI — create your first administrator in one command
-- Login rate limiting and anti-enumeration responses
+- Login rate limiting **per client IP** (shared buckets no longer allow one attacker to lock out everyone) and anti-enumeration responses
 
 ### Platform services
 - **Background jobs** — durable task queue with automatic retries and a management UI
@@ -52,7 +52,7 @@ agentic AI assistant (providers, skills, chat, approvals, workflow).
 - **Dashboard** — live platform stats: users (with a 7-day registration trend), task
   queue, files, notifications, tenants and cache entries
 - **Audit log** — who did what, when and from where: login/register, user/task/tenant/
-  file operations with actor / action / keyword filters
+  file operations with actor / action / keyword filters; CSV export + retention-based daily cleanup
 - **Email templates** — configurable verification & password-reset mail with variable
   rendering and built-in defaults
 - User management: CRUD, pagination, keyword search, self-protection guards
@@ -171,6 +171,7 @@ All settings are environment variables with the `ZENAIPA_` prefix. See
 | `ZENAIPA_TASK_RETRY_INTERVAL_SECONDS` | `60` | Retry backoff interval |
 | `ZENAIPA_AI_KEY_SECRET` | _(empty)_ | Master key encrypting stored AI provider keys (required to save providers) |
 | `ZENAIPA_AI_DAILY_RUN_LIMIT` | `100` | Max agent runs per user per rolling 24h |
+| `ZENAIPA_AUDIT_RETENTION_DAYS` | `180` | Audit-log retention; older rows purged by the daily housekeeping job |
 
 ## 🛠️ Operations Guide
 
@@ -265,8 +266,8 @@ Every endpoint returns the envelope `{ code, msg, data }`; `code === 0` means su
 | `GET` | `/api/v1/auth/me` | Authenticated |
 | `POST` | `/api/v1/auth/send-verification` | Authenticated |
 | `PUT` | `/api/v1/auth/profile` · `/api/v1/auth/password` | Authenticated |
-| `GET/POST/PUT/DELETE` | `/api/v1/users` · `/api/v1/users/{id}` | Admin |
-| `GET` | `/api/v1/audit-logs` | Admin |
+| `GET/POST/PUT/DELETE` | `/api/v1/users` · `/api/v1/users/{id}` · `/users/export` (CSV) | Admin |
+| `GET` | `/api/v1/audit-logs` · `/api/v1/audit-logs/export` (CSV) | Admin |
 | `GET/POST` | `/api/v1/tasks` · `/tasks/{id}/retry` · `/tasks/{id}/cancel` · `/tasks/purge` | Admin |
 | `GET` | `/api/v1/tasks/stats` · `/api/v1/system/info` · `/api/v1/system/dashboard` | Admin |
 | `POST/GET/DELETE` | `/api/v1/files` · `/api/v1/files/{id}` | Authenticated (owner or admin) |

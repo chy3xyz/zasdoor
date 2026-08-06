@@ -49,6 +49,8 @@ pub const Config = struct {
     ai_key_secret: []const u8 = "",
     /// Max agent runs per user per rolling 24h.
     ai_daily_run_limit: i64 = 100,
+    /// 审计日志保留天数;超出部分由每日定时任务清理。
+    audit_retention_days: i64 = 180,
 
     pub fn fromEnv(environ: *const std.process.Environ.Map) Config {
         var cfg: Config = .{};
@@ -78,6 +80,7 @@ pub const Config = struct {
         cfg.task_retry_interval_seconds = parseInt64(environ.get("ZENAIPA_TASK_RETRY_INTERVAL_SECONDS") orelse "60", 60);
         cfg.ai_key_secret = environ.get("ZENAIPA_AI_KEY_SECRET") orelse "";
         cfg.ai_daily_run_limit = parseInt64(environ.get("ZENAIPA_AI_DAILY_RUN_LIMIT") orelse "100", 100);
+        cfg.audit_retention_days = parseInt64(environ.get("ZENAIPA_AUDIT_RETENTION_DAYS") orelse "180", 180);
         return cfg;
     }
 };

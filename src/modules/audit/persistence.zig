@@ -115,6 +115,16 @@ pub const AuditStore = struct {
         return row.id;
     }
 
+    /// 删除 created_at 早于 now - max_age_seconds 的记录(保留策略)。
+    pub fn purgeOlderThan(self: *AuditStore, now: i64, max_age_seconds: i64) !usize {
+        const preds = self.client.audit_log.predicates;
+        const cutoff = now - max_age_seconds;
+        var d = self.client.audit_log.Delete();
+        defer d.deinit();
+        _ = try d.Where(.{preds.created_atLT(.{ .int = cutoff })});
+        return try d.Exec();
+    }
+
     pub fn list(self: *AuditStore, page: usize, page_size: usize, filters: AuditFilters) !AuditListResult {
         const preds = self.client.audit_log.predicates;
 
