@@ -1,9 +1,16 @@
 # 流式聊天接入契约(Streaming Chat)
 
 > 状态:**待上游**。zigmodu 的 `chatStream + DeltaBridge` 已用真实 DeepSeek API
-> 验证(zigmodu v0.15.13,`7ac16c8`),但 Agent 主循环尚未切换(TODO #4,待
-> SSE-capable mock harness)。zenaipa 的接入代码按本契约设计,上游落地后
-> 按下列步骤 10 分钟内接通。
+> 验证(zigmodu v0.15.13,`7ac16c8`),但 Agent 主循环尚未切换(TODO #4)。
+>
+> **关键澄清(消除误解)**:流式切换**不影响工具决策**——`chatStream` 内部先聚合
+> 完整 `ChatResponse`(含 `tool_calls`)再返回,Agent 拿到的与 `chatWith` 完全同构
+> (已验证 `content matches: YES`)。流式是"旁路推送 delta + 完整聚合决策"并行,
+> 不是"边流边决策"。
+>
+> **唯一阻塞是测试基建,且已定位为框架 bug 候选**:`requestStream` 对本地 HTTP
+> (非 TLS)连接读取挂起(真实 HTTPS 正常)——不是 mock 写法问题(4 种写法均复现)。
+> 待上游修复 `requestStream` 本地路径后,Agent 切换(3-5 行)与 zenaipa 接入即可落地。
 
 ## 契约(SSE 事件流)
 
@@ -70,5 +77,6 @@ agent.hooks = .{
 ## 前置检查
 
 - [ ] zigmodu Agent 主循环 `chatWith → chatStream + DeltaBridge` 已切换(`agent.zig` 无 `TODO(#4)`)
-- [ ] mock harness 可驱动 `requestStream`(上游阻塞点)
+- [ ] zigmodu `requestStream` 本地(非 TLS)路径修复(框架 bug 候选;真实 HTTPS 已验证正常)
+- [ ] Agent 主循环切换后 `on_delta` 触发;Testkit 增加 SSE 直连测试
 - [ ] zenaipa `zig build test` 通过后接 SSE 测试(Testkit 直连 chat 端点)
