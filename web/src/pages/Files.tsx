@@ -1,4 +1,5 @@
 import { Show, createSignal } from 'solid-js';
+import { useToast } from '#ui/components';
 
 import { deleteFile, downloadFile, listFiles, toApiError, uploadFile, type FileItem } from '#ui/api';
 import DataTable, { type Column } from '#ui/components/DataTable';
@@ -14,6 +15,7 @@ function formatSize(bytes: number): string {
 }
 
 function Files() {
+  const toast = useToast();
   const [uploading, setUploading] = createSignal(false);
   const [success, setSuccess] = createSignal<string | null>(null);
 
@@ -31,7 +33,7 @@ function Files() {
       input.value = '';
       void paged.reload(1);
     } catch (err) {
-      window.alert(toApiError(err).message);
+      toast.show(toApiError(err).message, 'error');
     } finally {
       setUploading(false);
     }
@@ -43,7 +45,7 @@ function Files() {
       await deleteFile(file.id);
       void paged.reload();
     } catch (err) {
-      window.alert(toApiError(err).message);
+      toast.show(toApiError(err).message, 'error');
     }
   };
 
@@ -95,7 +97,7 @@ function Files() {
               type="button"
               class="btn btn-ghost btn-xs"
               onClick={() => {
-                downloadFile(file.id, file.name).catch((err) => window.alert(toApiError(err).message));
+                downloadFile(file.id, file.name).catch((err) => toast.show(toApiError(err).message));
               }}
             >
               下载

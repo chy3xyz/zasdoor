@@ -1,4 +1,5 @@
 import { createSignal, Show } from 'solid-js';
+import { useToast } from '#ui/components';
 
 import { deleteUser, listUsers, toApiError, type AuthUser } from '#ui/api';
 import DataTable, { type Column } from '#ui/components/DataTable';
@@ -10,6 +11,7 @@ import { formatDateTime } from '#ui/utils';
 const PAGE_SIZE = 20;
 
 function Users() {
+  const toast = useToast();
   const [auth] = useAuth();
   const [keyword, setKeyword] = createSignal('');
   const [searchInput, setSearchInput] = createSignal('');
@@ -44,7 +46,7 @@ function Users() {
       await deleteUser(user.id);
       void paged.reload();
     } catch (err) {
-      window.alert(toApiError(err).message);
+      toast.show(toApiError(err).message, 'error');
     }
   };
 

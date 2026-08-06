@@ -1,4 +1,5 @@
 import { createSignal, For, Show } from 'solid-js';
+import { useToast } from '#ui/components';
 
 import {
   checkAiProvider,
@@ -21,6 +22,7 @@ import { formatDateTime } from '#ui/utils';
 type Tab = 'providers' | 'approvals' | 'runs' | 'workflow';
 
 function AiAdmin() {
+  const toast = useToast();
   const [tab, setTab] = createSignal<Tab>('providers');
   const [providers, setProviders] = createSignal<AiProviderItem[]>([]);
   const [approvals, setApprovals] = createSignal<AiApprovalItem[]>([]);
@@ -99,7 +101,7 @@ function AiAdmin() {
 
   const onSaveProvider = async () => {
     if (!name().trim() || !endpoint().trim()) {
-      window.alert('名称与端点不能为空');
+      toast.show('名称与端点不能为空', 'error');
       return;
     }
     try {
@@ -123,7 +125,7 @@ function AiAdmin() {
       setFormOpen(false);
       await loadProviders();
     } catch (err) {
-      window.alert(toApiError(err).message);
+      toast.show(toApiError(err).message, 'error');
     }
   };
 
@@ -133,7 +135,7 @@ function AiAdmin() {
       await deleteAiProvider(p.id);
       await loadProviders();
     } catch (err) {
-      window.alert(toApiError(err).message);
+      toast.show(toApiError(err).message, 'error');
     }
   };
 
@@ -155,7 +157,7 @@ function AiAdmin() {
       await resolveAiApproval(a.id, action);
       await loadApprovals();
     } catch (err) {
-      window.alert(toApiError(err).message);
+      toast.show(toApiError(err).message, 'error');
     }
   };
 

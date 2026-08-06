@@ -1,4 +1,5 @@
 import { Show, createSignal } from 'solid-js';
+import { useToast } from '#ui/components';
 
 import { createTenant, listTenants, toApiError, updateTenant, type TenantItem } from '#ui/api';
 import DataTable, { type Column } from '#ui/components/DataTable';
@@ -8,6 +9,7 @@ import { formatDateTime } from '#ui/utils';
 const PAGE_SIZE = 20;
 
 function Tenants() {
+  const toast = useToast();
   const [creating, setCreating] = createSignal(false);
   const [success, setSuccess] = createSignal<string | null>(null);
   const [nameInput, setNameInput] = createSignal('');
@@ -25,7 +27,7 @@ function Tenants() {
       setSuccess('租户已创建');
       void paged.reload(1);
     } catch (err) {
-      window.alert(toApiError(err).message);
+      toast.show(toApiError(err).message, 'error');
     } finally {
       setCreating(false);
     }
@@ -40,7 +42,7 @@ function Tenants() {
       setSuccess(`租户「${tenant.name}」已${tenant.status === 'active' ? '停用' : '启用'}`);
       void paged.reload();
     } catch (err) {
-      window.alert(toApiError(err).message);
+      toast.show(toApiError(err).message, 'error');
     }
   };
 

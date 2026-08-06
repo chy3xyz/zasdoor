@@ -1,4 +1,5 @@
 import { createSignal, For, Show } from 'solid-js';
+import { useToast } from '#ui/components';
 
 import { listMailTemplates, toApiError, upsertMailTemplate, type MailTemplateItem } from '#ui/api';
 import { usePaged } from '#ui/hooks/usePaged';
@@ -12,6 +13,7 @@ const CODE_LABELS: Record<string, string> = {
 };
 
 function MailTemplates() {
+  const toast = useToast();
   const [editing, setEditing] = createSignal<MailTemplateItem | null>(null);
   const [subject, setSubject] = createSignal('');
   const [body, setBody] = createSignal('');
@@ -31,7 +33,7 @@ function MailTemplates() {
     const item = editing();
     if (!item) return;
     if (!subject().trim() || !body().trim()) {
-      window.alert('主题和正文不能为空');
+      toast.show('主题和正文不能为空', 'error');
       return;
     }
     setSaving(true);
@@ -41,7 +43,7 @@ function MailTemplates() {
       void paged.reload();
       window.setTimeout(() => setSaved(''), 2000);
     } catch (err) {
-      window.alert(toApiError(err).message);
+      toast.show(toApiError(err).message, 'error');
     } finally {
       setSaving(false);
     }

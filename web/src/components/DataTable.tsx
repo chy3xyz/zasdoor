@@ -53,6 +53,26 @@ export default function DataTable<T>(props: DataTableProps<T>) {
             </tr>
           </thead>
           <tbody>
+            <Show when={props.loading && props.rows.length === 0}>
+              <For each={[0, 1, 2]}>
+                {() => (
+                  <tr>
+                    <For each={props.columns}>
+                      {() => (
+                        <td class="py-2">
+                          <div class="skeleton h-4 w-full" />
+                        </td>
+                      )}
+                    </For>
+                    <Show when={props.actions}>
+                      <td>
+                        <div class="skeleton ml-auto h-6 w-16" />
+                      </td>
+                    </Show>
+                  </tr>
+                )}
+              </For>
+            </Show>
             <Show when={props.rows.length === 0 && !props.loading}>
               <tr>
                 <td colspan={columnCount()} class="py-10 text-center text-base-content/50">

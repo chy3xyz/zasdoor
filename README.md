@@ -354,6 +354,8 @@ npm run build
   SIGTERM/SIGINT drains in-flight requests.
 - **CI**: `.github/workflows/ci.yml` runs `zig fmt --check`, `zig build test`,
   frontend typecheck/tests/build.
+- **Backups**: see [`docs/backup.md`](docs/backup.md) — online SQLite `.backup`,
+  `pg_dump`/`pg_restore`, uploads snapshot and a suggested schedule.
 - **PostgreSQL**: set `ZENAIPA_DB_DRIVER=postgres` and `ZENAIPA_PG_CONNINFO`; the schema
   migrates automatically on startup.
 - **Email**: configure SMTP and a real `ZENAIPA_APP_HOST` so verification/reset links

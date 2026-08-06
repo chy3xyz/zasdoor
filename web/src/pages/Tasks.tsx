@@ -1,4 +1,5 @@
 import { For, Show, createSignal } from 'solid-js';
+import { useToast } from '#ui/components';
 
 import {
   cancelTask,
@@ -34,6 +35,7 @@ const STATUS_CLASS: Record<string, string> = {
 };
 
 function Tasks() {
+  const toast = useToast();
   const [stats, setStats] = createSignal<TaskStats | null>(null);
   const [status, setStatus] = createSignal('');
 
@@ -57,7 +59,7 @@ function Tasks() {
       await fn();
       refresh();
     } catch (err) {
-      window.alert(toApiError(err).message);
+      toast.show(toApiError(err).message, 'error');
     }
   };
 

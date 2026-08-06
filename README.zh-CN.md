@@ -322,6 +322,7 @@ npm run build
 - **TLS**：在 Zig 服务前由反向代理（Nginx、Caddy 或云负载均衡）终结 HTTPS。
 - **容器**：`Dockerfile` 多阶段构建 API 镜像；`web/dist` 由任意静态主机/nginx 托管并代理 `/api` 到容器。SIGTERM/SIGINT 优雅关闭（排空在途请求）。
 - **CI**：`.github/workflows/ci.yml` 执行 `zig fmt --check`、`zig build test`、前端 typecheck/测试/构建。
+- **备份**：见 [`docs/backup.md`](docs/backup.md) —— SQLite 在线 `.backup`、`pg_dump`/`pg_restore`、uploads 快照与建议节奏。
 - **PostgreSQL**：设置 `ZENAIPA_DB_DRIVER=postgres` 与 `ZENAIPA_PG_CONNINFO`；schema
   在启动时自动迁移。
 - **邮件**：配置 SMTP 与真实的 `ZENAIPA_APP_HOST`，使验证/重置链接指向你的公网地址。
