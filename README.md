@@ -61,7 +61,7 @@ Ship your internal console faster than your coffee gets cold.
 - **Skills** — LLM-callable platform tools: user search, task stats, audit search, tenant list (read-only) + `notify.send` (write, human-approved)
 - **Chat** — per-user sessions with persisted history, **reasoning-chain display** (DeepSeek-R1 etc.)
 - **Human-in-the-loop** — approval queue, approve executes the action
-- **Governance** — rolling 24h quota, 4-way concurrency bulkhead, provider health check, run audit with the **actual model** recorded, Prometheus AI metrics
+- **Governance** — rolling 24h quota, 4-way concurrency bulkhead,**circuit breaker** (5-failure → 60s OPEN + half-open probe), provider health check, run audit with the **actual model** recorded, Prometheus AI metrics
 - **Workflow** — read-only health-report orchestration via zigmodu.ai
 
 ### 💎 Engineering quality
@@ -151,7 +151,7 @@ All settings are `ZENAIPA_*` env vars (see [`src/config.zig`](src/config.zig) fo
 1. **Configure a provider** (admin): AI 管理 → Provider — OpenAI-compatible `endpoint`, JSON array of `api_keys`, comma-separated `models`. Keys are AES-256-GCM encrypted (set `ZENAIPA_AI_KEY_SECRET` first). Use the **测试** button to verify connectivity.
 2. **Chat** (AI 助手): ask the agent about your platform — *"任务队列现在什么情况?"* It calls read-only skills (user/task/audit/tenant) and shows its **reasoning chain** in a collapsible block.
 3. **Write actions need approval**: `notify.send` lands in the approval queue; approving it performs the send (audit-logged, optimistic-locked).
-4. **Governance**: rolling 24h quota, 4-way bulkhead, provider health checks, run audit records the **actual model** answered, Prometheus AI metrics.
+4. **Governance**: rolling 24h quota, 4-way bulkhead, **circuit breaker**, provider health checks, run audit records the **actual model** answered, Prometheus AI metrics.
 
 ---
 

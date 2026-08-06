@@ -61,7 +61,7 @@
 - **技能** —— LLM 可调用的平台工具:用户搜索、任务统计、审计检索、租户列表(只读)+ `notify.send`(写,人工审批)
 - **聊天** —— 按用户会话、历史持久化、**推理链折叠展示**(DeepSeek-R1 等)
 - **人工审批** —— 审批队列,批准时真正执行
-- **治理** —— 滚动 24h 配额、4 路并发 Bulkhead、Provider 健康检查、运行审计记录**实际应答模型**、Prometheus AI 指标
+- **治理** —— 滚动 24h 配额、4 路并发 Bulkhead、**熔断保护**(连续失败 → 开路 + 半开探测)、Provider 健康检查、运行审计记录**实际应答模型**、Prometheus AI 指标
 - **工作流** —— 基于 zigmodu.ai 的只读健康报告编排
 
 ### 💎 工程品质
@@ -151,7 +151,7 @@ cd web && npm install && npm run dev
 1. **配置 Provider**(管理员):AI 管理 → Provider —— OpenAI 兼容 `endpoint`、JSON 数组 `api_keys`、逗号分隔 `models`。密钥 AES-256-GCM 加密(先设 `ZENAIPA_AI_KEY_SECRET`)。用 **测试** 按钮验证连通性。
 2. **聊天**(AI 助手):问 Agent 关于平台的问题 —— *「任务队列现在什么情况?」*。它调用只读技能(用户/任务/审计/租户),并在可折叠块中展示**推理过程**。
 3. **写操作需审批**:`notify.send` 进入审批队列;批准时执行发送(审计记录、乐观锁防重复)。
-4. **治理**:滚动 24h 配额、4 路 Bulkhead、Provider 健康检查、运行审计记录**实际应答模型**、Prometheus AI 指标。
+4. **治理**:滚动 24h 配额、4 路 Bulkhead、**熔断保护**、Provider 健康检查、运行审计记录**实际应答模型**、Prometheus AI 指标。
 
 ---
 
