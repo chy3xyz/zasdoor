@@ -27,7 +27,7 @@ Zenaipa 是一个开箱即用的管理后台与内部平台脚手架：基于 **
 - 注册 / 登录 / 登出、忘记与重置密码、`GET /me`（JWT + PBKDF2）
 - 邮箱验证：一键验证链接，未验证用户在界面有横幅提示
 - 管理员引导 CLI：一条命令创建首个管理员
-- 登录限流与防枚举应答
+- 登录限流**按客户端 IP** 与防枚举应答；生产环境 JWT 密钥缺失即拒绝启动（fail-closed）；`/metrics` 支持 IP 白名单
 
 ### 平台服务
 - **后台任务**：持久化任务队列，自动重试，配套管理界面
@@ -155,6 +155,7 @@ npm run dev
 | `ZENAIPA_CACHE_TTL_SECONDS` | `300` | 缓存 TTL |
 | `ZENAIPA_TASK_MAX_ATTEMPTS` | `3` | 后台任务最大重试次数 |
 | `ZENAIPA_TASK_RETRY_INTERVAL_SECONDS` | `60` | 重试退避间隔 |
+| `ZENAIPA_METRICS_ALLOW_IPS` | _(空)_ | `/metrics` IP 白名单（逗号分隔；空 = 允许全部） |
 | `ZENAIPA_AI_KEY_SECRET` | _(空)_ | 加密 AI Provider 密钥的主密钥（保存 Provider 前必须设置） |
 | `ZENAIPA_AI_DAILY_RUN_LIMIT` | `100` | 每用户滚动 24 小时 Agent 调用上限 |
 
@@ -307,19 +308,20 @@ web/
 
 ```bash
 # 后端：单元 + 集成测试（内存 SQLite + Testkit HTTP 分发）
-# 覆盖 store、service、JWT/多租户、审计、概览计数、邮件模板，
-# 以及管理端门禁（401/403/200）HTTP 流程
 zig build test
 
-# 前端：类型检查与生产构建
+# 前端：类型检查、单元测试（vitest）与生产构建
 cd web
 npm run typecheck
+npm test
 npm run build
 ```
 
 ## 🚢 部署建议
 
 - **TLS**：在 Zig 服务前由反向代理（Nginx、Caddy 或云负载均衡）终结 HTTPS。
+- **容器**：`Dockerfile` 多阶段构建 API 镜像；`web/dist` 由任意静态主机/nginx 托管并代理 `/api` 到容器。SIGTERM/SIGINT 优雅关闭（排空在途请求）。
+- **CI**：`.github/workflows/ci.yml` 执行 `zig fmt --check`、`zig build test`、前端 typecheck/测试/构建。
 - **PostgreSQL**：设置 `ZENAIPA_DB_DRIVER=postgres` 与 `ZENAIPA_PG_CONNINFO`；schema
   在启动时自动迁移。
 - **邮件**：配置 SMTP 与真实的 `ZENAIPA_APP_HOST`，使验证/重置链接指向你的公网地址。

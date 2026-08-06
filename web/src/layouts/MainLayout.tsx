@@ -1,5 +1,5 @@
 import { A } from '@solidjs/router';
-import { For, Show, createSignal, onCleanup, onMount, type JSX } from 'solid-js';
+import { For, Show, createEffect, createSignal, onCleanup, onMount, type JSX } from 'solid-js';
 
 import {
   deleteNotification,
@@ -127,6 +127,12 @@ function NotificationBell() {
 
 function MainLayout(props: { children?: JSX.Element }) {
   const [auth, actions] = useAuth();
+  const [dark, setDark] = createSignal(localStorage.getItem('zenaipa.theme') === 'dark');
+  createEffect(() => {
+    document.documentElement.setAttribute('data-theme', dark() ? 'dark' : 'light');
+    localStorage.setItem('zenaipa.theme', dark() ? 'dark' : 'light');
+  });
+  const toggleTheme = () => setDark((d) => !d);
 
   return (
     <div class="flex h-screen overflow-hidden bg-base-100">
@@ -232,6 +238,9 @@ function MainLayout(props: { children?: JSX.Element }) {
           <h1 class="text-base font-semibold">管理后台</h1>
           <div class="flex items-center gap-3 text-sm text-base-content/70">
             <NotificationBell />
+            <button type="button" class="btn btn-ghost btn-xs" onClick={toggleTheme} aria-label="切换主题">
+              {dark() ? '🌙' : '☀️'}
+            </button>
             <span class="badge badge-ghost">{auth.user?.name ?? '-'}</span>
             <span class="badge badge-outline">{auth.user?.admin ? '管理员' : '用户'}</span>
           </div>

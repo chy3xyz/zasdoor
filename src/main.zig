@@ -35,6 +35,15 @@ const audit = @import("modules/audit/root.zig");
 const mail_template = @import("modules/mail_template/root.zig");
 const ai = @import("modules/ai/root.zig");
 
+/// Set by SIGINT/SIGTERM so the main thread can stop the server gracefully.
+const ShutdownFlag = struct {
+    var requested = std.atomic.Value(bool).init(false);
+};
+
+fn onShutdownSignal(_: std.posix.SIG) callconv(.c) void {
+    ShutdownFlag.requested.store(true, .release);
+}
+
 /// Shared state for scheduled housekeeping jobs (single background thread —
 /// zent's SQLite driver is a single connection).
 const CleanupCtx = struct {
@@ -72,6 +81,11 @@ pub fn main(init: std.process.Init) !void {
     const io = init.io;
 
     const cfg = config_mod.Config.fromEnv(init.environ_map);
+    // 生产(PostgreSQL)必须显式设置 JWT 密钥,拒绝使用默认值。
+    if (!cfg.jwt_secret_explicit and std.mem.eql(u8, cfg.db_driver, "postgres")) {
+        std.log.err("ZENAIPA_JWT_SECRET must be set explicitly in production (PostgreSQL). Refusing to start with the default dev secret.", .{});
+        return error.MissingJwtSecret;
+    }
     std.log.info("zenaipa starting (db={s}, port={d})", .{ cfg.db_driver, cfg.http_port });
 
     // ── Data store: zent driver + schema-as-code migration ──
@@ -217,7 +231,6 @@ pub fn main(init: std.process.Init) !void {
     dispatcher.scheduled = &scheduled_runner;
     try dispatcher.start();
     defer dispatcher.deinit();
-    std.log.info("[task] dispatcher started ({d} handlers, {d} workers)", .{ handler_registry.len, cfg.task_workers });
 
     // ── HTTP API ──
     // per-IP 登录限流(而非全局单桶):每个客户端独立 20 token / 1 补。
@@ -321,13 +334,31 @@ pub fn main(init: std.process.Init) !void {
     // Prometheus metrics (public, like the health probes).
     const MetricsRoute = struct {
         var metrics_ref: *metrics_mod.Metrics = undefined;
+        var allow_ips: []const u8 = "";
     };
     MetricsRoute.metrics_ref = &metrics;
+    MetricsRoute.allow_ips = cfg.metrics_allow_ips;
     try server.addRoute(.{
         .method = .GET,
         .path = "metrics",
         .handler = struct {
             fn handle(ctx: *zigmodu.http.Context) !void {
+                // /metrics IP 白名单(空 = 允许全部;生产建议限制到监控网段)。
+                if (MetricsRoute.allow_ips.len > 0) {
+                    const ip = zigmodu.http.RequestUtil.getRealIp(ctx);
+                    var allowed = false;
+                    var it = std.mem.splitScalar(u8, MetricsRoute.allow_ips, ',');
+                    while (it.next()) |a| {
+                        if (std.mem.eql(u8, std.mem.trim(u8, a, " \t"), ip)) {
+                            allowed = true;
+                            break;
+                        }
+                    }
+                    if (!allowed) {
+                        try ctx.sendErrorResponse(403, 403, "forbidden");
+                        return;
+                    }
+                }
                 const body = try MetricsRoute.metrics_ref.renderPrometheus(ctx.allocator, zigmodu.time.wallClockSeconds(ctx.io orelse return error.InternalError));
                 defer ctx.allocator.free(body);
                 try ctx.text(200, body);
@@ -336,7 +367,32 @@ pub fn main(init: std.process.Init) !void {
     });
 
     std.log.info("zenaipa listening on http://127.0.0.1:{d} (admin CLI: zig build admin -- --help)", .{cfg.http_port});
-    try server.start();
+
+    // 优雅关闭:SIGINT/SIGTERM → 停止 accept → 排空在途请求 → 停 modules。
+    const sig = std.posix.Sigaction{
+        .handler = .{ .handler = onShutdownSignal },
+        .mask = std.posix.sigemptyset(),
+        .flags = 0,
+    };
+    std.posix.sigaction(std.posix.SIG.INT, &sig, null);
+    std.posix.sigaction(std.posix.SIG.TERM, &sig, null);
+
+    const ServerThread = struct {
+        fn run(s: *zigmodu.http.Server) !void {
+            try s.start(); // 阻塞;stop() 后返回(内部 await 在途请求)
+        }
+    };
+    const server_handle = try std.Thread.spawn(.{ .stack_size = 4 * 1024 * 1024 }, ServerThread.run, .{&server});
+    defer server_handle.join();
+
+    const poll = std.posix.timespec{ .sec = 0, .nsec = 100 * std.time.ns_per_ms };
+    while (!ShutdownFlag.requested.load(.acquire)) {
+        _ = std.c.nanosleep(&poll, null);
+    }
+    std.log.info("shutdown signal received, draining in-flight requests...", .{});
+    server.stop();
+    server_handle.join();
+    std.log.info("server stopped gracefully", .{});
 }
 
 /// Parse `ZENAIPA_CORS_ORIGINS` ("*" or a comma-separated allow-list) into

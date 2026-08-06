@@ -60,7 +60,8 @@ pub fn NotificationApi(comptime Service: type, comptime UserService: type) type 
             const unread = ctx.queryInt(usize, "unread", 0) == 1;
 
             var result = self.svc.list(uid, params.page, params.page_size, unread) catch |err| {
-                try ctx.sendErrorResponse(500, 500, @errorName(err));
+                std.log.err("internal error: {s}", .{@errorName(err)});
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
             defer result.free(self.svc.allocator);
@@ -76,7 +77,8 @@ pub fn NotificationApi(comptime Service: type, comptime UserService: type) type 
                 return;
             };
             const count = self.svc.unreadCount(uid) catch |err| {
-                try ctx.sendErrorResponse(500, 500, @errorName(err));
+                std.log.err("internal error: {s}", .{@errorName(err)});
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
             try ctx.jsonStruct(200, .{ .code = 0, .msg = "", .data = .{ .unread = count } });
@@ -93,7 +95,8 @@ pub fn NotificationApi(comptime Service: type, comptime UserService: type) type 
                 return;
             };
             _ = self.svc.markRead(id, uid) catch |err| {
-                try ctx.sendErrorResponse(500, 500, @errorName(err));
+                std.log.err("internal error: {s}", .{@errorName(err)});
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
             try ctx.jsonStruct(200, .{ .code = 0, .msg = "ok", .data = null });
@@ -106,7 +109,8 @@ pub fn NotificationApi(comptime Service: type, comptime UserService: type) type 
                 return;
             };
             self.svc.markAllRead(uid) catch |err| {
-                try ctx.sendErrorResponse(500, 500, @errorName(err));
+                std.log.err("internal error: {s}", .{@errorName(err)});
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
             try ctx.jsonStruct(200, .{ .code = 0, .msg = "ok", .data = null });
@@ -123,7 +127,8 @@ pub fn NotificationApi(comptime Service: type, comptime UserService: type) type 
                 return;
             };
             _ = self.svc.delete(id, uid) catch |err| {
-                try ctx.sendErrorResponse(500, 500, @errorName(err));
+                std.log.err("internal error: {s}", .{@errorName(err)});
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
             try ctx.jsonStruct(200, .{ .code = 0, .msg = "ok", .data = null });

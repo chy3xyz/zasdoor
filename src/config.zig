@@ -11,6 +11,10 @@ pub const Config = struct {
     pg_conninfo: []const u8 = "host=localhost port=5432 dbname=zenaipa user=postgres password=postgres sslmode=prefer connect_timeout=10",
     /// HMAC key for JWT signing.
     jwt_secret: []const u8 = "dev-secret-change-me",
+    /// True when ZENAIPA_JWT_SECRET was explicitly set (fail-closed in prod).
+    jwt_secret_explicit: bool = false,
+    /// Comma-separated IP allow-list for /metrics (empty = all; use in prod).
+    metrics_allow_ips: []const u8 = "", 
     /// JWT lifetime in seconds.
     token_expiry_seconds: i64 = 24 * 3600,
     /// Password reset token lifetime in seconds.
@@ -41,7 +45,6 @@ pub const Config = struct {
     cache_max_entries: usize = 1024,
     cache_ttl_seconds: u64 = 300,
     /// Background task dispatcher.
-    task_workers: usize = 2,
     task_max_attempts: i64 = 3,
     task_retry_interval_seconds: i64 = 60,
     /// Master key used to encrypt AI provider API keys at rest
@@ -58,6 +61,7 @@ pub const Config = struct {
         cfg.db_driver = environ.get("ZENAIPA_DB_DRIVER") orelse "sqlite";
         cfg.sqlite_path = environ.get("ZENAIPA_SQLITE_PATH") orelse "zenaipa.db";
         cfg.pg_conninfo = environ.get("ZENAIPA_PG_CONNINFO") orelse cfg.pg_conninfo;
+        cfg.jwt_secret_explicit = environ.get("ZENAIPA_JWT_SECRET") != null;
         cfg.jwt_secret = environ.get("ZENAIPA_JWT_SECRET") orelse "dev-secret-change-me";
         cfg.token_expiry_seconds = parseInt64(environ.get("ZENAIPA_TOKEN_EXPIRY") orelse "86400", 86400);
         cfg.password_token_expiration_seconds = parseInt64(environ.get("ZENAIPA_PASSWORD_TOKEN_EXPIRATION") orelse "3600", 3600);
@@ -75,11 +79,11 @@ pub const Config = struct {
         cfg.upload_max_bytes = parseIntUsize(environ.get("ZENAIPA_UPLOAD_MAX_BYTES") orelse "10485760", 10 * 1024 * 1024);
         cfg.cache_max_entries = parseIntUsize(environ.get("ZENAIPA_CACHE_MAX_ENTRIES") orelse "1024", 1024);
         cfg.cache_ttl_seconds = @intCast(parseInt64(environ.get("ZENAIPA_CACHE_TTL_SECONDS") orelse "300", 300));
-        cfg.task_workers = parseIntUsize(environ.get("ZENAIPA_TASK_WORKERS") orelse "2", 2);
         cfg.task_max_attempts = parseInt64(environ.get("ZENAIPA_TASK_MAX_ATTEMPTS") orelse "3", 3);
         cfg.task_retry_interval_seconds = parseInt64(environ.get("ZENAIPA_TASK_RETRY_INTERVAL_SECONDS") orelse "60", 60);
         cfg.ai_key_secret = environ.get("ZENAIPA_AI_KEY_SECRET") orelse "";
         cfg.ai_daily_run_limit = parseInt64(environ.get("ZENAIPA_AI_DAILY_RUN_LIMIT") orelse "100", 100);
+        cfg.metrics_allow_ips = environ.get("ZENAIPA_METRICS_ALLOW_IPS") orelse "";
         cfg.audit_retention_days = parseInt64(environ.get("ZENAIPA_AUDIT_RETENTION_DAYS") orelse "180", 180);
         return cfg;
     }

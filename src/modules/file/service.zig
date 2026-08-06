@@ -39,6 +39,8 @@ pub const FileService = struct {
     /// user-facing name; the on-disk name is a generated storage key.
     pub fn save(self: *FileService, uploader_id: i64, tenant_id: i64, filename: []const u8, mime: []const u8, data: []const u8) !FileRow {
         if (data.len > self.max_bytes) return error.FileTooLarge;
+        const ext = extensionOf(filename);
+        if (!extensionAllowed(ext)) return error.FileTypeNotAllowed;
         try self.ensureDir();
 
         const key = try self.storageKey(filename);
@@ -110,6 +112,20 @@ pub const FileService = struct {
 fn wallNow(io: std.Io) i64 {
     const zigmodu = @import("zigmodu");
     return zigmodu.time.wallClockSeconds(io);
+}
+
+/// 允许上传的扩展名白名单(排除 html/svg/脚本等可执行内容)。
+const allowed_extensions = [_][]const u8{
+    "txt", "md", "csv", "json", "log", "pdf", "doc", "docx", "xls", "xlsx",
+    "ppt", "pptx", "png", "jpg", "jpeg", "gif", "webp", "zip", "gz", "tar",
+    "7z", "mp4", "mov", "mp3", "wav", "bin",
+};
+
+fn extensionAllowed(ext: []const u8) bool {
+    for (allowed_extensions) |e| {
+        if (std.ascii.eqlIgnoreCase(e, ext)) return true;
+    }
+    return false;
 }
 
 fn extensionOf(filename: []const u8) []const u8 {

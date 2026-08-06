@@ -163,7 +163,7 @@ pub const Dispatcher = struct {
         }
         const handler = found orelse {
             // Unknown handler — fail so the row does not spin forever.
-        self.store.markFailedOrRetry(task.id, task.attempts, task.max_attempts, "no handler registered", wallNow(self), 0) catch {};
+            self.store.markFailedOrRetry(task.id, task.attempts, task.max_attempts, "no handler registered", wallNow(self), 0) catch {};
             _ = self.failed.fetchAdd(1, .monotonic);
             return;
         };

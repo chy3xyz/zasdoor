@@ -82,7 +82,8 @@ pub fn TenantApi(comptime Service: type, comptime UserService: type) type {
 
             const params = zigmodu.http.PageParams.parse(ctx, .{ .max_page_size = 100 });
             var result = self.svc.list(params.page, params.page_size) catch |err| {
-                try ctx.sendErrorResponse(500, 500, @errorName(err));
+                std.log.err("internal error: {s}", .{@errorName(err)});
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
             defer result.free(self.svc.allocator);
@@ -105,7 +106,8 @@ pub fn TenantApi(comptime Service: type, comptime UserService: type) type {
                 return;
             }
             const id = self.svc.create(req.name) catch |err| {
-                try ctx.sendErrorResponse(500, 500, @errorName(err));
+                std.log.err("internal error: {s}", .{@errorName(err)});
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
             var d1: [128]u8 = undefined;
@@ -147,7 +149,8 @@ pub fn TenantApi(comptime Service: type, comptime UserService: type) type {
                 return;
             }
             _ = self.svc.update(id, name, status) catch |err| {
-                try ctx.sendErrorResponse(500, 500, @errorName(err));
+                std.log.err("internal error: {s}", .{@errorName(err)});
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
             var d2: [128]u8 = undefined;

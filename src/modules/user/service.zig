@@ -15,7 +15,7 @@ pub const CreateError = error{
     Unexpected,
 };
 
-pub const LoginError = error{ InvalidCredentials };
+pub const LoginError = error{InvalidCredentials};
 
 pub const ResetTokenError = error{
     InvalidToken,

@@ -7,7 +7,8 @@
     "build": "rsbuild build",
     "dev": "rsbuild dev",
     "preview": "rsbuild preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@solidjs/router": "^1.0.0",
@@ -18,9 +19,14 @@
     "@rsbuild/core": "^2.1.9",
     "@rsbuild/plugin-babel": "^2.0.1",
     "@rsbuild/plugin-solid": "^1.2.2",
+    "@solidjs/testing-library": "^0.8.10",
     "@tailwindcss/postcss": "^4.3.3",
+    "@testing-library/jest-dom": "^7.0.0",
     "daisyui": "^5.7.13",
+    "jsdom": "^27.0.1",
     "tailwindcss": "^4.3.3",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "vite-plugin-solid": "^2.11.14",
+    "vitest": "^3.2.7"
   }
 }

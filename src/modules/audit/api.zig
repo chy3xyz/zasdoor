@@ -77,7 +77,8 @@ pub fn AuditApi(comptime AuditServiceT: type, comptime UserService: type) type {
             _ = (try requireAdmin(ctx, self)) orelse return;
 
             var result = self.svc.list(1, 10000, .{}) catch |err| {
-                try ctx.sendErrorResponse(500, 500, @errorName(err));
+                std.log.err("internal error: {s}", .{@errorName(err)});
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
             defer result.free(ctx.allocator);
@@ -117,7 +118,8 @@ pub fn AuditApi(comptime AuditServiceT: type, comptime UserService: type) type {
                 .keyword = keyword_raw,
             };
             var result = self.svc.list(params.page, params.page_size, filters) catch |err| {
-                try ctx.sendErrorResponse(500, 500, @errorName(err));
+                std.log.err("internal error: {s}", .{@errorName(err)});
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
             defer result.free(self.svc.allocator);

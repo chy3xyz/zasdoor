@@ -70,7 +70,8 @@ pub fn MailTemplateApi(comptime TemplateServiceT: type, comptime UserService: ty
 
             const params = zigmodu.http.PageParams.parse(ctx, .{ .max_page_size = 100 });
             var result = self.svc.list(params.page, params.page_size) catch |err| {
-                try ctx.sendErrorResponse(500, 500, @errorName(err));
+                std.log.err("internal error: {s}", .{@errorName(err)});
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
             defer result.free(self.svc.allocator);
@@ -100,7 +101,8 @@ pub fn MailTemplateApi(comptime TemplateServiceT: type, comptime UserService: ty
                 return;
             }
             self.svc.upsert(code, req.subject, req.body) catch |err| {
-                try ctx.sendErrorResponse(500, 500, @errorName(err));
+                std.log.err("internal error: {s}", .{@errorName(err)});
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
             try ctx.jsonStruct(200, .{ .code = 0, .msg = "模板已保存", .data = null });

@@ -92,7 +92,8 @@ pub fn TaskApi(comptime Service: type, comptime UserService: type) type {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
             _ = (try requireAdmin(ctx, self)) orelse return;
             const counts = self.svc.counts() catch |err| {
-                try ctx.sendErrorResponse(500, 500, @errorName(err));
+                std.log.err("internal error: {s}", .{@errorName(err)});
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
             try ctx.jsonStruct(200, .{ .code = 0, .msg = "", .data = counts });
@@ -106,7 +107,8 @@ pub fn TaskApi(comptime Service: type, comptime UserService: type) type {
             const status = ctx.queryParam("status");
 
             var result = self.svc.list(params.page, params.page_size, status) catch |err| {
-                try ctx.sendErrorResponse(500, 500, @errorName(err));
+                std.log.err("internal error: {s}", .{@errorName(err)});
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
             defer result.free(self.svc.store.allocator);
@@ -124,7 +126,8 @@ pub fn TaskApi(comptime Service: type, comptime UserService: type) type {
                 return;
             };
             const row_opt = self.svc.get(id) catch |err| {
-                try ctx.sendErrorResponse(500, 500, @errorName(err));
+                std.log.err("internal error: {s}", .{@errorName(err)});
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
             const row = row_opt orelse {
@@ -143,7 +146,8 @@ pub fn TaskApi(comptime Service: type, comptime UserService: type) type {
                 return;
             };
             _ = self.svc.retry(id) catch |err| {
-                try ctx.sendErrorResponse(500, 500, @errorName(err));
+                std.log.err("internal error: {s}", .{@errorName(err)});
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
             var d1: [96]u8 = undefined;
@@ -160,7 +164,8 @@ pub fn TaskApi(comptime Service: type, comptime UserService: type) type {
                 return;
             };
             _ = self.svc.cancel(id) catch |err| {
-                try ctx.sendErrorResponse(500, 500, @errorName(err));
+                std.log.err("internal error: {s}", .{@errorName(err)});
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
             var d2: [96]u8 = undefined;
@@ -173,7 +178,8 @@ pub fn TaskApi(comptime Service: type, comptime UserService: type) type {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
             const admin_id = (try requireAdmin(ctx, self)) orelse return;
             _ = self.svc.purge() catch |err| {
-                try ctx.sendErrorResponse(500, 500, @errorName(err));
+                std.log.err("internal error: {s}", .{@errorName(err)});
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
             const det3 = "清理已完成任务";
@@ -189,7 +195,8 @@ pub fn TaskApi(comptime Service: type, comptime UserService: type) type {
                 return;
             };
             self.svc.delete(id) catch |err| {
-                try ctx.sendErrorResponse(500, 500, @errorName(err));
+                std.log.err("internal error: {s}", .{@errorName(err)});
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
             var d4: [96]u8 = undefined;

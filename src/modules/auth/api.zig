@@ -235,7 +235,8 @@ pub fn AuthApi(comptime Service: type) type {
                 return;
             };
             const row_opt = self.svc.getUserById(uid) catch |err| {
-                try ctx.sendErrorResponse(500, 500, @errorName(err));
+                std.log.err("internal error: {s}", .{@errorName(err)});
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
             const row = row_opt orelse {

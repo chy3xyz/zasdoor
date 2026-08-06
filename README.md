@@ -30,13 +30,13 @@ agentic AI assistant (providers, skills, chat, approvals, workflow).
 - Register / login / logout, forgot & reset password, `GET /me` (JWT + PBKDF2)
 - Email verification with one-click links and in-app banners for unverified users
 - Admin bootstrap CLI — create your first administrator in one command
-- Login rate limiting **per client IP** (shared buckets no longer allow one attacker to lock out everyone) and anti-enumeration responses
+- Login rate limiting **per client IP** and anti-enumeration responses; JWT secret is fail-closed in production; `/metrics` supports an IP allow-list
 
 ### Platform services
 - **Background jobs** — durable task queue with automatic retries and a management UI
 - **Email** — SMTP transport (STARTTLS with system CA verification + AUTH PLAIN) and a
   console sink for development
-- **File management** — upload, download and delete with per-user access control
+- **File management** — upload, download and delete with per-user access control; extension/mime allow-list, filename sanitization and dangerous-type downgrade
 - **Notifications** — per-user inbox with an unread badge in the header
 - **Caching** — in-memory LRU with configurable TTL and capacity
 - **Scheduled maintenance** — automatic cleanup of expired tokens and old notifications
@@ -169,6 +169,7 @@ All settings are environment variables with the `ZENAIPA_` prefix. See
 | `ZENAIPA_CACHE_TTL_SECONDS` | `300` | Cache TTL |
 | `ZENAIPA_TASK_MAX_ATTEMPTS` | `3` | Max attempts per background task |
 | `ZENAIPA_TASK_RETRY_INTERVAL_SECONDS` | `60` | Retry backoff interval |
+| `ZENAIPA_METRICS_ALLOW_IPS` | _(empty)_ | Comma-separated `/metrics` IP allow-list (empty = all) |
 | `ZENAIPA_AI_KEY_SECRET` | _(empty)_ | Master key encrypting stored AI provider keys (required to save providers) |
 | `ZENAIPA_AI_DAILY_RUN_LIMIT` | `100` | Max agent runs per user per rolling 24h |
 | `ZENAIPA_AUDIT_RETENTION_DAYS` | `180` | Audit-log retention; older rows purged by the daily housekeeping job |
@@ -335,13 +336,12 @@ pruning (daily).
 
 ```bash
 # Backend: unit + integration tests (in-memory SQLite + Testkit HTTP dispatch)
-# covers stores, services, JWT/multi-tenancy, audit, dashboard counts, mail
-# templates, and the admin-gate (401/403/200) HTTP flow
 zig build test
 
-# Frontend: type check and production build
+# Frontend: type check, unit tests (vitest) and production build
 cd web
 npm run typecheck
+npm test
 npm run build
 ```
 
@@ -349,6 +349,11 @@ npm run build
 
 - **TLS**: terminate HTTPS at a reverse proxy (Nginx, Caddy, or a cloud load balancer)
   in front of the Zig server.
+- **Container**: `Dockerfile` builds the API image (multi-stage); serve `web/dist` from
+  any static host/nginx and proxy `/api` to the container. Graceful shutdown on
+  SIGTERM/SIGINT drains in-flight requests.
+- **CI**: `.github/workflows/ci.yml` runs `zig fmt --check`, `zig build test`,
+  frontend typecheck/tests/build.
 - **PostgreSQL**: set `ZENAIPA_DB_DRIVER=postgres` and `ZENAIPA_PG_CONNINFO`; the schema
   migrates automatically on startup.
 - **Email**: configure SMTP and a real `ZENAIPA_APP_HOST` so verification/reset links

@@ -87,7 +87,8 @@ pub fn FileApi(comptime Service: type, comptime UserService: type) type {
                     return;
                 },
                 else => {
-                    try ctx.sendErrorResponse(500, 500, @errorName(err));
+                    std.log.err("internal error: {s}", .{@errorName(err)});
+                    try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                     return;
                 },
             };
@@ -102,19 +103,17 @@ pub fn FileApi(comptime Service: type, comptime UserService: type) type {
             const params = zigmodu.http.PageParams.parse(ctx, .{ .max_page_size = 100 });
             const current_tenant = mw.authTenantId(ctx) orelse self.default_tenant_id;
             const owner: ?i64 = if (actor.admin) null else actor.id;
-            const tenant_filter: ?i64 = if (actor.admin)
-                blk: {
-                    const tid = ctx.queryInt(i64, "tenant_id", 0);
-                    break :blk if (tid > 0) tid else null;
-                }
-            else
-                current_tenant;
+            const tenant_filter: ?i64 = if (actor.admin) blk: {
+                const tid = ctx.queryInt(i64, "tenant_id", 0);
+                break :blk if (tid > 0) tid else null;
+            } else current_tenant;
             const sort = zigmodu.http.page.parseSort(ctx, &.{ "name", "size_bytes", "created_at" });
             const sort_col: ?[]const u8 = if (sort) |s| s.column else null;
             const sort_desc = if (sort) |s| s.desc else false;
 
             var result = self.svc.list(params.page, params.page_size, owner, tenant_filter, sort_col, sort_desc) catch |err| {
-                try ctx.sendErrorResponse(500, 500, @errorName(err));
+                std.log.err("internal error: {s}", .{@errorName(err)});
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
             defer result.free(self.svc.allocator);
@@ -132,7 +131,8 @@ pub fn FileApi(comptime Service: type, comptime UserService: type) type {
                 return;
             };
             const loaded_opt = self.svc.load(id) catch |err| {
-                try ctx.sendErrorResponse(500, 500, @errorName(err));
+                std.log.err("internal error: {s}", .{@errorName(err)});
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
             var loaded = loaded_opt orelse {
@@ -148,7 +148,9 @@ pub fn FileApi(comptime Service: type, comptime UserService: type) type {
             }
 
             try ctx.text(200, loaded.bytes);
-            try ctx.setHeader("Content-Type", loaded.row.mime);
+            // 危险内容类型(HTML/SVG/JS)强制二进制输出,避免经代理缓存后被当作网页渲染。
+            const safe_mime: []const u8 = if (isDangerousMime(loaded.row.mime)) "application/octet-stream" else loaded.row.mime;
+            try ctx.setHeader("Content-Type", safe_mime);
             const disposition = try std.fmt.allocPrint(ctx.allocator, "attachment; filename=\"{s}\"", .{loaded.row.name});
             defer ctx.allocator.free(disposition);
             try ctx.setHeader("Content-Disposition", disposition);
@@ -163,7 +165,8 @@ pub fn FileApi(comptime Service: type, comptime UserService: type) type {
                 return;
             };
             const row_opt = self.svc.get(id) catch |err| {
-                try ctx.sendErrorResponse(500, 500, @errorName(err));
+                std.log.err("internal error: {s}", .{@errorName(err)});
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
             const row = row_opt orelse {
@@ -177,7 +180,8 @@ pub fn FileApi(comptime Service: type, comptime UserService: type) type {
                 return;
             }
             self.svc.delete(id) catch |err| {
-                try ctx.sendErrorResponse(500, 500, @errorName(err));
+                std.log.err("internal error: {s}", .{@errorName(err)});
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
             var d5: [96]u8 = undefined;
@@ -186,6 +190,30 @@ pub fn FileApi(comptime Service: type, comptime UserService: type) type {
             try ctx.jsonStruct(200, .{ .code = 0, .msg = "ok", .data = null });
         }
     };
+}
+
+/// 取原始文件名的 basename,剔除路径分隔符、控制字符与引号(防路径穿越/header 注入)。
+fn sanitizeFilename(buf: *[256]u8, raw: []const u8) []const u8 {
+    var start: usize = 0;
+    if (std.mem.lastIndexOfScalar(u8, raw, '/')) |i| start = i + 1;
+    if (std.mem.lastIndexOfScalar(u8, raw[start..], '\\')) |j| start += j + 1;
+    var len: usize = 0;
+    for (raw[start..]) |c| {
+        if (c < 0x20 or c == '"' or c == '\\' or c == '/') continue;
+        if (len >= buf.len - 1) break;
+        buf[len] = c;
+        len += 1;
+    }
+    return buf[0..len];
+}
+
+/// 可被浏览器当活动内容渲染的 MIME 类型(附件下载场景仍需强制二进制)。
+fn isDangerousMime(mime: []const u8) bool {
+    return std.mem.indexOf(u8, mime, "text/html") != null or
+        std.mem.indexOf(u8, mime, "image/svg") != null or
+        std.mem.indexOf(u8, mime, "application/xhtml") != null or
+        std.mem.indexOf(u8, mime, "text/javascript") != null or
+        std.mem.indexOf(u8, mime, "application/javascript") != null;
 }
 
 pub const DefaultFileApi = FileApi(service.FileService, user_svc.UserService);

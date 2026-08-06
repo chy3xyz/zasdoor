@@ -98,7 +98,8 @@ pub fn UserApi(comptime Service: type) type {
             _ = (try requireAdmin(ctx, self)) orelse return;
 
             var result = self.svc.listUsers(1, 10000, null, null, null, false) catch |err| {
-                try ctx.sendErrorResponse(500, 500, @errorName(err));
+                std.log.err("internal error: {s}", .{@errorName(err)});
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
             defer result.free(ctx.allocator);
@@ -134,7 +135,8 @@ pub fn UserApi(comptime Service: type) type {
             // zigmodu percent-decodes query values at parse time, so the
             // keyword arrives already decoded (CJK searches included).
             var result = self.svc.listUsers(params.page, params.page_size, keyword_raw, tenant_filter, sort_col, sort_desc) catch |err| {
-                try ctx.sendErrorResponse(500, 500, @errorName(err));
+                std.log.err("internal error: {s}", .{@errorName(err)});
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
             defer self.svc.freeList(&result);
@@ -152,7 +154,8 @@ pub fn UserApi(comptime Service: type) type {
                 return;
             };
             const row_opt = self.svc.getUserById(id) catch |err| {
-                try ctx.sendErrorResponse(500, 500, @errorName(err));
+                std.log.err("internal error: {s}", .{@errorName(err)});
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
             const row = row_opt orelse {
@@ -231,7 +234,8 @@ pub fn UserApi(comptime Service: type) type {
             // keep the current stored values.
             if (req.name != null or req.email != null) {
                 const cur_opt = self.svc.getUserById(id) catch |err| {
-                    try ctx.sendErrorResponse(500, 500, @errorName(err));
+                    std.log.err("internal error: {s}", .{@errorName(err)});
+                    try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                     return;
                 };
                 const cur = cur_opt orelse {
@@ -258,13 +262,15 @@ pub fn UserApi(comptime Service: type) type {
             }
             if (req.verified) |v| {
                 self.svc.setVerified(id, v) catch |err| {
-                    try ctx.sendErrorResponse(500, 500, @errorName(err));
+                    std.log.err("internal error: {s}", .{@errorName(err)});
+                    try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                     return;
                 };
             }
             if (req.admin) |a| {
                 self.svc.setAdmin(id, a) catch |err| {
-                    try ctx.sendErrorResponse(500, 500, @errorName(err));
+                    std.log.err("internal error: {s}", .{@errorName(err)});
+                    try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                     return;
                 };
             }
@@ -287,7 +293,8 @@ pub fn UserApi(comptime Service: type) type {
                 return;
             }
             self.svc.deleteUser(id) catch |err| {
-                try ctx.sendErrorResponse(500, 500, @errorName(err));
+                std.log.err("internal error: {s}", .{@errorName(err)});
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
             var detail_buf: [160]u8 = undefined;
@@ -302,7 +309,11 @@ pub fn UserApi(comptime Service: type) type {
                 error.InvalidEmail => try ctx.sendErrorResponse(400, 400, "邮箱格式不正确"),
                 error.InvalidPassword => try ctx.sendErrorResponse(400, 400, "密码至少 8 位"),
                 error.EmailTaken => try ctx.sendErrorResponse(409, 409, "该邮箱已被注册"),
-                else => try ctx.sendErrorResponse(500, 500, @errorName(err)),
+                else => {
+                    std.log.err("internal error: {s}", .{@errorName(err)});
+                    try ctx.sendErrorResponse(500, 500, "服务器内部错误");
+                    return;
+                },
             }
         }
 
@@ -310,7 +321,11 @@ pub fn UserApi(comptime Service: type) type {
             switch (err) {
                 error.InvalidName => try ctx.sendErrorResponse(400, 400, "姓名不能为空"),
                 error.InvalidEmail => try ctx.sendErrorResponse(400, 400, "邮箱格式不正确"),
-                else => try ctx.sendErrorResponse(500, 500, @errorName(err)),
+                else => {
+                    std.log.err("internal error: {s}", .{@errorName(err)});
+                    try ctx.sendErrorResponse(500, 500, "服务器内部错误");
+                    return;
+                },
             }
         }
     };

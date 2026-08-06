@@ -198,7 +198,8 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
             _ = (try requireAdmin(ctx, self)) orelse return;
             const params = zigmodu.http.PageParams.parse(ctx, .{ .max_page_size = 100 });
             var result = self.svc.store.listProviders(params.page, params.page_size) catch |err| {
-                try ctx.sendErrorResponse(500, 500, @errorName(err));
+                std.log.err("internal error: {s}", .{@errorName(err)});
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
             defer result.free(ctx.allocator);
@@ -226,14 +227,16 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
                     return;
                 },
                 else => {
-                    try ctx.sendErrorResponse(500, 500, @errorName(err));
+                    std.log.err("internal error: {s}", .{@errorName(err)});
+                    try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                     return;
                 },
             };
             defer ctx.allocator.free(encrypted);
             const now = zigmodu.time.wallClockSeconds(self.svc.io);
             const id = self.svc.store.createProvider(req.name, req.endpoint, encrypted, req.models, req.fallback_providers, req.enabled, now) catch |err| {
-                try ctx.sendErrorResponse(500, 500, @errorName(err));
+                std.log.err("internal error: {s}", .{@errorName(err)});
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
             try ctx.jsonStruct(201, .{ .code = 0, .msg = "Provider 已创建", .data = .{ .id = id } });
@@ -279,7 +282,8 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
                             return;
                         },
                         else => {
-                            try ctx.sendErrorResponse(500, 500, @errorName(err));
+                            std.log.err("internal error: {s}", .{@errorName(err)});
+                            try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                             return;
                         },
                     };
@@ -298,7 +302,8 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
                 req.enabled orelse cur.enabled,
                 now,
             ) catch |err| {
-                try ctx.sendErrorResponse(500, 500, @errorName(err));
+                std.log.err("internal error: {s}", .{@errorName(err)});
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
             try ctx.jsonStruct(200, .{ .code = 0, .msg = "ok", .data = null });
@@ -312,7 +317,8 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
                 return;
             };
             self.svc.store.deleteProvider(id) catch |err| {
-                try ctx.sendErrorResponse(500, 500, @errorName(err));
+                std.log.err("internal error: {s}", .{@errorName(err)});
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
             try ctx.jsonStruct(200, .{ .code = 0, .msg = "ok", .data = null });
@@ -328,7 +334,8 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
             };
             const params = zigmodu.http.PageParams.parse(ctx, .{ .max_page_size = 100 });
             var result = self.svc.store.listSessions(uid, params.page, params.page_size) catch |err| {
-                try ctx.sendErrorResponse(500, 500, @errorName(err));
+                std.log.err("internal error: {s}", .{@errorName(err)});
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
             defer result.free(ctx.allocator);
@@ -369,7 +376,8 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
             };
             defer session.free(ctx.allocator);
             var result = self.svc.store.listMessages(sid) catch |err| {
-                try ctx.sendErrorResponse(500, 500, @errorName(err));
+                std.log.err("internal error: {s}", .{@errorName(err)});
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
             defer result.free(ctx.allocator);
@@ -449,7 +457,8 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
                 return;
             };
             _ = self.svc.store.deleteSession(sid, uid) catch |err| {
-                try ctx.sendErrorResponse(500, 500, @errorName(err));
+                std.log.err("internal error: {s}", .{@errorName(err)});
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
             try ctx.jsonStruct(200, .{ .code = 0, .msg = "ok", .data = null });
@@ -497,7 +506,8 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
             const params = zigmodu.http.PageParams.parse(ctx, .{ .max_page_size = 100 });
             const status = ctx.queryParam("status");
             var result = self.svc.store.listApprovals(status, params.page, params.page_size) catch |err| {
-                try ctx.sendErrorResponse(500, 500, @errorName(err));
+                std.log.err("internal error: {s}", .{@errorName(err)});
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
             defer result.free(ctx.allocator);
@@ -513,7 +523,8 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
                 return;
             };
             const done = self.svc.approve(ctx.allocator, id, admin_id, approve) catch |err| {
-                try ctx.sendErrorResponse(500, 500, @errorName(err));
+                std.log.err("internal error: {s}", .{@errorName(err)});
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
             if (!done) {
@@ -537,7 +548,8 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
             const params = zigmodu.http.PageParams.parse(ctx, .{ .max_page_size = 100 });
             const uid = ctx.queryInt(i64, "user_id", 0);
             var result = self.svc.store.listRuns(if (uid > 0) uid else null, params.page, params.page_size) catch |err| {
-                try ctx.sendErrorResponse(500, 500, @errorName(err));
+                std.log.err("internal error: {s}", .{@errorName(err)});
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
             defer result.free(ctx.allocator);
@@ -551,7 +563,8 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
             const tenant_id = mw.authTenantId(ctx) orelse 1;
 
             var result = self.svc.runHealthWorkflow(ctx.allocator, admin_id, tenant_id) catch |err| {
-                try ctx.sendErrorResponse(500, 500, @errorName(err));
+                std.log.err("internal error: {s}", .{@errorName(err)});
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
             defer result.deinit();
