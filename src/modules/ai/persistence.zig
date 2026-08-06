@@ -103,6 +103,7 @@ pub const RunRow = struct {
     tenant_id: i64,
     kind: []const u8,
     prompt: []const u8,
+    model: []const u8,
     tokens_in: i64,
     tokens_out: i64,
     status: []const u8,
@@ -112,6 +113,7 @@ pub const RunRow = struct {
     pub fn free(self: RunRow, allocator: std.mem.Allocator) void {
         allocator.free(self.kind);
         allocator.free(self.prompt);
+        allocator.free(self.model);
         allocator.free(self.status);
         allocator.free(self.err);
     }
@@ -259,6 +261,8 @@ pub const AiStore = struct {
         errdefer self.allocator.free(kind);
         const prompt = try self.allocator.dupe(u8, e.prompt);
         errdefer self.allocator.free(prompt);
+        const model_name = try self.allocator.dupe(u8, e.model);
+        errdefer self.allocator.free(model_name);
         const status = try self.allocator.dupe(u8, e.status);
         errdefer self.allocator.free(status);
         const err = try self.allocator.dupe(u8, e.err_msg);
@@ -270,6 +274,7 @@ pub const AiStore = struct {
             .tenant_id = e.tenant_id,
             .kind = kind,
             .prompt = prompt,
+            .model = model_name,
             .tokens_in = e.tokens_in,
             .tokens_out = e.tokens_out,
             .status = status,
@@ -555,7 +560,7 @@ pub const AiStore = struct {
 
     // ── Runs (audit / metrics / quota) ──
 
-    pub fn createRun(self: *AiStore, session_id: i64, user_id: i64, tenant_id: i64, kind: []const u8, prompt: []const u8, tokens_in: i64, tokens_out: i64, status: []const u8, err: []const u8, now: i64) !i64 {
+    pub fn createRun(self: *AiStore, session_id: i64, user_id: i64, tenant_id: i64, kind: []const u8, prompt: []const u8, model_name: []const u8, tokens_in: i64, tokens_out: i64, status: []const u8, err: []const u8, now: i64) !i64 {
         var b = try self.client.ai_run.Create();
         defer b.deinit();
         _ = try b.setFieldValue("session_id", session_id);
@@ -563,6 +568,7 @@ pub const AiStore = struct {
         _ = try b.setFieldValue("tenant_id", tenant_id);
         _ = try b.setFieldValue("kind", kind);
         _ = try b.setFieldValue("prompt", prompt);
+        _ = try b.setFieldValue("model", model_name);
         _ = try b.setFieldValue("tokens_in", tokens_in);
         _ = try b.setFieldValue("tokens_out", tokens_out);
         _ = try b.setFieldValue("status", status);

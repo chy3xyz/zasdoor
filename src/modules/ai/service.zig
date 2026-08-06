@@ -435,14 +435,14 @@ pub const AiService = struct {
         };
 
         var result = agent.run(allocator, prompt, &skill_ctx, self.cfg.default_max_steps) catch |err| {
-            _ = self.store.createRun(session_id, user_id, tenant_id, "chat", prompt, 0, 0, "error", @errorName(err), now) catch {};
+            _ = self.store.createRun(session_id, user_id, tenant_id, "chat", prompt, "", 0, 0, "error", @errorName(err), now) catch {};
             return err;
         };
         defer result.deinit(allocator);
         self.agent_metrics = agent.metrics;
 
         const status: []const u8 = if (result.budget_exhausted) "budget" else "ok";
-        _ = try self.store.createRun(session_id, user_id, tenant_id, "chat", prompt, 0, 0, status, "", now);
+        _ = try self.store.createRun(session_id, user_id, tenant_id, "chat", prompt, result.model, 0, 0, status, "", now);
         const answer = try allocator.dupe(u8, result.answer);
         const reasoning = try allocator.dupe(u8, result.reasoning);
         return .{ .answer = answer, .reasoning = reasoning, .budget_exhausted = result.budget_exhausted };

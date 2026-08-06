@@ -333,6 +333,7 @@ function AiAdmin() {
                 <th>ID</th>
                 <th>用户</th>
                 <th>类型</th>
+                <th>模型</th>
                 <th>提示词</th>
                 <th>状态</th>
                 <th>时间</th>
@@ -345,6 +346,7 @@ function AiAdmin() {
                     <td class="font-mono text-xs">{r.id}</td>
                     <td class="font-mono text-xs">{r.user_id}</td>
                     <td class="text-sm">{r.kind}</td>
+                    <td class="font-mono text-xs text-base-content/70">{r.model || '-'}</td>
                     <td class="max-w-xs truncate text-sm text-base-content/70">{r.prompt}</td>
                     <td>
                       <span class={`badge badge-sm ${r.status === 'ok' ? 'badge-success' : 'badge-warning'}`}>{r.status}</span>
@@ -355,7 +357,7 @@ function AiAdmin() {
               </For>
               <Show when={runs().length === 0}>
                 <tr>
-                  <td colspan={6} class="py-8 text-center text-base-content/50">
+                  <td colspan={7} class="py-8 text-center text-base-content/50">
                     暂无运行记录
                   </td>
                 </tr>

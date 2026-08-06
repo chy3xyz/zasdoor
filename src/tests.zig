@@ -650,9 +650,9 @@ test "ai: run quota counts within rolling window + health workflow" {
     var svc = try ai.service.AiService.init(allocator, std.testing.io, &ai_store, .{ .key_secret = "master-secret" }, refs);
     defer svc.deinit();
 
-    _ = try ai_store.createRun(0, 7, 1, "chat", "hi", 0, 0, "ok", "", 100);
-    _ = try ai_store.createRun(0, 7, 1, "chat", "hi", 0, 0, "ok", "", 200);
-    _ = try ai_store.createRun(0, 8, 1, "chat", "hi", 0, 0, "ok", "", 300);
+    _ = try ai_store.createRun(0, 7, 1, "chat", "hi", "test-model", 0, 0, "ok", "", 100);
+    _ = try ai_store.createRun(0, 7, 1, "chat", "hi", "test-model", 0, 0, "ok", "", 200);
+    _ = try ai_store.createRun(0, 8, 1, "chat", "hi", "test-model", 0, 0, "ok", "", 300);
     try std.testing.expectEqual(@as(i64, 2), try ai_store.runCountForUser(7, 50));
 
     // 无 LLM 的健康工作流:两个只读技能按序执行。

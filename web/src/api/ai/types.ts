@@ -73,6 +73,7 @@ export interface AiRunItem {
   user_id: number;
   kind: string;
   prompt: string;
+  model: string;
   status: string;
   err: string;
   created_at: number;

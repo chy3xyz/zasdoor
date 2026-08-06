@@ -248,7 +248,7 @@ fails without it). Then chat with the agent in **AI 助手**:
   the **审批** queue; approving it performs the send)
 - Per-user sessions persist message history; a rolling 24h quota caps runs
   (`ZENAIPA_AI_DAILY_RUN_LIMIT`)
-- **AI 管理 → 运行记录** lists every agent run; **AI 管理 → 工作流** runs the
+- **AI 管理 → 运行记录** lists every agent run (with the actual model that answered); **AI 管理 → 工作流** runs the
   read-only health-report workflow; each provider row has a **测试** button
   (POST `/ai/providers/{id}/check`) that pings the endpoint; approval
   decisions are written to the audit log; `GET /api/v1/ai/metrics` exposes

@@ -61,6 +61,7 @@ pub const AiRun = Schema("AiRun", .{
         field.Int("tenant_id").Default(1),
         field.String("kind").Default("chat"),
         field.String("prompt").Default(""),
+        field.String("model").Default(""),
         field.Int("tokens_in").Default(0),
         field.Int("tokens_out").Default(0),
         field.String("status").Default("ok"),
