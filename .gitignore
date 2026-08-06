@@ -30,3 +30,6 @@ uploads/
 
 # Stray root package-lock (real lockfile lives in web/)
 package-lock.json
+
+# Local agent sandbox config (machine-specific writable roots)
+reasonix.toml
