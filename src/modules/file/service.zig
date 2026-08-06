@@ -116,9 +116,9 @@ fn wallNow(io: std.Io) i64 {
 
 /// 允许上传的扩展名白名单(排除 html/svg/脚本等可执行内容)。
 const allowed_extensions = [_][]const u8{
-    "txt", "md", "csv", "json", "log", "pdf", "doc", "docx", "xls", "xlsx",
-    "ppt", "pptx", "png", "jpg", "jpeg", "gif", "webp", "zip", "gz", "tar",
-    "7z", "mp4", "mov", "mp3", "wav", "bin",
+    "txt", "md",   "csv", "json", "log",  "pdf", "doc",  "docx", "xls", "xlsx",
+    "ppt", "pptx", "png", "jpg",  "jpeg", "gif", "webp", "zip",  "gz",  "tar",
+    "7z",  "mp4",  "mov", "mp3",  "wav",  "bin",
 };
 
 fn extensionAllowed(ext: []const u8) bool {
