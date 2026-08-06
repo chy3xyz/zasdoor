@@ -1,6 +1,7 @@
 export * from './types';
 export {
   chatAi,
+  checkAiProvider,
   createAiProvider,
   createAiSession,
   deleteAiProvider,

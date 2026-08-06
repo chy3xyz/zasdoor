@@ -430,6 +430,13 @@ pub const AiStore = struct {
     }
 
     pub fn deleteSession(self: *AiStore, id: i64, user_id: i64) !bool {
+        // 级联删除该会话的全部消息,避免孤儿数据。
+        const mpreds = self.client.ai_message.predicates;
+        var dm = self.client.ai_message.Delete();
+        defer dm.deinit();
+        _ = try dm.Where(.{mpreds.session_idEQ(.{ .int = id })});
+        _ = try dm.Exec();
+
         const preds = self.client.ai_session.predicates;
         var d = self.client.ai_session.Delete();
         defer d.deinit();

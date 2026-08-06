@@ -228,7 +228,8 @@ JSON 序列化，你编辑中的引号/换行永远不会破坏邮件载荷。
   （写操作——进入**审批**队列，批准后才会真正发送）
 - 会话按用户持久化消息历史；滚动 24 小时配额限制调用次数（`ZENAIPA_AI_DAILY_RUN_LIMIT`）
 - **AI 管理 → 运行记录** 展示每次 Agent 运行；**AI 管理 → 工作流** 运行只读健康报告
-  工作流；`GET /api/v1/ai/metrics` 暴露 Prometheus Agent 指标
+  工作流；每个 Provider 行有 **测试** 按钮（`POST /ai/providers/{id}/check`）可探测连通性；
+  审批处置写入审计日志；`GET /api/v1/ai/metrics` 暴露 Prometheus Agent 指标
 
 ## 📡 API 概览
 

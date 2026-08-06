@@ -679,3 +679,53 @@ test "ai: message reasoning_content persists and round-trips" {
     try std.testing.expectEqualStrings("这是推理过程(thinking chain)", msgs.items[1].reasoning_content);
     try std.testing.expectEqualStrings("", msgs.items[0].reasoning_content);
 }
+
+test "ai: deleting a session cascades to its messages" {
+    const allocator = std.testing.allocator;
+    var env = try openMemory(allocator);
+    defer env.deinit();
+    var ai_store = ai.persistence.AiStore.init(allocator, env.client);
+
+    const sid = try ai_store.createSession(7, 1, "会话", 100);
+    _ = try ai_store.addMessage(sid, "user", "hi", "", 100);
+    _ = try ai_store.addMessage(sid, "assistant", "hello", "thinking", 110);
+
+    try std.testing.expect(try ai_store.deleteSession(sid, 7));
+    var msgs = try ai_store.listMessages(sid);
+    defer msgs.free(allocator);
+    try std.testing.expectEqual(@as(i64, 0), msgs.total); // 消息已级联清除
+    try std.testing.expect((try ai_store.getSession(sid, 7)) == null);
+}
+
+test "ai: approval resolve writes audit log" {
+    const allocator = std.testing.allocator;
+    var env = try openMemory(allocator);
+    defer env.deinit();
+    var ai_store = ai.persistence.AiStore.init(allocator, env.client);
+    var user_store = user.persistence.UserStore.init(allocator, env.client);
+    var task_store = task.persistence.TaskStore.init(allocator, env.client);
+    var audit_store = audit.persistence.AuditStore.init(allocator, env.client);
+    var tenant_store = tenant.persistence.TenantStore.init(allocator, env.client);
+    var notify_store = notify.persistence.NotificationStore.init(allocator, env.client);
+    var notify_svc = notify.service.NotificationService.init(allocator, std.testing.io, &notify_store);
+    const refs = ai.service.SkillsRefs{
+        .user_store = &user_store,
+        .task_store = &task_store,
+        .audit_store = &audit_store,
+        .tenant_store = &tenant_store,
+        .ai_store = &ai_store,
+        .notify_svc = &notify_svc,
+    };
+    var svc = try ai.service.AiService.init(allocator, std.testing.io, &ai_store, .{ .key_secret = "master-secret" }, refs);
+    defer svc.deinit();
+
+    const approval_id = try ai_store.createApproval(1, 7, "zenaipa.notify.send", "{\"user_id\":1,\"title\":\"t\",\"body\":\"b\",\"kind\":\"info\"}", 100);
+    _ = try user_store.createUser("Boss", "boss@x.com", "hash", false, true, 1, 100);
+    _ = try svc.approve(allocator, approval_id, 2, true);
+
+    // 审计日志应有 ai.approval 记录。
+    var logs = try audit_store.list(1, 10, .{ .action = "ai." });
+    defer logs.free(allocator);
+    try std.testing.expectEqual(@as(i64, 1), logs.total);
+    try std.testing.expectEqualStrings("ai.approval", logs.items[0].action);
+}

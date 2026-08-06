@@ -249,7 +249,9 @@ fails without it). Then chat with the agent in **AI 助手**:
 - Per-user sessions persist message history; a rolling 24h quota caps runs
   (`ZENAIPA_AI_DAILY_RUN_LIMIT`)
 - **AI 管理 → 运行记录** lists every agent run; **AI 管理 → 工作流** runs the
-  read-only health-report workflow; `GET /api/v1/ai/metrics` exposes
+  read-only health-report workflow; each provider row has a **测试** button
+  (POST `/ai/providers/{id}/check`) that pings the endpoint; approval
+  decisions are written to the audit log; `GET /api/v1/ai/metrics` exposes
   Prometheus agent metrics
 
 ## 📡 API Overview

@@ -153,6 +153,7 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
             try a.post("/ai/providers", createProvider, @ptrCast(@alignCast(self)));
             try a.put("/ai/providers/{id}", updateProvider, @ptrCast(@alignCast(self)));
             try a.delete("/ai/providers/{id}", deleteProvider, @ptrCast(@alignCast(self)));
+            try a.post("/ai/providers/{id}/check", checkProvider, @ptrCast(@alignCast(self)));
             try a.get("/ai/approvals", listApprovals, @ptrCast(@alignCast(self)));
             try a.post("/ai/approvals/{id}/approve", approveApproval, @ptrCast(@alignCast(self)));
             try a.post("/ai/approvals/{id}/reject", rejectApproval, @ptrCast(@alignCast(self)));
@@ -450,6 +451,40 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
                 return;
             };
             try ctx.jsonStruct(200, .{ .code = 0, .msg = "ok", .data = null });
+        }
+
+        fn checkProvider(ctx: *http.Context) !void {
+            const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
+            _ = (try requireAdmin(ctx, self)) orelse return;
+            const id = ctx.paramInt(i64, "id") catch {
+                try ctx.sendErrorResponse(400, 400, "无效的 Provider ID");
+                return;
+            };
+            const result = self.svc.checkProvider(ctx.allocator, id) catch |err| switch (err) {
+                error.ProviderNotFound => {
+                    try ctx.sendErrorResponse(404, 404, "Provider 不存在");
+                    return;
+                },
+                error.ProviderDisabled => {
+                    try ctx.sendErrorResponse(400, 400, "Provider 已停用");
+                    return;
+                },
+                error.EmptyApiKeys => {
+                    try ctx.sendErrorResponse(400, 400, "Provider 未配置密钥");
+                    return;
+                },
+                error.EmptyModel => {
+                    try ctx.sendErrorResponse(400, 400, "Provider 未配置模型");
+                    return;
+                },
+                else => {
+                    const msg = try std.fmt.allocPrint(ctx.allocator, "连接失败: {s}", .{@errorName(err)});
+                    defer ctx.allocator.free(msg);
+                    try ctx.sendErrorResponse(502, 502, msg);
+                    return;
+                },
+            };
+            try ctx.jsonStruct(200, .{ .code = 0, .msg = "", .data = .{ .status = result } });
         }
 
         // ── Approvals / runs / metrics ──

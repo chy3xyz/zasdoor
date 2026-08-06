@@ -5,6 +5,7 @@ import {
   AI_PATH,
   aiApprovalResolve,
   aiApprovalsQuery,
+  aiProviderCheck,
   aiProviderDetail,
   aiProvidersQuery,
   aiRunsQuery,
@@ -81,6 +82,10 @@ export async function updateAiProvider(
 ): Promise<void> {
   const { data } = await http.put<{ code: number; msg: string; data: null }>(aiProviderDetail(id), body);
   unwrapEnvelope(data);
+}
+
+export async function checkAiProvider(id: number): Promise<{ status: string }> {
+  return postEnvelope<{ status: string }>(aiProviderCheck(id));
 }
 
 export async function deleteAiProvider(id: number): Promise<void> {

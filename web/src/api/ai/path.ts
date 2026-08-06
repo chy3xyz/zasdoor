@@ -14,6 +14,7 @@ export const aiSessionDetail = (id: number) => `${AI_PATH.sessions}/${id}`;
 export const aiSessionMessages = (id: number) => `${AI_PATH.sessions}/${id}/messages`;
 export const aiSessionChat = (id: number) => `${AI_PATH.sessions}/${id}/chat`;
 export const aiProviderDetail = (id: number) => `${AI_PATH.providers}/${id}`;
+export const aiProviderCheck = (id: number) => `${AI_PATH.providers}/${id}/check`;
 export const aiApprovalResolve = (id: number, action: 'approve' | 'reject') =>
   `${AI_PATH.approvals}/${id}/${action}`;
 

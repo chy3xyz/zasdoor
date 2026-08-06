@@ -1,6 +1,7 @@
 import { createSignal, For, Show } from 'solid-js';
 
 import {
+  checkAiProvider,
   createAiProvider,
   deleteAiProvider,
   listAiApprovals,
@@ -37,6 +38,8 @@ function AiAdmin() {
 
   const [workflow, setWorkflow] = createSignal<AiWorkflowResult | null>(null);
   const [wfBusy, setWfBusy] = createSignal(false);
+  const [checkingId, setCheckingId] = createSignal<number | null>(null);
+  const [checkResult, setCheckResult] = createSignal<{ id: number; ok: boolean; msg: string } | null>(null);
 
   const loadProviders = async () => {
     try {
@@ -134,6 +137,19 @@ function AiAdmin() {
     }
   };
 
+  const onCheckProvider = async (p: AiProviderItem) => {
+    setCheckingId(p.id);
+    setCheckResult(null);
+    try {
+      await checkAiProvider(p.id);
+      setCheckResult({ id: p.id, ok: true, msg: '连接正常' });
+    } catch (err) {
+      setCheckResult({ id: p.id, ok: false, msg: toApiError(err).message });
+    } finally {
+      setCheckingId(null);
+    }
+  };
+
   const onResolve = async (a: AiApprovalItem, action: 'approve' | 'reject') => {
     try {
       await resolveAiApproval(a.id, action);
@@ -222,6 +238,9 @@ function AiAdmin() {
                       </td>
                       <td class="text-right">
                         <div class="flex justify-end gap-1">
+                          <button type="button" class="btn btn-outline btn-xs" disabled={checkingId() === p.id} onClick={() => onCheckProvider(p)}>
+                            {checkingId() === p.id ? '测试中…' : '测试'}
+                          </button>
                           <button type="button" class="btn btn-outline btn-xs" onClick={() => openEdit(p)}>
                             编辑
                           </button>
@@ -244,6 +263,13 @@ function AiAdmin() {
             </table>
           </div>
         </div>
+        <Show when={checkResult()}>
+          {(r) => (
+            <div role="alert" class={`alert py-2 text-sm ${r().ok ? 'alert-success' : 'alert-error'}`}>
+              Provider #{r().id}: {r().msg}
+            </div>
+          )}
+        </Show>
       </Show>
 
       <Show when={tab() === 'approvals'}>

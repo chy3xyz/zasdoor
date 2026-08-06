@@ -466,6 +466,45 @@ pub const AiService = struct {
         return workflow.run(allocator, &skill_ctx);
     }
 
+    // ── Provider health check ──────────────────────────────────────────────
+
+    /// 向 Provider 发送一次最小 chat 请求(max_tokens=1)验证连通性。
+    /// 返回 "ok" 或 error(调用方转成 502 + 错误信息)。
+    pub fn checkProvider(self: *AiService, allocator: std.mem.Allocator, id: i64) ![]const u8 {
+        const row_opt = try self.store.getProvider(id);
+        const row = row_opt orelse return error.ProviderNotFound;
+        defer row.free(allocator);
+        if (!row.enabled) return error.ProviderDisabled;
+        if (row.api_keys_encrypted.len == 0) return error.EmptyApiKeys;
+
+        const keys_json = try self.decryptKeys(allocator, row.api_keys_encrypted);
+        defer allocator.free(keys_json);
+        const parsed = try std.json.parseFromSlice(std.json.Value, allocator, keys_json, .{});
+        defer parsed.deinit();
+        if (parsed.value.array.items.len == 0) return error.EmptyApiKeys;
+
+        var model: []const u8 = "";
+        var it = std.mem.splitScalar(u8, row.models, ',');
+        while (it.next()) |m| {
+            if (m.len > 0) {
+                model = m;
+                break;
+            }
+        }
+        if (model.len == 0) return error.EmptyModel;
+
+        var provider = ai.AiProvider{
+            .allocator = allocator,
+            .http = &self.http,
+            .endpoint = row.endpoint,
+            .api_key = parsed.value.array.items[0].string,
+            .model = model,
+        };
+        var resp = provider.chat(&.{.{ .role = "user", .content = "ping" }}) catch |err| return err;
+        defer provider.freeResponse(&resp);
+        return "ok";
+    }
+
     // ── Quota / approvals ──────────────────────────────────────────────────
 
     pub fn runCountToday(self: *AiService, user_id: i64) !i64 {
@@ -485,6 +524,12 @@ pub const AiService = struct {
         const new_status: []const u8 = if (do_approve) "approved" else "rejected";
         const affected = try self.store.resolveApproval(id, new_status, approved_by, now);
         if (affected == 0) return false; // 并发下已被他人处理
+
+        // 审批处置写入平台审计日志(合规)。
+        const now_s = zigmodu.time.wallClockSeconds(self.io);
+        var detail_buf: [160]u8 = undefined;
+        const detail = try std.fmt.bufPrint(&detail_buf, "AI 审批 {s}: {s} #{d}", .{ if (do_approve) "批准" else "拒绝", row.skill_name, id });
+        _ = self.refs.audit_store.create(approved_by, "", "ai.approval", "ai_approval", id, detail, "", true, 0, now_s) catch {};
 
         if (do_approve and std.mem.eql(u8, row.skill_name, "zenaipa.notify.send")) {
             const parsed = try std.json.parseFromSlice(std.json.Value, allocator, row.args, .{});
