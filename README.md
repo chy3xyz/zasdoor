@@ -7,7 +7,7 @@
 Ship your internal console faster than your coffee gets cold.
 
 [![Zig](https://img.shields.io/badge/Zig-0.17-orange?logo=zig&logoColor=white)](https://ziglang.org)
-[![zigmodu](https://img.shields.io/badge/zigmodu-v0.15.12-blue)](https://github.com/chy3xyz/zigmodu)
+[![zigmodu](https://img.shields.io/badge/zigmodu-v0.15.18-blue)](https://github.com/chy3xyz/zigmodu)
 [![zent](https://img.shields.io/badge/zent-ORM-6b46c1)](https://github.com/chy3xyz/zent)
 [![SolidJS](https://img.shields.io/badge/Frontend-SolidJS-2c4f7c?logo=solid&logoColor=white)](https://www.solidjs.com)
 [![Tests](https://img.shields.io/badge/tests-31%20backend%20%2B%205%20frontend-green)]()
@@ -61,7 +61,7 @@ Ship your internal console faster than your coffee gets cold.
 - **Skills** — LLM-callable platform tools: user search, task stats, audit search, tenant list (read-only) + `notify.send` (write, human-approved)
 - **Chat** — per-user sessions with persisted history, **reasoning-chain display** (DeepSeek-R1 etc.)
 - **Human-in-the-loop** — approval queue, approve executes the action
-- **Governance** — rolling 24h quota, 4-way concurrency bulkhead,**circuit breaker** (5-failure → 60s OPEN + half-open probe), provider health check, run audit with the **actual model** recorded, Prometheus AI metrics
+- **Governance** — rolling 24h quota, 4-way concurrency bulkhead,**circuit breaker** (5-failure → 60s OPEN + half-open probe), provider health check, run audit with the **actual model** + **per-run usage snapshot** (tokens/steps/tool calls via `Metrics.toStats()`, zigmodu v0.15.17), Prometheus AI metrics
 - **Workflow** — read-only health-report orchestration via zigmodu.ai
 
 ### 💎 Engineering quality
@@ -76,7 +76,7 @@ Ship your internal console faster than your coffee gets cold.
 
 | Layer | Technology |
 | --- | --- |
-| Backend | [Zig](https://ziglang.org) 0.17 · [zigmodu](https://github.com/chy3xyz/zigmodu) v0.15.12+ (HTTP, security, AI, resilience, Application lifecycle) · [zent](https://github.com/chy3xyz/zent) (ORM, schema, migrations) |
+| Backend | [Zig](https://ziglang.org) 0.17 · [zigmodu](https://github.com/chy3xyz/zigmodu) v0.15.18+ (HTTP, security, AI, resilience, Application lifecycle) · [zent](https://github.com/chy3xyz/zent) (ORM, schema, migrations) |
 | Frontend | [SolidJS](https://www.solidjs.com) · TypeScript · [Rsbuild](https://rsbuild.dev) · [Tailwind CSS](https://tailwindcss.com) 4 · [DaisyUI](https://daisyui.com) · vitest |
 | Database | SQLite (default) · PostgreSQL (one env var) |
 
@@ -151,7 +151,7 @@ All settings are `ZENAIPA_*` env vars (see [`src/config.zig`](src/config.zig) fo
 1. **Configure a provider** (admin): AI 管理 → Provider — OpenAI-compatible `endpoint`, JSON array of `api_keys`, comma-separated `models`. Keys are AES-256-GCM encrypted (set `ZENAIPA_AI_KEY_SECRET` first). Use the **测试** button to verify connectivity.
 2. **Chat** (AI 助手): ask the agent about your platform — *"任务队列现在什么情况?"* It calls read-only skills (user/task/audit/tenant) and shows its **reasoning chain** in a collapsible block.
 3. **Write actions need approval**: `notify.send` lands in the approval queue; approving it performs the send (audit-logged, optimistic-locked).
-4. **Governance**: rolling 24h quota, 4-way bulkhead, **circuit breaker**, provider health checks, run audit records the **actual model** answered, Prometheus AI metrics.
+4. **Governance**: rolling 24h quota, 4-way bulkhead, **circuit breaker**, provider health checks, run audit records the **actual model** answered + **per-run usage snapshot** (tokens/steps/tool calls via `AgentMetrics.toStats()`), Prometheus AI metrics.
 
 ---
 
@@ -202,6 +202,8 @@ cd web && npm run typecheck && npm test && npm run build   # vitest + build
 | --- | --- |
 | ✅ Done | AI assistant (providers/skills/chat/approvals/workflow/quota), audit log + CSV, dashboard, email templates, per-IP rate limiting, **session revocation**, file allow-list, graceful shutdown, Docker/CI, frontend tests, theme toggle |
 | ✅ Done | **Streaming chat** — Agent `chatStream` + `on_delta` (zigmodu v0.15.16); SSE reasoning/delta/done feed with typing effect, JSON fallback |
+| ✅ Done | **Run usage audit** — zigmodu v0.15.17 `Metrics.toStats()`; every AI run persists tokens/steps/tool-call usage, admin runs table shows it |
+| ✅ Done | **Streaming tool-JSON fix** — zigmodu v0.15.18 (`b28444a`); SkillRegistry tools_json now emits valid JSON (extra `}` removed) so DeepSeek/OpenAI no longer reject tool schemas with 400 → `ProviderError` in streaming chat |
 
 ---
 

@@ -337,6 +337,7 @@ function AiAdmin() {
                 <th>类型</th>
                 <th>模型</th>
                 <th>提示词</th>
+                <th>用量</th>
                 <th>状态</th>
                 <th>时间</th>
               </tr>
@@ -350,6 +351,10 @@ function AiAdmin() {
                     <td class="text-sm">{r.kind}</td>
                     <td class="font-mono text-xs text-base-content/70">{r.model || '-'}</td>
                     <td class="max-w-xs truncate text-sm text-base-content/70">{r.prompt}</td>
+                    <td class="text-xs text-base-content/70">
+                      {r.tokens_in > 0 || r.tokens_out > 0 ? `${r.tokens_in}→${r.tokens_out} tok` : '—'}
+                      {r.steps > 0 || r.tool_calls > 0 ? ` · ${r.steps}步/${r.tool_calls}工具${r.tool_errors > 0 ? `/${r.tool_errors}错` : ''}` : ''}
+                    </td>
                     <td>
                       <span class={`badge badge-sm ${r.status === 'ok' ? 'badge-success' : 'badge-warning'}`}>{r.status}</span>
                     </td>
@@ -359,7 +364,7 @@ function AiAdmin() {
               </For>
               <Show when={runs().length === 0}>
                 <tr>
-                  <td colspan={7} class="py-8 text-center text-base-content/50">
+                  <td colspan={8} class="py-8 text-center text-base-content/50">
                     暂无运行记录
                   </td>
                 </tr>

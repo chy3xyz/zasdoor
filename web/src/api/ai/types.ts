@@ -74,6 +74,11 @@ export interface AiRunItem {
   kind: string;
   prompt: string;
   model: string;
+  tokens_in: number;
+  tokens_out: number;
+  steps: number;
+  tool_calls: number;
+  tool_errors: number;
   status: string;
   err: string;
   created_at: number;

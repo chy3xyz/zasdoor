@@ -106,6 +106,9 @@ pub const RunRow = struct {
     model: []const u8,
     tokens_in: i64,
     tokens_out: i64,
+    steps: i64,
+    tool_calls: i64,
+    tool_errors: i64,
     status: []const u8,
     err: []const u8,
     created_at: i64,
@@ -277,6 +280,9 @@ pub const AiStore = struct {
             .model = model_name,
             .tokens_in = e.tokens_in,
             .tokens_out = e.tokens_out,
+            .steps = e.steps,
+            .tool_calls = e.tool_calls,
+            .tool_errors = e.tool_errors,
             .status = status,
             .err = err,
             .created_at = e.created_at orelse 0,
@@ -560,7 +566,7 @@ pub const AiStore = struct {
 
     // ── Runs (audit / metrics / quota) ──
 
-    pub fn createRun(self: *AiStore, session_id: i64, user_id: i64, tenant_id: i64, kind: []const u8, prompt: []const u8, model_name: []const u8, tokens_in: i64, tokens_out: i64, status: []const u8, err: []const u8, now: i64) !i64 {
+    pub fn createRun(self: *AiStore, session_id: i64, user_id: i64, tenant_id: i64, kind: []const u8, prompt: []const u8, model_name: []const u8, tokens_in: i64, tokens_out: i64, steps: i64, tool_calls: i64, tool_errors: i64, status: []const u8, err: []const u8, now: i64) !i64 {
         var b = try self.client.ai_run.Create();
         defer b.deinit();
         _ = try b.setFieldValue("session_id", session_id);
@@ -571,6 +577,9 @@ pub const AiStore = struct {
         _ = try b.setFieldValue("model", model_name);
         _ = try b.setFieldValue("tokens_in", tokens_in);
         _ = try b.setFieldValue("tokens_out", tokens_out);
+        _ = try b.setFieldValue("steps", steps);
+        _ = try b.setFieldValue("tool_calls", tool_calls);
+        _ = try b.setFieldValue("tool_errors", tool_errors);
         _ = try b.setFieldValue("status", status);
         _ = try b.setFieldValue("err_msg", err);
         _ = try b.setFieldValue("created_at", now);

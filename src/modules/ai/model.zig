@@ -64,6 +64,10 @@ pub const AiRun = Schema("AiRun", .{
         field.String("model").Default(""),
         field.Int("tokens_in").Default(0),
         field.Int("tokens_out").Default(0),
+        // zigmodu v0.15.17 AgentMetrics.toStats() 快照增量(本次 run 的用量)。
+        field.Int("steps").Default(0),
+        field.Int("tool_calls").Default(0),
+        field.Int("tool_errors").Default(0),
         field.String("status").Default("ok"),
         field.String("err_msg").Default(""),
     },

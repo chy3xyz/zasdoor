@@ -60,6 +60,33 @@ pub const ChatOutcome = struct {
     }
 };
 
+/// 本次 run 的 Agent 用量增量(由前后两次 `AgentMetrics.toStats()` 快照相减)。
+pub const UsageDelta = struct {
+    runs: usize = 0,
+    steps: usize = 0,
+    tool_calls: usize = 0,
+    tool_errors: usize = 0,
+    tool_denied: usize = 0,
+    max_steps_hits: usize = 0,
+    budget_exhausted: usize = 0,
+    canceled: usize = 0,
+};
+
+/// 纯函数:本次 run 用量 = 运行后累计快照 − 运行前累计快照
+/// (同一累加器单调递增,差值非负;避免逐字段 .load 与 {d} 传 atomic 的编译错误)。
+pub fn usageDelta(before: ai.AgentMetrics.Stats, after: ai.AgentMetrics.Stats) UsageDelta {
+    return .{
+        .runs = after.runs - before.runs,
+        .steps = after.steps - before.steps,
+        .tool_calls = after.tool_calls - before.tool_calls,
+        .tool_errors = after.tool_errors - before.tool_errors,
+        .tool_denied = after.tool_denied - before.tool_denied,
+        .max_steps_hits = after.max_steps_hits - before.max_steps_hits,
+        .budget_exhausted = after.budget_exhausted - before.budget_exhausted,
+        .canceled = after.canceled - before.canceled,
+    };
+}
+
 pub const AiService = struct {
     allocator: std.mem.Allocator,
     io: std.Io,
@@ -72,6 +99,36 @@ pub const AiService = struct {
     /// AI provider 熔断:连续失败达到阈值后快速失败,避免拖垮上游。
     breaker: zigmodu.CircuitBreaker,
     refs: SkillsRefs,
+
+    /// 读取当前累计值组装 AgentMetrics 快照(逐字段 atomic load,无锁;供
+    /// run 起点与 /metrics 渲染使用,避免整 struct 拷贝与并发写回竞争)。
+    pub fn currentAgentMetrics(self: *AiService) ai.AgentMetrics {
+        const s = self.agent_metrics.toStats();
+        return .{
+            .runs = .init(s.runs),
+            .steps = .init(s.steps),
+            .tool_calls = .init(s.tool_calls),
+            .tool_errors = .init(s.tool_errors),
+            .tool_denied = .init(s.tool_denied),
+            .max_steps_hits = .init(s.max_steps_hits),
+            .budget_exhausted = .init(s.budget_exhausted),
+            .canceled = .init(s.canceled),
+        };
+    }
+
+    /// 原子累加本次 run 的用量增量。AgentMetrics 字段均为 atomic.Value,
+    /// 逐字段 fetchAdd 无锁且并发安全(整 struct 覆盖写回会丢增量/回退,
+    /// 故不采用)。
+    pub fn addAgentMetrics(self: *AiService, d: UsageDelta) void {
+        _ = self.agent_metrics.runs.fetchAdd(d.runs, .monotonic);
+        _ = self.agent_metrics.steps.fetchAdd(d.steps, .monotonic);
+        _ = self.agent_metrics.tool_calls.fetchAdd(d.tool_calls, .monotonic);
+        _ = self.agent_metrics.tool_errors.fetchAdd(d.tool_errors, .monotonic);
+        _ = self.agent_metrics.tool_denied.fetchAdd(d.tool_denied, .monotonic);
+        _ = self.agent_metrics.max_steps_hits.fetchAdd(d.max_steps_hits, .monotonic);
+        _ = self.agent_metrics.budget_exhausted.fetchAdd(d.budget_exhausted, .monotonic);
+        _ = self.agent_metrics.canceled.fetchAdd(d.canceled, .monotonic);
+    }
 
     pub fn init(
         allocator: std.mem.Allocator,
@@ -451,13 +508,19 @@ pub const AiService = struct {
         };
         defer allocator.free(skill_ctx.run_id.?);
 
+        // zigmodu v0.15.17:AgentMetrics.toStats() 运行前累计快照——与运行后快照
+        // 相减得到本次 run 的用量增量(避免逐字段 .load(.monotonic) 与 {d} 传 atomic 的编译错误)。
+        // run 起点与 before 用同一次快照,消除并发写回下的不一致窗口。
+        const start_metrics = self.currentAgentMetrics();
+        const agent_stats_before = start_metrics.toStats();
+
         var agent = ai.Agent{
             .provider = &provider,
             .registry = &self.registry,
             .allowlist = &.{ "zenaipa.user.search", "zenaipa.task.stats", "zenaipa.audit.search", "zenaipa.tenant.list", "zenaipa.notify.send" },
             .tool_timeout_ms = self.cfg.tool_timeout_ms,
             .budget = &budget,
-            .metrics = self.agent_metrics,
+            .metrics = start_metrics,
             .hooks = .{ .ctx = delta_ctx, .on_delta = on_delta },
         };
 
@@ -487,16 +550,25 @@ pub const AiService = struct {
         switch (br) {
             .circuit_open => return error.AiCircuitOpen,
             .failure => |e| {
-                _ = self.store.createRun(session_id, user_id, tenant_id, "chat", prompt, "", 0, 0, "error", @errorName(e), now) catch {};
+                // 失败也记录部分用量(agent.metrics 为累计快照起步,差值即本次增量),
+                // 并同样原子累加进累计器,与成功路径语义一致。
+                const f_stats = agent.metrics.toStats();
+                const f_prov = provider.metrics.toStats();
+                const fd = usageDelta(agent_stats_before, f_stats);
+                self.addAgentMetrics(fd);
+                _ = self.store.createRun(session_id, user_id, tenant_id, "chat", prompt, "", @intCast(f_prov.total_prompt_tokens), @intCast(f_prov.total_completion_tokens), @intCast(fd.steps), @intCast(fd.tool_calls), @intCast(fd.tool_errors), "error", @errorName(e), now) catch {};
                 return e;
             },
             .success => result = run_ctx.result orelse return error.AiRunFailed,
         }
         defer result.deinit(allocator);
-        self.agent_metrics = agent.metrics;
-
+        // 本次 run 用量:Agent 快照差值(本地拷贝,无锁)+ provider(本次新建)tokens;
+        // 逐字段 fetchAdd 原子累加,并发 chat 不丢增量(不用整 struct 覆盖写回)。
+        const d = usageDelta(agent_stats_before, agent.metrics.toStats());
+        self.addAgentMetrics(d);
+        const provider_stats = provider.metrics.toStats();
         const status: []const u8 = if (result.budget_exhausted) "budget" else "ok";
-        _ = try self.store.createRun(session_id, user_id, tenant_id, "chat", prompt, result.model, 0, 0, status, "", now);
+        _ = try self.store.createRun(session_id, user_id, tenant_id, "chat", prompt, result.model, @intCast(provider_stats.total_prompt_tokens), @intCast(provider_stats.total_completion_tokens), @intCast(d.steps), @intCast(d.tool_calls), @intCast(d.tool_errors), status, "", now);
         const answer = try allocator.dupe(u8, result.answer);
         const reasoning = try allocator.dupe(u8, result.reasoning);
         return .{ .answer = answer, .reasoning = reasoning, .budget_exhausted = result.budget_exhausted };

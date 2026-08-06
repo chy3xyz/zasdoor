@@ -3,6 +3,11 @@
 > 状态:**已落地**。zigmodu v0.15.16(`e7cf9df`)修复 `requestStream` 本地路径并
 > 完成 Agent 流式切换(TODO #4);zenaipa 已按本契约接入(后端 SSE + 前端打字机)。
 >
+> **v0.15.18 补丁(`b28444a`)**:`SkillRegistry.toOpenAiFunctionsAlloc` 曾为每个
+> 工具多输出一个 `}` 使 tools JSON 非法,DeepSeek/OpenAI 以 HTTP 400 拒绝 → 流式
+> chat 出现 `ProviderError`。上游已修复(闭合改为 `]}}}`),zenaipa 的工具 schema
+> 全量走 `SkillRegistry`,无需改动即恢复;上游测试新增 `std.json` 解析守卫。
+>
 > **关键澄清(消除误解)**:流式切换**不影响工具决策**——`chatStream` 内部先聚合
 > 完整 `ChatResponse`(含 `tool_calls`)再返回,Agent 拿到的与 `chatWith` 完全同构
 > (已验证 `content matches: YES`)。流式是"旁路推送 delta + 完整聚合决策"并行,

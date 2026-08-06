@@ -650,10 +650,30 @@ test "ai: run quota counts within rolling window + health workflow" {
     var svc = try ai.service.AiService.init(allocator, std.testing.io, &ai_store, .{ .key_secret = "master-secret" }, refs);
     defer svc.deinit();
 
-    _ = try ai_store.createRun(0, 7, 1, "chat", "hi", "test-model", 0, 0, "ok", "", 100);
-    _ = try ai_store.createRun(0, 7, 1, "chat", "hi", "test-model", 0, 0, "ok", "", 200);
-    _ = try ai_store.createRun(0, 8, 1, "chat", "hi", "test-model", 0, 0, "ok", "", 300);
+    // 用量快照字段(tokens/steps/tool_calls/tool_errors)持久化往返。
+    _ = try ai_store.createRun(0, 7, 1, "chat", "hi", "test-model", 0, 0, 0, 0, 0, "ok", "", 100);
+    _ = try ai_store.createRun(0, 7, 1, "chat", "hi", "test-model", 12, 34, 3, 2, 1, "ok", "", 200);
+    _ = try ai_store.createRun(0, 8, 1, "chat", "hi", "test-model", 0, 0, 0, 0, 0, "ok", "", 300);
     try std.testing.expectEqual(@as(i64, 2), try ai_store.runCountForUser(7, 50));
+    {
+        // listRuns 按 created_at 降序:最新一条(200)带用量快照。
+        var runs = try ai_store.listRuns(7, 1, 10);
+        defer runs.free(allocator);
+        try std.testing.expectEqual(@as(i64, 12), runs.items[0].tokens_in);
+        try std.testing.expectEqual(@as(i64, 34), runs.items[0].tokens_out);
+        try std.testing.expectEqual(@as(i64, 3), runs.items[0].steps);
+        try std.testing.expectEqual(@as(i64, 2), runs.items[0].tool_calls);
+        try std.testing.expectEqual(@as(i64, 1), runs.items[0].tool_errors);
+    }
+
+    // 用量增量逐字段 fetchAdd 累加 → currentAgentMetrics 快照回读(并发安全,不丢增量)。
+    svc.addAgentMetrics(.{ .runs = 1, .steps = 3, .tool_calls = 2, .tool_errors = 1 });
+    svc.addAgentMetrics(.{ .runs = 1, .steps = 1 });
+    const acc = svc.currentAgentMetrics().toStats();
+    try std.testing.expectEqual(@as(usize, 2), acc.runs);
+    try std.testing.expectEqual(@as(usize, 4), acc.steps);
+    try std.testing.expectEqual(@as(usize, 2), acc.tool_calls);
+    try std.testing.expectEqual(@as(usize, 1), acc.tool_errors);
 
     // 无 LLM 的健康工作流:两个只读技能按序执行。
     var result = try svc.runHealthWorkflow(allocator, 1, 1);
@@ -661,6 +681,27 @@ test "ai: run quota counts within rolling window + health workflow" {
     try std.testing.expectEqual(@as(usize, 2), result.steps.items.len);
     try std.testing.expectEqualStrings("task_stats", result.steps.items[0].name);
     try std.testing.expectEqualStrings("tenant_list", result.steps.items[1].name);
+}
+
+test "ai: usageDelta computes per-run AgentMetrics increment" {
+    const Stats = zigmodu.ai.AgentMetrics.Stats;
+    const before = Stats{ .runs = 5, .steps = 10, .tool_calls = 3, .tool_errors = 1, .tool_denied = 0, .max_steps_hits = 0, .budget_exhausted = 0, .canceled = 0 };
+    const after = Stats{ .runs = 6, .steps = 13, .tool_calls = 5, .tool_errors = 2, .tool_denied = 1, .max_steps_hits = 0, .budget_exhausted = 0, .canceled = 1 };
+    const d = ai.service.usageDelta(before, after);
+    try std.testing.expectEqual(@as(usize, 1), d.runs);
+    try std.testing.expectEqual(@as(usize, 3), d.steps);
+    try std.testing.expectEqual(@as(usize, 2), d.tool_calls);
+    try std.testing.expectEqual(@as(usize, 1), d.tool_errors);
+    try std.testing.expectEqual(@as(usize, 1), d.tool_denied);
+    try std.testing.expectEqual(@as(usize, 1), d.canceled);
+    // 前后快照一致(如 run 被拒绝)时差值为 0。
+    const d0 = ai.service.usageDelta(after, after);
+    try std.testing.expectEqual(@as(usize, 0), d0.runs);
+    try std.testing.expectEqual(@as(usize, 0), d0.steps);
+    try std.testing.expectEqual(@as(usize, 0), d0.tool_calls);
+    try std.testing.expectEqual(@as(usize, 0), d0.tool_errors);
+    try std.testing.expectEqual(@as(usize, 0), d0.tool_denied);
+    try std.testing.expectEqual(@as(usize, 0), d0.canceled);
 }
 
 test "ai: message reasoning_content persists and round-trips" {

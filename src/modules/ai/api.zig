@@ -85,6 +85,11 @@ const RunDto = struct {
     kind: []const u8,
     prompt: []const u8,
     model: []const u8,
+    tokens_in: i64,
+    tokens_out: i64,
+    steps: i64,
+    tool_calls: i64,
+    tool_errors: i64,
     status: []const u8,
     err: []const u8,
     created_at: i64,
@@ -98,6 +103,11 @@ fn toRunDto(row: service.RunRow) RunDto {
         .kind = row.kind,
         .prompt = row.prompt,
         .model = row.model,
+        .tokens_in = row.tokens_in,
+        .tokens_out = row.tokens_out,
+        .steps = row.steps,
+        .tool_calls = row.tool_calls,
+        .tool_errors = row.tool_errors,
         .status = row.status,
         .err = row.err,
         .created_at = row.created_at,
@@ -627,7 +637,9 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
         fn metrics(ctx: *http.Context) !void {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
             _ = (try requireAdmin(ctx, self)) orelse return;
-            var ai_metrics = zigmodu.ai.observability.AiMetrics{ .agent = &self.svc.agent_metrics };
+            // 用逐字段 atomic load 组装的快照渲染,避免与并发 chat 写回 agent_metrics 竞争。
+            var snapshot = self.svc.currentAgentMetrics();
+            var ai_metrics = zigmodu.ai.observability.AiMetrics{ .agent = &snapshot };
             const body = try ai_metrics.toPrometheusFormat(ctx.allocator);
             defer ctx.allocator.free(body);
             try ctx.text(200, body);
