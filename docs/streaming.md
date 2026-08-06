@@ -1,7 +1,7 @@
 # 流式聊天接入契约(Streaming Chat)
 
-> 状态:**待上游**。zigmodu 的 `chatStream + DeltaBridge` 已用真实 DeepSeek API
-> 验证(zigmodu v0.15.13,`7ac16c8`),但 Agent 主循环尚未切换(TODO #4)。
+> 状态:**已落地**。zigmodu v0.15.16(`e7cf9df`)修复 `requestStream` 本地路径并
+> 完成 Agent 流式切换(TODO #4);zenaipa 已按本契约接入(后端 SSE + 前端打字机)。
 >
 > **关键澄清(消除误解)**:流式切换**不影响工具决策**——`chatStream` 内部先聚合
 > 完整 `ChatResponse`(含 `tool_calls`)再返回,Agent 拿到的与 `chatWith` 完全同构

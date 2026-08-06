@@ -4,12 +4,15 @@ import {
   chatAi,
   createAiSession,
   deleteAiSession,
+  getAuthToken,
   listAiMessages,
   listAiSessions,
   toApiError,
   type AiMessageItem,
   type AiSessionItem,
 } from '#ui/api';
+import { aiSessionChat } from '#ui/api/ai/path';
+import { APP_CONFIG } from '#ui/config';
 
 function AiChat() {
   const [sessions, setSessions] = createSignal<AiSessionItem[]>([]);
@@ -18,6 +21,8 @@ function AiChat() {
   const [input, setInput] = createSignal('');
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
+  const [streamingReasoning, setStreamingReasoning] = createSignal('');
+  const [streamingAnswer, setStreamingAnswer] = createSignal('');
 
   const refreshSessions = async () => {
     try {
@@ -77,37 +82,96 @@ function AiChat() {
     setInput('');
     setBusy(true);
     setError(null);
-    const userMsg: AiMessageItem = {
-      id: -Date.now(),
-      role: 'user',
-      content,
-      reasoning_content: '',
-      created_at: Math.floor(Date.now() / 1000),
-    };
-    setMessages((prev) => [...prev, userMsg]);
+    setStreamingReasoning('');
+    setStreamingAnswer('');
+    setMessages((prev) => [
+      ...prev,
+      { id: -Date.now(), role: 'user', content, reasoning_content: '', created_at: Math.floor(Date.now() / 1000) },
+    ]);
     try {
-      const result = await chatAi(sid, content);
-      const botMsg: AiMessageItem = {
-        id: -Date.now() - 1,
-        role: 'assistant',
-        content: result.answer,
-        reasoning_content: result.reasoning_content ?? '',
-        created_at: Math.floor(Date.now() / 1000),
-      };
-      setMessages((prev) => [...prev, botMsg]);
-      if (result.budget_exhausted) {
-        setError('本次回答触发了 token 预算上限,结果可能不完整。');
+      const done = await streamChat(sid, content);
+      if (done) {
+        // 流式已完成并落库:刷新消息历史(取完整记录)。
+        const fresh = await listAiMessages(sid);
+        setMessages(fresh.list);
       }
+      setStreamingReasoning('');
+      setStreamingAnswer('');
     } catch (err) {
       const msg = toApiError(err).message;
       setError(msg);
-      setMessages((prev) => [
-        ...prev,
-        { id: -Date.now() - 2, role: 'assistant', content: `⚠️ ${msg}`, reasoning_content: '', created_at: Math.floor(Date.now() / 1000) },
-      ]);
     } finally {
       setBusy(false);
     }
+  };
+
+  /** fetch + SSE 消费;服务端不支持流式时自动降级为 JSON。返回 true=流式完成。 */
+  const streamChat = async (sid: number, content: string): Promise<boolean> => {
+    const token = getAuthToken();
+    const base = APP_CONFIG.apiBaseUrl || '';
+    const resp = await fetch(`${base}${aiSessionChat(sid)}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ content }),
+    });
+    if (!resp.ok) {
+      const env = (await resp.json().catch(() => null)) as { msg?: string } | null;
+      throw new Error(env?.msg ?? `请求失败(${resp.status})`);
+    }
+    const isSse = (resp.headers.get('content-type') ?? '').includes('text/event-stream');
+    if (!isSse || !resp.body) {
+      // 非流式(旧版/降级):直接解析 JSON。
+      const env = (await resp.json()) as { code: number; msg: string; data: { answer: string; reasoning_content?: string } };
+      if (env.code !== 0) throw new Error(env.msg || '请求失败');
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: -Date.now() - 1,
+          role: 'assistant',
+          content: env.data.answer,
+          reasoning_content: env.data.reasoning_content ?? '',
+          created_at: Math.floor(Date.now() / 1000),
+        },
+      ]);
+      return false;
+    }
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    let reasoning = '';
+    let answer = '';
+    for (;;) {
+      const { value, done: doneReading } = await reader.read();
+      if (doneReading) break;
+      buf += decoder.decode(value, { stream: true });
+      let idx: number;
+      while ((idx = buf.indexOf('\n\n')) >= 0) {
+        const block = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        const ev = block.match(/^event: (.+)$/m)?.[1];
+        const data = block.match(/^data: (.+)$/m)?.[1];
+        if (!data) continue;
+        if (ev === 'reasoning') {
+          reasoning += data;
+          setStreamingReasoning(reasoning);
+        } else if (ev === 'delta') {
+          answer += data;
+          setStreamingAnswer(answer);
+        } else if (ev === 'done') {
+          const j = JSON.parse(data) as { answer: string; reasoning_content: string; budget_exhausted: boolean };
+          if (j.budget_exhausted) setError('本次回答触发了 token 预算上限,结果可能不完整。');
+          return true;
+        } else if (ev === 'error') {
+          throw new Error(data);
+        }
+      }
+    }
+    throw new Error('流式连接中断');
   };
 
   const renderBubble = (m: AiMessageItem): JSX.Element => {
@@ -187,7 +251,22 @@ function AiChat() {
             </div>
           </Show>
           <For each={messages()}>{(m) => renderBubble(m)}</For>
-          <Show when={busy()}>
+          <Show when={busy() && streamingReasoning()}>
+            <div class="flex justify-start">
+              <div class="max-w-[85%] space-y-1 rounded-lg border border-base-300 bg-base-200/60 px-3 py-2">
+                <p class="text-xs text-base-content/50">推理中…</p>
+                <p class="text-xs text-base-content/50 whitespace-pre-wrap">{streamingReasoning()}</p>
+              </div>
+            </div>
+          </Show>
+          <Show when={busy() && streamingAnswer()}>
+            <div class="flex justify-start">
+              <div class="max-w-[85%] rounded-lg border border-base-300 bg-base-200 px-3 py-2 text-sm whitespace-pre-wrap">
+                {streamingAnswer()}
+              </div>
+            </div>
+          </Show>
+          <Show when={busy() && !streamingAnswer() && !streamingReasoning()}>
             <div class="flex justify-start">
               <div class="rounded-lg border border-base-300 bg-base-200 px-3 py-2 text-sm text-base-content/60">
                 思考中…

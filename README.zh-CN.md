@@ -201,7 +201,7 @@ cd web && npm run typecheck && npm test && npm run build   # vitest + 构建
 | 状态 | 项目 |
 | --- | --- |
 | ✅ 已完成 | 智能助手(Provider/技能/聊天/审批/工作流/配额)、审计日志 + CSV、概览面板、邮件模板、按 IP 限流、**会话吊销**、文件白名单、优雅关闭、Docker/CI、前端测试、主题切换 |
-| 🔜 待上游 | **流式聊天** —— Agent `chatStream` 已用真实 DeepSeek 验证(zigmodu v0.15.13);切换待 SSE mock harness。接入契约与钩子脚手架已备好(见 [`docs/streaming.md`](docs/streaming.md)) |
+| ✅ 已完成 | **流式聊天** —— Agent `chatStream` + `on_delta`(zigmodu v0.15.16);SSE reasoning/delta/done 打字机效果,JSON 降级 |
 
 ---
 

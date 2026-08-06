@@ -416,7 +416,27 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
             const now = zigmodu.time.wallClockSeconds(self.svc.io);
             _ = self.svc.store.addMessage(sid, "user", content, "", now) catch {};
 
-            var outcome = self.svc.chat(ctx.allocator, sid, uid, session.tenant_id, content) catch |err| switch (err) {
+            // SSE 流式模式:Accept: text/event-stream → 旁路推送 reasoning/delta,结束发 done。
+            const stream_req = std.mem.eql(u8, ctx.header("Accept") orelse "", "text/event-stream");
+            var outcome = if (stream_req) blk: {
+                var sse = try zigmodu.http.SseWriter.init(ctx);
+                const StreamState = struct {
+                    sse: *zigmodu.http.SseWriter,
+                };
+                var st = StreamState{ .sse = &sse };
+                const on_delta = struct {
+                    fn cb(c: ?*anyopaque, d: zigmodu.ai.AiProvider.StreamDelta) anyerror!void {
+                        const s: *StreamState = @ptrCast(@alignCast(c.?));
+                        if (d.reasoning_delta) |rd| try s.sse.sendEvent("reasoning", rd);
+                        if (d.content_delta) |cd| try s.sse.sendEvent("delta", cd);
+                    }
+                }.cb;
+                break :blk self.svc.chat(ctx.allocator, sid, uid, session.tenant_id, content, on_delta, &st) catch |err| {
+                    try sse.sendEvent("error", @errorName(err));
+                    try sse.done();
+                    return;
+                };
+            } else self.svc.chat(ctx.allocator, sid, uid, session.tenant_id, content, null, null) catch |err| switch (err) {
                 error.NoAiProvider => {
                     try ctx.sendErrorResponse(503, 503, "未配置可用的 AI Provider");
                     return;
@@ -437,6 +457,18 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
                 },
             };
             defer outcome.free(ctx.allocator);
+
+            if (stream_req) {
+                var sse2 = try zigmodu.http.SseWriter.init(ctx);
+                const done_json = try std.json.Stringify.valueAlloc(ctx.allocator, .{
+                    .answer = outcome.answer,
+                    .reasoning_content = outcome.reasoning,
+                    .budget_exhausted = outcome.budget_exhausted,
+                }, .{});
+                defer ctx.allocator.free(done_json);
+                try sse2.sendEvent("done", done_json);
+                try sse2.done();
+            }
 
             _ = self.svc.store.addMessage(sid, "assistant", outcome.answer, outcome.reasoning, now) catch {};
             _ = self.svc.store.touchSession(sid, now) catch {};

@@ -400,7 +400,18 @@ pub const AiService = struct {
 
     /// Run one agent turn: quota check → provider resolve → Agent run →
     /// persist run audit. Returns the assistant answer (caller-owned).
-    pub fn chat(self: *AiService, allocator: std.mem.Allocator, session_id: i64, user_id: i64, tenant_id: i64, prompt: []const u8) !ChatOutcome {
+    /// `on_delta`/`delta_ctx`(可选):挂到 Agent hooks.on_delta 旁路推送流式增量
+    /// (SSE 模式);为 null 时与原先完全一致(一次性返回)。
+    pub fn chat(
+        self: *AiService,
+        allocator: std.mem.Allocator,
+        session_id: i64,
+        user_id: i64,
+        tenant_id: i64,
+        prompt: []const u8,
+        on_delta: ?*const fn (?*anyopaque, ai.AiProvider.StreamDelta) anyerror!void,
+        delta_ctx: ?*anyopaque,
+    ) !ChatOutcome {
         const now = zigmodu.time.wallClockSeconds(self.io);
         const used = try self.store.runCountForUser(user_id, now - 24 * 3600);
         if (used >= self.cfg.daily_run_limit) return error.QuotaExceeded;
@@ -447,6 +458,7 @@ pub const AiService = struct {
             .tool_timeout_ms = self.cfg.tool_timeout_ms,
             .budget = &budget,
             .metrics = self.agent_metrics,
+            .hooks = .{ .ctx = delta_ctx, .on_delta = on_delta },
         };
 
         // 熔断保护:连续失败后快速失败(callWithContext 经 ctx 传状态,无闭包捕获)。

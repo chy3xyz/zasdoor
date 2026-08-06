@@ -201,7 +201,7 @@ cd web && npm run typecheck && npm test && npm run build   # vitest + build
 | Status | Item |
 | --- | --- |
 | ✅ Done | AI assistant (providers/skills/chat/approvals/workflow/quota), audit log + CSV, dashboard, email templates, per-IP rate limiting, **session revocation**, file allow-list, graceful shutdown, Docker/CI, frontend tests, theme toggle |
-| 🔜 Upstream | **Streaming chat** — Agent `chatStream` verified against real DeepSeek (zigmodu v0.15.13); switch pending SSE mock harness. Contract + hook scaffolding prepared in [`docs/streaming.md`](docs/streaming.md) |
+| ✅ Done | **Streaming chat** — Agent `chatStream` + `on_delta` (zigmodu v0.15.16); SSE reasoning/delta/done feed with typing effect, JSON fallback |
 
 ---
 
