@@ -14,7 +14,7 @@ pub const Config = struct {
     /// True when ZENAIPA_JWT_SECRET was explicitly set (fail-closed in prod).
     jwt_secret_explicit: bool = false,
     /// Comma-separated IP allow-list for /metrics (empty = all; use in prod).
-    metrics_allow_ips: []const u8 = "", 
+    metrics_allow_ips: []const u8 = "",
     /// JWT lifetime in seconds.
     token_expiry_seconds: i64 = 24 * 3600,
     /// Password reset token lifetime in seconds.
