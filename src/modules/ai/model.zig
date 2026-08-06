@@ -34,6 +34,7 @@ pub const AiMessage = Schema("AiMessage", .{
         field.Int("session_id"),
         field.String("role").Default("user"),
         field.String("content").Default(""),
+        field.String("reasoning_content").Default(""),
     },
     .mixins = &.{zent.core.mixin.TimeMixin},
 });

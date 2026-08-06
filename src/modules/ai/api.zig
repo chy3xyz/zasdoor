@@ -48,11 +48,12 @@ const MessageDto = struct {
     id: i64,
     role: []const u8,
     content: []const u8,
+    reasoning_content: []const u8,
     created_at: i64,
 };
 
 fn toMessageDto(row: service.MessageRow) MessageDto {
-    return .{ .id = row.id, .role = row.role, .content = row.content, .created_at = row.created_at };
+    return .{ .id = row.id, .role = row.role, .content = row.content, .reasoning_content = row.reasoning_content, .created_at = row.created_at };
 }
 
 const ApprovalDto = struct {
@@ -401,7 +402,7 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
             }
 
             const now = zigmodu.time.wallClockSeconds(self.svc.io);
-            _ = self.svc.store.addMessage(sid, "user", content, now) catch {};
+            _ = self.svc.store.addMessage(sid, "user", content, "", now) catch {};
 
             var outcome = self.svc.chat(ctx.allocator, sid, uid, session.tenant_id, content) catch |err| switch (err) {
                 error.NoAiProvider => {
@@ -421,13 +422,14 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
             };
             defer outcome.free(ctx.allocator);
 
-            _ = self.svc.store.addMessage(sid, "assistant", outcome.answer, now) catch {};
+            _ = self.svc.store.addMessage(sid, "assistant", outcome.answer, outcome.reasoning, now) catch {};
             _ = self.svc.store.touchSession(sid, now) catch {};
             try ctx.jsonStruct(200, .{
                 .code = 0,
                 .msg = "",
                 .data = .{
                     .answer = outcome.answer,
+                    .reasoning_content = outcome.reasoning,
                     .budget_exhausted = outcome.budget_exhausted,
                 },
             });

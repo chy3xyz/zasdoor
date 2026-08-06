@@ -51,10 +51,12 @@ pub const SkillsRefs = struct {
 
 pub const ChatOutcome = struct {
     answer: []u8,
+    reasoning: []u8,
     budget_exhausted: bool,
 
     pub fn free(self: ChatOutcome, allocator: std.mem.Allocator) void {
         allocator.free(self.answer);
+        allocator.free(self.reasoning);
     }
 };
 
@@ -442,7 +444,8 @@ pub const AiService = struct {
         const status: []const u8 = if (result.budget_exhausted) "budget" else "ok";
         _ = try self.store.createRun(session_id, user_id, tenant_id, "chat", prompt, 0, 0, status, "", now);
         const answer = try allocator.dupe(u8, result.answer);
-        return .{ .answer = answer, .budget_exhausted = result.budget_exhausted };
+        const reasoning = try allocator.dupe(u8, result.reasoning);
+        return .{ .answer = answer, .reasoning = reasoning, .budget_exhausted = result.budget_exhausted };
     }
 
     // ── Workflow ───────────────────────────────────────────────────────────

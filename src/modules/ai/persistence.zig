@@ -68,11 +68,13 @@ pub const MessageRow = struct {
     session_id: i64,
     role: []const u8,
     content: []const u8,
+    reasoning_content: []const u8,
     created_at: i64,
 
     pub fn free(self: MessageRow, allocator: std.mem.Allocator) void {
         allocator.free(self.role);
         allocator.free(self.content);
+        allocator.free(self.reasoning_content);
     }
 };
 
@@ -220,11 +222,14 @@ pub const AiStore = struct {
         errdefer self.allocator.free(role);
         const content = try self.allocator.dupe(u8, e.content);
         errdefer self.allocator.free(content);
+        const reasoning = try self.allocator.dupe(u8, e.reasoning_content);
+        errdefer self.allocator.free(reasoning);
         return .{
             .id = e.id,
             .session_id = e.session_id,
             .role = role,
             .content = content,
+            .reasoning_content = reasoning,
             .created_at = e.created_at orelse 0,
         };
     }
@@ -436,12 +441,13 @@ pub const AiStore = struct {
 
     // ── Messages ──
 
-    pub fn addMessage(self: *AiStore, session_id: i64, role: []const u8, content: []const u8, now: i64) !i64 {
+    pub fn addMessage(self: *AiStore, session_id: i64, role: []const u8, content: []const u8, reasoning: []const u8, now: i64) !i64 {
         var b = try self.client.ai_message.Create();
         defer b.deinit();
         _ = try b.setFieldValue("session_id", session_id);
         _ = try b.setFieldValue("role", role);
         _ = try b.setFieldValue("content", content);
+        _ = try b.setFieldValue("reasoning_content", reasoning);
         _ = try b.setFieldValue("created_at", now);
         var row = try b.Save();
         defer zent.codegen.deinitEntity(infos, MessageInfo, &row, self.allocator);

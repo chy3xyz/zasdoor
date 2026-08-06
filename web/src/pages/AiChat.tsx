@@ -81,6 +81,7 @@ function AiChat() {
       id: -Date.now(),
       role: 'user',
       content,
+      reasoning_content: '',
       created_at: Math.floor(Date.now() / 1000),
     };
     setMessages((prev) => [...prev, userMsg]);
@@ -90,6 +91,7 @@ function AiChat() {
         id: -Date.now() - 1,
         role: 'assistant',
         content: result.answer,
+        reasoning_content: result.reasoning_content ?? '',
         created_at: Math.floor(Date.now() / 1000),
       };
       setMessages((prev) => [...prev, botMsg]);
@@ -101,7 +103,7 @@ function AiChat() {
       setError(msg);
       setMessages((prev) => [
         ...prev,
-        { id: -Date.now() - 2, role: 'assistant', content: `⚠️ ${msg}`, created_at: Math.floor(Date.now() / 1000) },
+        { id: -Date.now() - 2, role: 'assistant', content: `⚠️ ${msg}`, reasoning_content: '', created_at: Math.floor(Date.now() / 1000) },
       ]);
     } finally {
       setBusy(false);
@@ -120,8 +122,16 @@ function AiChat() {
     }
     return (
       <div class="flex justify-start">
-        <div class="max-w-[85%] rounded-lg border border-base-300 bg-base-200 px-3 py-2 text-sm whitespace-pre-wrap">
-          {m.content}
+        <div class="max-w-[85%] space-y-2">
+          <Show when={m.reasoning_content}>
+            <details class="rounded-lg border border-base-300 bg-base-200/60 px-3 py-2">
+              <summary class="cursor-pointer text-xs text-base-content/50">推理过程</summary>
+              <p class="mt-1 text-xs text-base-content/50 whitespace-pre-wrap">{m.reasoning_content}</p>
+            </details>
+          </Show>
+          <div class="rounded-lg border border-base-300 bg-base-200 px-3 py-2 text-sm whitespace-pre-wrap">
+            {m.content}
+          </div>
         </div>
       </div>
     );

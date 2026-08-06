@@ -662,3 +662,20 @@ test "ai: run quota counts within rolling window + health workflow" {
     try std.testing.expectEqualStrings("task_stats", result.steps.items[0].name);
     try std.testing.expectEqualStrings("tenant_list", result.steps.items[1].name);
 }
+
+test "ai: message reasoning_content persists and round-trips" {
+    const allocator = std.testing.allocator;
+    var env = try openMemory(allocator);
+    defer env.deinit();
+    var ai_store = ai.persistence.AiStore.init(allocator, env.client);
+
+    _ = try ai_store.addMessage(1, "user", "你好", "", 100);
+    _ = try ai_store.addMessage(1, "assistant", "这是回答", "这是推理过程(thinking chain)", 110);
+
+    var msgs = try ai_store.listMessages(1);
+    defer msgs.free(allocator);
+    try std.testing.expectEqual(@as(i64, 2), msgs.total);
+    try std.testing.expectEqualStrings("这是回答", msgs.items[1].content);
+    try std.testing.expectEqualStrings("这是推理过程(thinking chain)", msgs.items[1].reasoning_content);
+    try std.testing.expectEqualStrings("", msgs.items[0].reasoning_content);
+}

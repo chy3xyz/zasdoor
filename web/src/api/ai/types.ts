@@ -35,6 +35,7 @@ export interface AiMessageItem {
   id: number;
   role: 'user' | 'assistant' | 'tool';
   content: string;
+  reasoning_content: string;
   created_at: number;
 }
 
@@ -45,6 +46,7 @@ export interface AiMessageListResult {
 
 export interface AiChatResult {
   answer: string;
+  reasoning_content: string;
   budget_exhausted: boolean;
 }
 
