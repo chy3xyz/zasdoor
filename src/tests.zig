@@ -655,6 +655,12 @@ test "ai: run quota counts within rolling window + health workflow" {
     _ = try ai_store.createRun(0, 7, 1, "chat", "hi", "test-model", 12, 34, 3, 2, 1, "ok", "", 200);
     _ = try ai_store.createRun(0, 8, 1, "chat", "hi", "test-model", 0, 0, 0, 0, 0, "ok", "", 300);
     try std.testing.expectEqual(@as(i64, 2), try ai_store.runCountForUser(7, 50));
+    // zent v0.29.4:Sum 返回 f64;quotaForUser 用 @intFromFloat 显式转换并聚合校验。
+    {
+        const agg = try ai_store.quotaForUser(7, 50);
+        try std.testing.expectEqual(@as(i64, 12), agg.tokens_in);
+        try std.testing.expectEqual(@as(i64, 34), agg.tokens_out);
+    }
     {
         // listRuns 按 created_at 降序:最新一条(200)带用量快照。
         var runs = try ai_store.listRuns(7, 1, 10);

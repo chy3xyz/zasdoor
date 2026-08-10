@@ -622,6 +622,8 @@ pub const AiStore = struct {
     }
 
     /// Sum of tokens consumed by `user_id` since `since` (daily quota).
+    /// zent v0.29.4: `Sum` now returns f64 (numeric SUM parses via text
+    /// representation) — convert explicitly instead of @intCast.
     pub fn quotaForUser(self: *AiStore, user_id: i64, since: i64) !QuotaAgg {
         const preds = self.client.ai_run.predicates;
         var q = self.client.ai_run.Query();
@@ -629,8 +631,8 @@ pub const AiStore = struct {
         _ = try q.Where(.{preds.user_idEQ(.{ .int = user_id })});
         _ = try q.Where(.{preds.created_atGTE(.{ .int = since })});
         return .{
-            .tokens_in = @intCast(try q.Sum("tokens_in")),
-            .tokens_out = @intCast(try q.Sum("tokens_out")),
+            .tokens_in = @intFromFloat(try q.Sum("tokens_in")),
+            .tokens_out = @intFromFloat(try q.Sum("tokens_out")),
         };
     }
 };
