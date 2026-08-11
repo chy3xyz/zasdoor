@@ -92,22 +92,20 @@ pub const TemplateStore = struct {
     }
 
     pub fn list(self: *TemplateStore, page: usize, page_size: usize) !TemplateListResult {
-        var q = self.client.email_template.Query();
-        defer q.deinit();
-        _ = try q.OrderBy(&[_]zent.sql.Order{.{ .column = .{ .name = "code", .desc = false } }});
-        var paged = try q.paged(page, page_size);
-        defer paged.deinit();
+        // zent v0.29.6 paginatedWithOptions — 分页 + 排序列白名单校验。
+        var result = try crud.paginatedWithOptions(self.client.email_template, .{}, .{ .sort_col = "code" }, page, page_size);
+        defer result.deinit(infos, EmailTemplateInfo, self.allocator);
 
-        var out = try self.allocator.alloc(TemplateRow, paged.items.items.len);
+        var out = try self.allocator.alloc(TemplateRow, result.items.items.len);
         var n: usize = 0;
         errdefer {
             for (out[0..n]) |r| r.free(self.allocator);
             self.allocator.free(out);
         }
-        for (paged.items.items) |e| {
+        for (result.items.items) |e| {
             out[n] = try self.dup(e);
             n += 1;
         }
-        return .{ .items = out, .total = paged.total };
+        return .{ .items = out, .total = result.total };
     }
 };

@@ -248,15 +248,10 @@ pub const UserStore = struct {
     }
 
     /// Find the most recent password token for a user, if any.
+    /// zent v0.29.6 crud.latest — OrderBy(created_at desc) + First 封装。
     pub fn getLatestPasswordToken(self: *UserStore, user_id: i64) !?PasswordTokenRow {
-        var q = self.client.password_token.Query();
-        defer q.deinit();
         const preds = self.client.password_token.predicates;
-        _ = try q.Where(.{preds.user_idEQ(.{ .int = user_id })});
-        _ = try q.OrderBy(&[_]zent.sql.Order{.{ .column = .{ .name = "created_at", .desc = true } }});
-        _ = q.Limit(1);
-        const entity_opt = try q.First();
-        var entity = entity_opt orelse return null;
+        var entity = (try crud.latest(self.client.password_token, .{preds.user_idEQ(.{ .int = user_id })}, "created_at")) orelse return null;
         defer zent.codegen.deinitEntity(infos, PasswordTokenInfo, &entity, self.allocator);
         const token_dup = try self.allocator.dupe(u8, entity.token);
         return .{
@@ -299,15 +294,11 @@ pub const UserStore = struct {
         }
     };
 
+    /// Find the most recent email verification for a user, if any.
+    /// zent v0.29.6 crud.latest — OrderBy(created_at desc) + First 封装。
     pub fn getLatestEmailVerification(self: *UserStore, user_id: i64) !?EmailVerificationRow {
-        var q = self.client.email_verification.Query();
-        defer q.deinit();
         const preds = self.client.email_verification.predicates;
-        _ = try q.Where(.{preds.user_idEQ(.{ .int = user_id })});
-        _ = try q.OrderBy(&[_]zent.sql.Order{.{ .column = .{ .name = "created_at", .desc = true } }});
-        _ = q.Limit(1);
-        const entity_opt = try q.First();
-        var entity = entity_opt orelse return null;
+        var entity = (try crud.latest(self.client.email_verification, .{preds.user_idEQ(.{ .int = user_id })}, "created_at")) orelse return null;
         defer zent.codegen.deinitEntity(infos, EmailVerificationInfo, &entity, self.allocator);
         const token_dup = try self.allocator.dupe(u8, entity.token);
         return .{

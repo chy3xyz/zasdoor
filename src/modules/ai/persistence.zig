@@ -324,22 +324,20 @@ pub const AiStore = struct {
     }
 
     pub fn listProviders(self: *AiStore, page: usize, page_size: usize) !ProviderListResult {
-        var q = self.client.ai_provider.Query();
-        defer q.deinit();
-        _ = try q.OrderBy(&[_]zent.sql.Order{.{ .column = .{ .name = "name", .desc = false } }});
-        var paged = try q.paged(page, page_size);
-        defer paged.deinit();
-        var out = try self.allocator.alloc(ProviderRow, paged.items.items.len);
+        // zent v0.29.6 paginatedWithOptions — 分页 + 排序列白名单校验。
+        var result = try crud.paginatedWithOptions(self.client.ai_provider, .{}, .{ .sort_col = "name" }, page, page_size);
+        defer result.deinit(infos, ProviderInfo, self.allocator);
+        var out = try self.allocator.alloc(ProviderRow, result.items.items.len);
         var n: usize = 0;
         errdefer {
             for (out[0..n]) |r| r.free(self.allocator);
             self.allocator.free(out);
         }
-        for (paged.items.items) |e| {
+        for (result.items.items) |e| {
             out[n] = try self.dupProvider(e);
             n += 1;
         }
-        return .{ .items = out, .total = paged.total };
+        return .{ .items = out, .total = result.total };
     }
 
     /// zent.crud_helpers.get — 按主键查单行。
@@ -381,23 +379,19 @@ pub const AiStore = struct {
 
     pub fn listSessions(self: *AiStore, user_id: i64, page: usize, page_size: usize) !SessionListResult {
         const preds = self.client.ai_session.predicates;
-        var q = self.client.ai_session.Query();
-        defer q.deinit();
-        _ = try q.Where(.{preds.user_idEQ(.{ .int = user_id })});
-        _ = try q.OrderBy(&[_]zent.sql.Order{.{ .column = .{ .name = "updated_at", .desc = true } }});
-        var paged = try q.paged(page, page_size);
-        defer paged.deinit();
-        var out = try self.allocator.alloc(SessionRow, paged.items.items.len);
+        var result = try crud.paginatedWithOptions(self.client.ai_session, .{preds.user_idEQ(.{ .int = user_id })}, .{ .sort_col = "updated_at", .desc = true }, page, page_size);
+        defer result.deinit(infos, SessionInfo, self.allocator);
+        var out = try self.allocator.alloc(SessionRow, result.items.items.len);
         var n: usize = 0;
         errdefer {
             for (out[0..n]) |r| r.free(self.allocator);
             self.allocator.free(out);
         }
-        for (paged.items.items) |e| {
+        for (result.items.items) |e| {
             out[n] = try self.dupSession(e);
             n += 1;
         }
-        return .{ .items = out, .total = paged.total };
+        return .{ .items = out, .total = result.total };
     }
 
     pub fn getSession(self: *AiStore, id: i64, user_id: i64) !?SessionRow {
@@ -497,6 +491,8 @@ pub const AiStore = struct {
     }
 
     pub fn listApprovals(self: *AiStore, status: ?[]const u8, page: usize, page_size: usize) !ApprovalListResult {
+        // 可选谓词无法传给 paginatedWithOptions(Where 仅接受元组/固定数组),
+        // 保留 Query 写法,排序仍走 OrderBy。
         var q = self.client.ai_approval.Query();
         defer q.deinit();
         if (status) |s| {
@@ -574,6 +570,8 @@ pub const AiStore = struct {
     }
 
     pub fn listRuns(self: *AiStore, user_id: ?i64, page: usize, page_size: usize) !RunListResult {
+        // 可选谓词无法传给 paginatedWithOptions(Where 仅接受元组/固定数组),
+        // 保留 Query 写法,排序仍走 OrderBy。
         var q = self.client.ai_run.Query();
         defer q.deinit();
         if (user_id) |uid| {

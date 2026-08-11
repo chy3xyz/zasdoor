@@ -76,24 +76,21 @@ pub const TenantStore = struct {
     }
 
     pub fn list(self: *TenantStore, page: usize, page_size: usize) !TenantListResult {
-        var q = self.client.tenant.Query();
-        defer q.deinit();
-        _ = try q.OrderBy(&[_]zent.sql.Order{zent.sql.OrderAsc("id")});
+        // zent v0.29.6 paginatedWithOptions — 分页 + 排序列白名单校验。
+        var result = try crud.paginatedWithOptions(self.client.tenant, .{}, .{ .sort_col = "id" }, page, page_size);
+        defer result.deinit(infos, TenantInfo, self.allocator);
 
-        var paged = try q.paged(page, page_size);
-        defer paged.deinit();
-
-        var out = try self.allocator.alloc(TenantRow, paged.items.items.len);
+        var out = try self.allocator.alloc(TenantRow, result.items.items.len);
         var n: usize = 0;
         errdefer {
             for (out[0..n]) |r| r.free(self.allocator);
             self.allocator.free(out);
         }
-        for (paged.items.items) |e| {
+        for (result.items.items) |e| {
             out[n] = try self.dup(e);
             n += 1;
         }
-        return .{ .items = out, .total = paged.total };
+        return .{ .items = out, .total = result.total };
     }
 
     pub fn update(self: *TenantStore, id: i64, name: []const u8, status: []const u8, now: i64) !bool {
