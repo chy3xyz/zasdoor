@@ -2,6 +2,7 @@
 
 const std = @import("std");
 const zent = @import("zent");
+const crud = zent.crud_helpers;
 const model = @import("model.zig");
 const schema = @import("../../schema.zig");
 
@@ -108,11 +109,10 @@ pub const NotificationStore = struct {
 
     pub fn unreadCount(self: *NotificationStore, user_id: i64) !i64 {
         const preds = self.client.notification.predicates;
-        var q = self.client.notification.Query();
-        defer q.deinit();
-        _ = try q.Where(.{preds.user_idEQ(.{ .int = user_id })});
-        _ = try q.Where(.{preds.readEQ(.{ .bool = false })});
-        return @intCast(try q.Count());
+        return @intCast(try crud.count(self.client.notification, .{
+            preds.user_idEQ(.{ .int = user_id }),
+            preds.readEQ(.{ .bool = false }),
+        }));
     }
 
     pub fn markRead(self: *NotificationStore, id: i64, user_id: i64) !bool {
@@ -157,8 +157,6 @@ pub const NotificationStore = struct {
     }
     /// Total notification count (dashboard stats).
     pub fn countAll(self: *NotificationStore) !i64 {
-        var q = self.client.notification.Query();
-        defer q.deinit();
-        return @intCast(try q.Count());
+        return @intCast(try crud.count(self.client.notification, .{}));
     }
 };

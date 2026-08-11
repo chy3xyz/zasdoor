@@ -2,6 +2,7 @@
 
 const std = @import("std");
 const zent = @import("zent");
+const crud = zent.crud_helpers;
 const model = @import("model.zig");
 const schema = @import("../../schema.zig");
 
@@ -341,34 +342,18 @@ pub const AiStore = struct {
         return .{ .items = out, .total = paged.total };
     }
 
+    /// zent.crud_helpers.get — 按主键查单行。
     pub fn getProvider(self: *AiStore, id: i64) !?ProviderRow {
-        const preds = self.client.ai_provider.predicates;
-        var q = self.client.ai_provider.Query();
-        defer q.deinit();
-        _ = try q.Where(.{preds.idEQ(.{ .int = id })});
-        _ = q.Limit(1);
-        var rows = try q.All();
-        defer {
-            for (rows.items) |*e| zent.codegen.deinitEntity(infos, ProviderInfo, e, self.allocator);
-            rows.deinit();
-        }
-        if (rows.items.len == 0) return null;
-        return try self.dupProvider(rows.items[0]);
+        var entity = (try crud.get(self.client.ai_provider, id)) orelse return null;
+        defer zent.codegen.deinitEntity(infos, ProviderInfo, &entity, self.allocator);
+        return try self.dupProvider(entity);
     }
 
     pub fn getProviderByName(self: *AiStore, name: []const u8) !?ProviderRow {
         const preds = self.client.ai_provider.predicates;
-        var q = self.client.ai_provider.Query();
-        defer q.deinit();
-        _ = try q.Where(.{preds.nameEQ(.{ .string = name })});
-        _ = q.Limit(1);
-        var rows = try q.All();
-        defer {
-            for (rows.items) |*e| zent.codegen.deinitEntity(infos, ProviderInfo, e, self.allocator);
-            rows.deinit();
-        }
-        if (rows.items.len == 0) return null;
-        return try self.dupProvider(rows.items[0]);
+        var entity = (try crud.first(self.client.ai_provider, .{preds.nameEQ(.{ .string = name })})) orelse return null;
+        defer zent.codegen.deinitEntity(infos, ProviderInfo, &entity, self.allocator);
+        return try self.dupProvider(entity);
     }
 
     pub fn deleteProvider(self: *AiStore, id: i64) !void {
@@ -614,11 +599,10 @@ pub const AiStore = struct {
     /// Number of runs by `user_id` since `since` (rolling daily quota).
     pub fn runCountForUser(self: *AiStore, user_id: i64, since: i64) !i64 {
         const preds = self.client.ai_run.predicates;
-        var q = self.client.ai_run.Query();
-        defer q.deinit();
-        _ = try q.Where(.{preds.user_idEQ(.{ .int = user_id })});
-        _ = try q.Where(.{preds.created_atGTE(.{ .int = since })});
-        return try q.Count();
+        return try crud.count(self.client.ai_run, .{
+            preds.user_idEQ(.{ .int = user_id }),
+            preds.created_atGTE(.{ .int = since }),
+        });
     }
 
     /// Sum of tokens consumed by `user_id` since `since` (daily quota).

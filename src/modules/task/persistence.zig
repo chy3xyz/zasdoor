@@ -2,6 +2,7 @@
 
 const std = @import("std");
 const zent = @import("zent");
+const crud = zent.crud_helpers;
 const model = @import("model.zig");
 const schema = @import("../../schema.zig");
 
@@ -116,13 +117,9 @@ pub const TaskStore = struct {
         return row.id;
     }
 
+    /// zent.crud_helpers.get — 按主键查单行。
     pub fn getTaskById(self: *TaskStore, id: i64) !?TaskRow {
-        var q = self.client.task.Query();
-        defer q.deinit();
-        const preds = self.client.task.predicates;
-        _ = try q.Where(.{preds.idEQ(.{ .int = id })});
-        const entity_opt = try q.First();
-        var entity = entity_opt orelse return null;
+        var entity = (try crud.get(self.client.task, id)) orelse return null;
         defer zent.codegen.deinitEntity(infos, TaskInfo, &entity, self.allocator);
         return try self.dupTask(entity);
     }

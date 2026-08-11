@@ -2,6 +2,7 @@
 
 const std = @import("std");
 const zent = @import("zent");
+const crud = zent.crud_helpers;
 const model = @import("model.zig");
 const schema = @import("../../schema.zig");
 
@@ -67,13 +68,9 @@ pub const TenantStore = struct {
         return row.id;
     }
 
+    /// zent.crud_helpers.get — 按主键查单行。
     pub fn getById(self: *TenantStore, id: i64) !?TenantRow {
-        var q = self.client.tenant.Query();
-        defer q.deinit();
-        const preds = self.client.tenant.predicates;
-        _ = try q.Where(.{preds.idEQ(.{ .int = id })});
-        const entity_opt = try q.First();
-        var entity = entity_opt orelse return null;
+        var entity = (try crud.get(self.client.tenant, id)) orelse return null;
         defer zent.codegen.deinitEntity(infos, TenantInfo, &entity, self.allocator);
         return try self.dup(entity);
     }
@@ -112,8 +109,6 @@ pub const TenantStore = struct {
     }
     /// Total tenant count (dashboard stats).
     pub fn countAll(self: *TenantStore) !i64 {
-        var q = self.client.tenant.Query();
-        defer q.deinit();
-        return @intCast(try q.Count());
+        return @intCast(try crud.count(self.client.tenant, .{}));
     }
 };

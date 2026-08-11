@@ -2,6 +2,7 @@
 
 const std = @import("std");
 const zent = @import("zent");
+const crud = zent.crud_helpers;
 const model = @import("model.zig");
 const schema = @import("../../schema.zig");
 
@@ -82,24 +83,16 @@ pub const FileStore = struct {
         return row.id;
     }
 
+    /// zent.crud_helpers.get — 按主键查单行。
     pub fn getById(self: *FileStore, id: i64) !?FileRow {
-        var q = self.client.file.Query();
-        defer q.deinit();
-        const preds = self.client.file.predicates;
-        _ = try q.Where(.{preds.idEQ(.{ .int = id })});
-        const entity_opt = try q.First();
-        var entity = entity_opt orelse return null;
+        var entity = (try crud.get(self.client.file, id)) orelse return null;
         defer zent.codegen.deinitEntity(infos, FileInfo, &entity, self.allocator);
         return try self.dup(entity);
     }
 
     pub fn getByStorageKey(self: *FileStore, storage_key: []const u8) !?FileRow {
-        var q = self.client.file.Query();
-        defer q.deinit();
         const preds = self.client.file.predicates;
-        _ = try q.Where(.{preds.storage_keyEQ(.{ .string = storage_key })});
-        const entity_opt = try q.First();
-        var entity = entity_opt orelse return null;
+        var entity = (try crud.first(self.client.file, .{preds.storage_keyEQ(.{ .string = storage_key })})) orelse return null;
         defer zent.codegen.deinitEntity(infos, FileInfo, &entity, self.allocator);
         return try self.dup(entity);
     }
@@ -145,8 +138,6 @@ pub const FileStore = struct {
     }
     /// Total file count (dashboard stats).
     pub fn countAll(self: *FileStore) !i64 {
-        var q = self.client.file.Query();
-        defer q.deinit();
-        return @intCast(try q.Count());
+        return @intCast(try crud.count(self.client.file, .{}));
     }
 };

@@ -2,6 +2,7 @@
 
 const std = @import("std");
 const zent = @import("zent");
+const crud = zent.crud_helpers;
 const model = @import("model.zig");
 const schema = @import("../../schema.zig");
 
@@ -58,52 +59,36 @@ pub const TemplateStore = struct {
         };
     }
 
+    /// zent.crud_helpers.first — 按唯一键 code 查单行。
     pub fn getByCode(self: *TemplateStore, code: []const u8) !?TemplateRow {
         const preds = self.client.email_template.predicates;
-        var q = self.client.email_template.Query();
-        defer q.deinit();
-        _ = try q.Where(.{preds.codeEQ(.{ .string = code })});
-        _ = q.Limit(1);
-        var rows = try q.All();
-        defer {
-            for (rows.items) |*e| zent.codegen.deinitEntity(infos, EmailTemplateInfo, e, self.allocator);
-            rows.deinit();
-        }
-        if (rows.items.len == 0) return null;
-        return try self.dup(rows.items[0]);
+        var entity = (try crud.first(self.client.email_template, .{preds.codeEQ(.{ .string = code })})) orelse return null;
+        defer zent.codegen.deinitEntity(infos, EmailTemplateInfo, &entity, self.allocator);
+        return try self.dup(entity);
     }
 
     /// Insert or update the template identified by `code` (upsert by query).
     pub fn upsert(self: *TemplateStore, code: []const u8, subject: []const u8, body: []const u8, now: i64) !void {
         const preds = self.client.email_template.predicates;
-        var q = self.client.email_template.Query();
-        defer q.deinit();
-        _ = try q.Where(.{preds.codeEQ(.{ .string = code })});
-        _ = q.Limit(1);
-        var rows = try q.All();
-        defer {
-            for (rows.items) |*e| zent.codegen.deinitEntity(infos, EmailTemplateInfo, e, self.allocator);
-            rows.deinit();
-        }
-        if (rows.items.len == 0) {
-            var b = try self.client.email_template.Create();
-            defer b.deinit();
-            _ = try b.setFieldValue("code", code);
-            _ = try b.setFieldValue("subject", subject);
-            _ = try b.setFieldValue("body", body);
-            _ = try b.setFieldValue("created_at", now);
-            _ = try b.setFieldValue("updated_at", now);
-            var row = try b.Save();
-            defer zent.codegen.deinitEntity(infos, EmailTemplateInfo, &row, self.allocator);
+        if (try crud.exists(self.client.email_template, .{preds.codeEQ(.{ .string = code })})) {
+            var upd = self.client.email_template.Update();
+            defer upd.deinit();
+            _ = try upd.setFieldValue("subject", subject);
+            _ = try upd.setFieldValue("body", body);
+            _ = try upd.setFieldValue("updated_at", now);
+            _ = try upd.Where(.{preds.codeEQ(.{ .string = code })});
+            _ = try upd.Save();
             return;
         }
-        var upd = self.client.email_template.Update();
-        defer upd.deinit();
-        _ = try upd.setFieldValue("subject", subject);
-        _ = try upd.setFieldValue("body", body);
-        _ = try upd.setFieldValue("updated_at", now);
-        _ = try upd.Where(.{preds.codeEQ(.{ .string = code })});
-        _ = try upd.Save();
+        var b = try self.client.email_template.Create();
+        defer b.deinit();
+        _ = try b.setFieldValue("code", code);
+        _ = try b.setFieldValue("subject", subject);
+        _ = try b.setFieldValue("body", body);
+        _ = try b.setFieldValue("created_at", now);
+        _ = try b.setFieldValue("updated_at", now);
+        var row = try b.Save();
+        defer zent.codegen.deinitEntity(infos, EmailTemplateInfo, &row, self.allocator);
     }
 
     pub fn list(self: *TemplateStore, page: usize, page_size: usize) !TemplateListResult {

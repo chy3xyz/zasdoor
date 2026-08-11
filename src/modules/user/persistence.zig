@@ -5,6 +5,7 @@
 
 const std = @import("std");
 const zent = @import("zent");
+const crud = zent.crud_helpers;
 const model = @import("model.zig");
 const schema = @import("../../schema.zig");
 
@@ -106,36 +107,23 @@ pub const UserStore = struct {
         return row.id;
     }
 
+    /// zent.crud_helpers.get — 按主键查单行,生命周期由 helper 处理。
     pub fn getUserById(self: *UserStore, id: i64) !?UserRow {
-        var q = self.client.user.Query();
-        defer q.deinit();
-        const preds = self.client.user.predicates;
-        _ = try q.Where(.{preds.idEQ(.{ .int = id })});
-        const entity_opt = try q.First();
-        var entity = entity_opt orelse return null;
+        var entity = (try crud.get(self.client.user, id)) orelse return null;
         defer zent.codegen.deinitEntity(infos, UserInfo, &entity, self.allocator);
         return try self.dupUser(entity);
     }
 
     pub fn getUserByEmail(self: *UserStore, email: []const u8) !?UserRow {
-        var q = self.client.user.Query();
-        defer q.deinit();
         const preds = self.client.user.predicates;
-        _ = try q.Where(.{preds.emailEQ(.{ .string = email })});
-        const entity_opt = try q.First();
-        var entity = entity_opt orelse return null;
+        var entity = (try crud.first(self.client.user, .{preds.emailEQ(.{ .string = email })})) orelse return null;
         defer zent.codegen.deinitEntity(infos, UserInfo, &entity, self.allocator);
         return try self.dupUser(entity);
     }
 
     /// Fetch the stored password hash for a user (sensitive field is not in UserRow).
     pub fn getPasswordHashById(self: *UserStore, id: i64) !?[]const u8 {
-        var q = self.client.user.Query();
-        defer q.deinit();
-        const preds = self.client.user.predicates;
-        _ = try q.Where(.{preds.idEQ(.{ .int = id })});
-        const entity_opt = try q.First();
-        var entity = entity_opt orelse return null;
+        var entity = (try crud.get(self.client.user, id)) orelse return null;
         defer zent.codegen.deinitEntity(infos, UserInfo, &entity, self.allocator);
         return try self.allocator.dupe(u8, entity.password);
     }
@@ -371,19 +359,16 @@ pub const UserStore = struct {
     }
     /// Total user count (dashboard stats).
     pub fn countAll(self: *UserStore) !i64 {
-        var q = self.client.user.Query();
-        defer q.deinit();
-        return @intCast(try q.Count());
+        return @intCast(try crud.count(self.client.user, .{}));
     }
 
     /// Users registered in [start, end) — dashboard daily trend buckets.
     pub fn countRegisteredBetween(self: *UserStore, start: i64, end: i64) !i64 {
         const preds = self.client.user.predicates;
-        var q = self.client.user.Query();
-        defer q.deinit();
-        _ = try q.Where(.{preds.created_atGTE(.{ .int = start })});
-        _ = try q.Where(.{preds.created_atLT(.{ .int = end })});
-        return @intCast(try q.Count());
+        return @intCast(try crud.count(self.client.user, .{
+            preds.created_atGTE(.{ .int = start }),
+            preds.created_atLT(.{ .int = end }),
+        }));
     }
 
     /// 递增凭证版本(改密/踢下线),使之前签发的 JWT 全部失效。
