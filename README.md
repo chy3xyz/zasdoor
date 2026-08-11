@@ -192,6 +192,7 @@ cd web && npm run typecheck && npm test && npm run build   # vitest + build
 - **CI**: GitHub Actions — `zig fmt --check`, `zig build test`, frontend typecheck/tests/build.
 - **Graceful shutdown**: SIGTERM/SIGINT drains in-flight requests, then stops cleanly.
 - **Backups**: [`docs/backup.md`](docs/backup.md) — online SQLite `.backup`, `pg_dump`/restore, uploads snapshots, retention schedule.
+- **Dev guide**: [`docs/development-guide.md`](docs/development-guide.md) — how to add a business module (zent/zigmodu conventions, transactions, security, performance, testing pitfalls).
 - **Security checklist**: explicit `ZENAIPA_JWT_SECRET` (mandatory on PostgreSQL), `ZENAIPA_AI_KEY_SECRET` for AI, `/metrics` IP allow-list, audit retention.
 
 ---

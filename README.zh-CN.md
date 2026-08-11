@@ -192,6 +192,7 @@ cd web && npm run typecheck && npm test && npm run build   # vitest + 构建
 - **CI**:GitHub Actions —— `zig fmt --check`、`zig build test`、前端 typecheck/测试/构建。
 - **优雅关闭**:SIGTERM/SIGINT 排空在途请求后干净退出。
 - **备份**:[`docs/backup.md`](docs/backup.md) —— SQLite 在线 `.backup`、`pg_dump`/恢复、uploads 快照、保留节奏。
+- **开发指南**:[`docs/development-guide.md`](docs/development-guide.md) —— 新增业务模块的完整步骤(zent/zigmodu 约定、事务、安全、性能、测试陷阱)。
 - **安全检查清单**:显式 `ZENAIPA_JWT_SECRET`(PostgreSQL 下强制)、AI 用 `ZENAIPA_AI_KEY_SECRET`、`/metrics` IP 白名单、审计保留。
 
 ---
