@@ -172,7 +172,9 @@ pub const TaskStore = struct {
         _ = try upd.setFieldValue("updated_at", now);
         _ = try upd.Where(.{preds.idEQ(.{ .int = entity.id })});
         _ = try upd.Where(.{preds.statusEQ(.{ .string = "pending" })});
-        _ = try upd.Save();
+        const claimed = try upd.Save();
+        // 条件更新命中 0 行 → 已被并发 worker 抢先 claim,放弃本次(调用方重试)。
+        if (claimed == 0) return null;
 
         // Re-read so the returned row reflects the claimed state.
         return try self.getTaskById(entity.id);

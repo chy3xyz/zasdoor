@@ -370,15 +370,27 @@ pub const UserStore = struct {
     }
 
     /// 递增凭证版本(改密/踢下线),使之前签发的 JWT 全部失效。
+    /// 单条 UPDATE:`SET token_version = token_version + 1`(原子,无读-改-写竞态)。
     pub fn bumpTokenVersion(self: *UserStore, id: i64, now: i64) !void {
         const preds = self.client.user.predicates;
-        const cur = (try self.getUserById(id)) orelse return error.UserNotFound;
-        defer cur.free(self.allocator);
         var upd = self.client.user.Update();
         defer upd.deinit();
-        _ = try upd.setFieldValue("token_version", cur.token_version + 1);
+        _ = try upd.setExprArgs("token_version", "token_version + ?", &.{.{ .int = 1 }});
         _ = try upd.setFieldValue("updated_at", now);
         _ = try upd.Where(.{preds.idEQ(.{ .int = id })});
-        _ = try upd.Save();
+        const n = try upd.Save();
+        if (n == 0) return error.UserNotFound;
+    }
+
+    /// 列投影:只取 token_version,供 JWT 守卫逐请求校验(不读 password 哈希全行)。
+    pub fn getTokenVersion(self: *UserStore, id: i64) !?i64 {
+        var q = self.client.user.Query();
+        defer q.deinit();
+        const preds = self.client.user.predicates;
+        _ = try q.Where(.{preds.idEQ(.{ .int = id })});
+        _ = q.Select(&.{"token_version"});
+        var entity = (try q.First()) orelse return null;
+        defer zent.codegen.deinitEntity(infos, UserInfo, &entity, self.allocator);
+        return entity.token_version;
     }
 };

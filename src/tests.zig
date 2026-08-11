@@ -821,3 +821,22 @@ test "session revocation: token_version bump invalidates old JWTs" {
     defer denied.deinit(allocator);
     try std.testing.expectEqual(@as(u16, 401), denied.status_code);
 }
+
+test "user: token_version atomic bump + column projection" {
+    const allocator = std.testing.allocator;
+    var env = try openMemory(allocator);
+    defer env.deinit();
+    var store = user.persistence.UserStore.init(allocator, env.client);
+    const id = try store.createUser("Alice", "alice@example.com", "hash", false, false, 1, 100);
+
+    // 列投影:只读 token_version。
+    try std.testing.expectEqual(@as(?i64, 0), try store.getTokenVersion(id));
+    // 原子递增(改密/踢下线 → 旧 JWT 失效)。
+    try store.bumpTokenVersion(id, 200);
+    try std.testing.expectEqual(@as(?i64, 1), try store.getTokenVersion(id));
+    try store.bumpTokenVersion(id, 300);
+    try std.testing.expectEqual(@as(?i64, 2), try store.getTokenVersion(id));
+    // 不存在用户:递增报 UserNotFound,投影返回 null。
+    try std.testing.expectError(error.UserNotFound, store.bumpTokenVersion(9999, 400));
+    try std.testing.expectEqual(@as(?i64, null), try store.getTokenVersion(9999));
+}

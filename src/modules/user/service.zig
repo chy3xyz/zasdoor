@@ -31,6 +31,7 @@ pub const VerificationError = error{
 pub const ChangePasswordError = error{
     InvalidCredentials,
     InvalidPassword,
+    TokenInvalidationFailed,
 };
 
 /// Raw reset token plus the owning user id (for the reset link).
@@ -316,7 +317,8 @@ pub const UserService = struct {
         if (!self.sec.module.verifyPassword(old_password, hash)) return error.InvalidCredentials;
         self.setPassword(id, new_password) catch return error.InvalidPassword;
         const now_s = zigmodu.time.wallClockSeconds(self.io);
-        self.store.bumpTokenVersion(id, now_s) catch {}; // 使旧 JWT 全部失效
+        // 改密后必须 bump 凭证版本使旧 JWT 失效;失败不能静默吞掉。
+        self.store.bumpTokenVersion(id, now_s) catch return error.TokenInvalidationFailed;
     }
 };
 

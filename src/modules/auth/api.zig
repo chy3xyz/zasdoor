@@ -143,7 +143,9 @@ pub fn AuthApi(comptime Service: type) type {
             defer ctx.allocator.free(req.email);
             defer ctx.allocator.free(req.password);
 
-            const tenant_id = parseTenantHeader(ctx) orelse self.default_tenant_id;
+            // 公开注册固定进入默认租户:租户指定只允许经认证的管理端 /users 接口
+            // (避免伪造 X-Tenant-ID 头注入任意租户)。
+            const tenant_id = self.default_tenant_id;
             var session = self.svc.register(ctx.allocator, req.name, req.email, req.password, false, tenant_id) catch |err| switch (err) {
                 error.InvalidName => {
                     try ctx.sendErrorResponse(400, 400, "姓名不能为空");
@@ -420,6 +422,10 @@ pub fn AuthApi(comptime Service: type) type {
                     try ctx.sendErrorResponse(400, 400, "新密码至少 8 位");
                     return;
                 },
+                error.TokenInvalidationFailed => {
+                    try ctx.sendErrorResponse(500, 500, "密码已更新,但旧会话失效失败,请重新登录");
+                    return;
+                },
             };
             try ctx.jsonStruct(200, .{ .code = 0, .msg = "密码已更新", .data = null });
             _ = self.notify_svc.notify(uid, "密码已修改", "你的登录密码已更新。", "info") catch {};
@@ -451,11 +457,6 @@ pub fn AuthApi(comptime Service: type) type {
 /// 按客户端 IP 限流的 key(优先级 X-Real-IP > X-Forwarded-For > 远端地址)。
 fn clientIpKey(ctx: *http.Context) []const u8 {
     return zigmodu.http.RequestUtil.getRealIp(ctx);
-}
-
-fn parseTenantHeader(ctx: *http.Context) ?i64 {
-    const raw = ctx.header("X-Tenant-ID") orelse return null;
-    return std.fmt.parseInt(i64, raw, 10) catch null;
 }
 
 /// Build the JSON payload the `mail.send` task handler expects. Subjects and

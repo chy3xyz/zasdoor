@@ -22,4 +22,6 @@ pub const Task = Schema("Task", .{
         field.Int("finished_at").Default(0),
     },
     .mixins = &.{zent.core.mixin.TimeMixin},
+    // claimNext 按 status+available_at 取任务,listTasks/countByStatus 按 status 过滤。
+    .indexes = &.{zent.core.index.Fields(&.{ "status", "available_at" })},
 });

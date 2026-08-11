@@ -420,19 +420,27 @@ pub const AiStore = struct {
     }
 
     pub fn deleteSession(self: *AiStore, id: i64, user_id: i64) !bool {
-        // 级联删除该会话的全部消息,避免孤儿数据。
-        const mpreds = self.client.ai_message.predicates;
-        var dm = self.client.ai_message.Delete();
-        defer dm.deinit();
-        _ = try dm.Where(.{mpreds.session_idEQ(.{ .int = id })});
-        _ = try dm.Exec();
+        // 级联删除消息+会话:同一事务,避免中途失败产生孤儿数据。
+        // 先删会话并校验 owner(0 行 → 非 owner/不存在 → 回滚返回 false,
+        // 避免先删消息造成越权删除他人会话的消息)。
+        var tx = try zent.codegen.beginTx(schema.infos, self.client);
+        defer tx.deinit();
+        {
+            const preds = tx.client.ai_session.predicates;
+            var d = tx.client.ai_session.Delete();
+            defer d.deinit();
+            _ = try d.Where(.{preds.idEQ(.{ .int = id })});
+            _ = try d.Where(.{preds.user_idEQ(.{ .int = user_id })});
+            const removed = try d.Exec();
+            if (removed == 0) return false; // defer tx.deinit() → ROLLBACK
 
-        const preds = self.client.ai_session.predicates;
-        var d = self.client.ai_session.Delete();
-        defer d.deinit();
-        _ = try d.Where(.{preds.idEQ(.{ .int = id })});
-        _ = try d.Where(.{preds.user_idEQ(.{ .int = user_id })});
-        _ = try d.Exec();
+            const mpreds = tx.client.ai_message.predicates;
+            var dm = tx.client.ai_message.Delete();
+            defer dm.deinit();
+            _ = try dm.Where(.{mpreds.session_idEQ(.{ .int = id })});
+            _ = try dm.Exec();
+        }
+        try tx.commit();
         return true;
     }
 
