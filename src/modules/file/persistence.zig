@@ -98,35 +98,43 @@ pub const FileStore = struct {
     }
 
     pub fn list(self: *FileStore, page: usize, page_size: usize, uploader_id: ?i64, tenant_id: ?i64, sort_col: ?[]const u8, sort_desc: bool) !FileListResult {
+        // zent v0.29.7:Where 支持动态 []sql.Predicate — 可选谓词交给 paginatedWithOptions。
         const preds = self.client.file.predicates;
-        const owner_pred = if (uploader_id) |uid| preds.uploader_idEQ(.{ .int = uid }) else null;
-        const tenant_pred = if (tenant_id) |tid| preds.tenant_idEQ(.{ .int = tid }) else null;
-
-        var q = self.client.file.Query();
-        defer q.deinit();
-        if (owner_pred) |op| _ = try q.Where(.{op});
-        if (tenant_pred) |tp| _ = try q.Where(.{tp});
-        const order: zent.sql.Order = if (sort_col) |col| blk: {
+        var preds_buf: [2]zent.sql.Predicate = undefined;
+        var n_preds: usize = 0;
+        if (uploader_id) |uid| {
+            preds_buf[n_preds] = preds.uploader_idEQ(.{ .int = uid });
+            n_preds += 1;
+        }
+        if (tenant_id) |tid| {
+            preds_buf[n_preds] = preds.tenant_idEQ(.{ .int = tid });
+            n_preds += 1;
+        }
+        // 排序列白名单(非法列回退 created_at desc,与改写前一致)。
+        const sort_col_name: []const u8 = if (sort_col) |col| blk: {
             if (!(std.mem.eql(u8, col, "name") or std.mem.eql(u8, col, "size_bytes") or std.mem.eql(u8, col, "created_at")))
-                break :blk zent.sql.Order{ .column = .{ .name = "created_at", .desc = true } };
-            break :blk if (sort_desc) zent.sql.OrderDesc(col) else zent.sql.OrderAsc(col);
-        } else zent.sql.Order{ .column = .{ .name = "created_at", .desc = true } };
-        _ = try q.OrderBy(&.{order});
+                break :blk "created_at";
+            break :blk col;
+        } else "created_at";
+        const sort_desc_b: bool = if (sort_col) |col| blk: {
+            if (!(std.mem.eql(u8, col, "name") or std.mem.eql(u8, col, "size_bytes") or std.mem.eql(u8, col, "created_at")))
+                break :blk true;
+            break :blk sort_desc;
+        } else true;
+        var result = try crud.paginatedWithOptions(self.client.file, preds_buf[0..n_preds], .{ .sort_col = sort_col_name, .desc = sort_desc_b }, page, page_size);
+        defer result.deinit(infos, FileInfo, self.allocator);
 
-        var paged = try q.paged(page, page_size);
-        defer paged.deinit();
-
-        var out = try self.allocator.alloc(FileRow, paged.items.items.len);
+        var out = try self.allocator.alloc(FileRow, result.items.items.len);
         var n: usize = 0;
         errdefer {
             for (out[0..n]) |r| r.free(self.allocator);
             self.allocator.free(out);
         }
-        for (paged.items.items) |e| {
+        for (result.items.items) |e| {
             out[n] = try self.dup(e);
             n += 1;
         }
-        return .{ .items = out, .total = paged.total };
+        return .{ .items = out, .total = result.total };
     }
 
     pub fn delete(self: *FileStore, id: i64) !void {

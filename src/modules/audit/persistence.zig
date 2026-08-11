@@ -2,6 +2,7 @@
 
 const std = @import("std");
 const zent = @import("zent");
+const crud = zent.crud_helpers;
 const model = @import("model.zig");
 const schema = @import("../../schema.zig");
 
@@ -126,32 +127,39 @@ pub const AuditStore = struct {
     }
 
     pub fn list(self: *AuditStore, page: usize, page_size: usize, filters: AuditFilters) !AuditListResult {
+        // zent v0.29.7:Where 支持动态 []sql.Predicate — 可选谓词交给 paginatedWithOptions。
         const preds = self.client.audit_log.predicates;
-
-        var q = self.client.audit_log.Query();
-        defer q.deinit();
-        if (filters.actor_user_id) |uid| _ = try q.Where(.{preds.actor_user_idEQ(.{ .int = uid })});
+        var preds_buf: [3]zent.sql.Predicate = undefined;
+        var n_preds: usize = 0;
+        if (filters.actor_user_id) |uid| {
+            preds_buf[n_preds] = preds.actor_user_idEQ(.{ .int = uid });
+            n_preds += 1;
+        }
         if (filters.action) |a| {
-            if (a.len > 0) _ = try q.Where(.{preds.actionContainsEscaped(a)});
+            if (a.len > 0) {
+                preds_buf[n_preds] = preds.actionContainsEscaped(a);
+                n_preds += 1;
+            }
         }
         if (filters.keyword) |kw| {
-            if (kw.len > 0) _ = try q.Where(.{preds.detailContainsEscaped(kw)});
+            if (kw.len > 0) {
+                preds_buf[n_preds] = preds.detailContainsEscaped(kw);
+                n_preds += 1;
+            }
         }
-        _ = try q.OrderBy(&[_]zent.sql.Order{.{ .column = .{ .name = "created_at", .desc = true } }});
+        var result = try crud.paginatedWithOptions(self.client.audit_log, preds_buf[0..n_preds], .{ .sort_col = "created_at", .desc = true }, page, page_size);
+        defer result.deinit(infos, AuditLogInfo, self.allocator);
 
-        var paged = try q.paged(page, page_size);
-        defer paged.deinit();
-
-        var out = try self.allocator.alloc(AuditRow, paged.items.items.len);
+        var out = try self.allocator.alloc(AuditRow, result.items.items.len);
         var n: usize = 0;
         errdefer {
             for (out[0..n]) |r| r.free(self.allocator);
             self.allocator.free(out);
         }
-        for (paged.items.items) |e| {
+        for (result.items.items) |e| {
             out[n] = try self.dup(e);
             n += 1;
         }
-        return .{ .items = out, .total = paged.total };
+        return .{ .items = out, .total = result.total };
     }
 };

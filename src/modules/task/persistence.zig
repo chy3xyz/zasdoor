@@ -125,28 +125,29 @@ pub const TaskStore = struct {
     }
 
     pub fn listTasks(self: *TaskStore, page: usize, page_size: usize, status: ?[]const u8) !TaskListResult {
-        const preds = self.client.task.predicates;
-        const status_pred = if (status) |s| if (s.len > 0) preds.statusEQ(.{ .string = s }) else null else null;
+        // zent v0.29.7:Where 支持动态 []sql.Predicate — 可选谓词交给 paginatedWithOptions。
+        var preds_buf: [1]zent.sql.Predicate = undefined;
+        var n_preds: usize = 0;
+        if (status) |s| {
+            if (s.len > 0) {
+                preds_buf[n_preds] = self.client.task.predicates.statusEQ(.{ .string = s });
+                n_preds += 1;
+            }
+        }
+        var result = try crud.paginatedWithOptions(self.client.task, preds_buf[0..n_preds], .{ .sort_col = "id" }, page, page_size);
+        defer result.deinit(infos, TaskInfo, self.allocator);
 
-        var q = self.client.task.Query();
-        defer q.deinit();
-        if (status_pred) |sp| _ = try q.Where(.{sp});
-        _ = try q.OrderBy(&[_]zent.sql.Order{zent.sql.OrderAsc("id")});
-
-        var paged = try q.paged(page, page_size);
-        defer paged.deinit();
-
-        var out = try self.allocator.alloc(TaskRow, paged.items.items.len);
+        var out = try self.allocator.alloc(TaskRow, result.items.items.len);
         var n: usize = 0;
         errdefer {
             for (out[0..n]) |r| r.free(self.allocator);
             self.allocator.free(out);
         }
-        for (paged.items.items) |e| {
+        for (result.items.items) |e| {
             out[n] = try self.dupTask(e);
             n += 1;
         }
-        return .{ .items = out, .total = paged.total };
+        return .{ .items = out, .total = result.total };
     }
 
     /// Oldest due task (`pending` and `available_at <= now`), or null.

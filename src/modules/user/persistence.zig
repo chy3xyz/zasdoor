@@ -129,42 +129,49 @@ pub const UserStore = struct {
     }
 
     pub fn listUsers(self: *UserStore, page: usize, page_size: usize, keyword: ?[]const u8, tenant_id: ?i64, sort_col: ?[]const u8, sort_desc: bool) !UserListResult {
-        var q = self.client.user.Query();
-        defer q.deinit();
+        // zent v0.29.7:Where 支持动态 []sql.Predicate — 可选谓词(含 keyword OR)交给 paginatedWithOptions。
         const preds = self.client.user.predicates;
-        if (tenant_id) |tid| _ = try q.Where(.{preds.tenant_idEQ(.{ .int = tid })});
+        var preds_buf: [2]zent.sql.Predicate = undefined;
+        var n_preds: usize = 0;
+        if (tenant_id) |tid| {
+            preds_buf[n_preds] = preds.tenant_idEQ(.{ .int = tid });
+            n_preds += 1;
+        }
         // ContainsEscaped renders LIKE '%…%' with wildcard/quote escaping —
         // user input stays literal, no temporary pattern allocation needed.
         if (keyword) |kw| {
             if (kw.len > 0) {
                 const p1 = preds.nameContainsEscaped(kw);
                 const p2 = preds.emailContainsEscaped(kw);
-                _ = try q.Where(.{zent.sql.Or(&p1, &p2)});
+                preds_buf[n_preds] = zent.sql.Or(&p1, &p2);
+                n_preds += 1;
             }
         }
-        const order: zent.sql.Order = if (sort_col) |col| blk: {
-            // Column whitelist — never interpolate caller input directly.
+        // 排序列白名单(非法列回退 email asc,与改写前一致)。
+        const sort_col_name: []const u8 = if (sort_col) |col| blk: {
             if (!(std.mem.eql(u8, col, "name") or std.mem.eql(u8, col, "email") or std.mem.eql(u8, col, "created_at")))
-                break :blk zent.sql.OrderAsc("email");
-            break :blk if (sort_desc) zent.sql.OrderDesc(col) else zent.sql.OrderAsc(col);
-        } else zent.sql.OrderAsc("email");
-        _ = try q.OrderBy(&.{order});
+                break :blk "email";
+            break :blk col;
+        } else "email";
+        const sort_desc_b: bool = if (sort_col) |col| blk: {
+            if (!(std.mem.eql(u8, col, "name") or std.mem.eql(u8, col, "email") or std.mem.eql(u8, col, "created_at")))
+                break :blk false;
+            break :blk sort_desc;
+        } else false;
+        var result = try crud.paginatedWithOptions(self.client.user, preds_buf[0..n_preds], .{ .sort_col = sort_col_name, .desc = sort_desc_b }, page, page_size);
+        defer result.deinit(infos, UserInfo, self.allocator);
 
-        // One call: count + limit/offset + entity release (zent paged()).
-        var paged = try q.paged(page, page_size);
-        defer paged.deinit();
-
-        var out = try self.allocator.alloc(UserRow, paged.items.items.len);
+        var out = try self.allocator.alloc(UserRow, result.items.items.len);
         var n: usize = 0;
         errdefer {
             for (out[0..n]) |r| r.free(self.allocator);
             self.allocator.free(out);
         }
-        for (paged.items.items) |e| {
+        for (result.items.items) |e| {
             out[n] = try self.dupUser(e);
             n += 1;
         }
-        return .{ .items = out, .total = paged.total };
+        return .{ .items = out, .total = result.total };
     }
 
     /// Update a user's name/email/profile fields. Sensitive updates are

@@ -491,30 +491,28 @@ pub const AiStore = struct {
     }
 
     pub fn listApprovals(self: *AiStore, status: ?[]const u8, page: usize, page_size: usize) !ApprovalListResult {
-        // 可选谓词无法传给 paginatedWithOptions(Where 仅接受元组/固定数组),
-        // 保留 Query 写法,排序仍走 OrderBy。
-        var q = self.client.ai_approval.Query();
-        defer q.deinit();
+        // zent v0.29.7:Where 支持动态 []sql.Predicate — 可选谓词交给 paginatedWithOptions。
+        var preds_buf: [1]zent.sql.Predicate = undefined;
+        var n_preds: usize = 0;
         if (status) |s| {
             if (s.len > 0) {
-                const preds = self.client.ai_approval.predicates;
-                _ = try q.Where(.{preds.statusEQ(.{ .string = s })});
+                preds_buf[n_preds] = self.client.ai_approval.predicates.statusEQ(.{ .string = s });
+                n_preds += 1;
             }
         }
-        _ = try q.OrderBy(&[_]zent.sql.Order{.{ .column = .{ .name = "created_at", .desc = true } }});
-        var paged = try q.paged(page, page_size);
-        defer paged.deinit();
-        var out = try self.allocator.alloc(ApprovalRow, paged.items.items.len);
+        var result = try crud.paginatedWithOptions(self.client.ai_approval, preds_buf[0..n_preds], .{ .sort_col = "created_at", .desc = true }, page, page_size);
+        defer result.deinit(infos, ApprovalInfo, self.allocator);
+        var out = try self.allocator.alloc(ApprovalRow, result.items.items.len);
         var n: usize = 0;
         errdefer {
             for (out[0..n]) |r| r.free(self.allocator);
             self.allocator.free(out);
         }
-        for (paged.items.items) |e| {
+        for (result.items.items) |e| {
             out[n] = try self.dupApproval(e);
             n += 1;
         }
-        return .{ .items = out, .total = paged.total };
+        return .{ .items = out, .total = result.total };
     }
 
     pub fn getApproval(self: *AiStore, id: i64) !?ApprovalRow {
@@ -570,28 +568,26 @@ pub const AiStore = struct {
     }
 
     pub fn listRuns(self: *AiStore, user_id: ?i64, page: usize, page_size: usize) !RunListResult {
-        // 可选谓词无法传给 paginatedWithOptions(Where 仅接受元组/固定数组),
-        // 保留 Query 写法,排序仍走 OrderBy。
-        var q = self.client.ai_run.Query();
-        defer q.deinit();
+        // zent v0.29.7:Where 支持动态 []sql.Predicate — 可选谓词交给 paginatedWithOptions。
+        var preds_buf: [1]zent.sql.Predicate = undefined;
+        var n_preds: usize = 0;
         if (user_id) |uid| {
-            const preds = self.client.ai_run.predicates;
-            _ = try q.Where(.{preds.user_idEQ(.{ .int = uid })});
+            preds_buf[n_preds] = self.client.ai_run.predicates.user_idEQ(.{ .int = uid });
+            n_preds += 1;
         }
-        _ = try q.OrderBy(&[_]zent.sql.Order{.{ .column = .{ .name = "created_at", .desc = true } }});
-        var paged = try q.paged(page, page_size);
-        defer paged.deinit();
-        var out = try self.allocator.alloc(RunRow, paged.items.items.len);
+        var result = try crud.paginatedWithOptions(self.client.ai_run, preds_buf[0..n_preds], .{ .sort_col = "created_at", .desc = true }, page, page_size);
+        defer result.deinit(infos, RunInfo, self.allocator);
+        var out = try self.allocator.alloc(RunRow, result.items.items.len);
         var n: usize = 0;
         errdefer {
             for (out[0..n]) |r| r.free(self.allocator);
             self.allocator.free(out);
         }
-        for (paged.items.items) |e| {
+        for (result.items.items) |e| {
             out[n] = try self.dupRun(e);
             n += 1;
         }
-        return .{ .items = out, .total = paged.total };
+        return .{ .items = out, .total = result.total };
     }
 
     /// Number of runs by `user_id` since `since` (rolling daily quota).
