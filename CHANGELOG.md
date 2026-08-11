@@ -5,6 +5,44 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-08-11
+
+### Fixed
+
+- **Security**: `bumpTokenVersion` is now a single atomic
+  `token_version = token_version + 1` UPDATE (no read-modify-write race);
+  `changePassword` propagates `TokenInvalidationFailed` instead of silently
+  swallowing it
+- **Security**: `claimNext` checks affected rows — concurrent workers no
+  longer execute the same task twice
+- **Security**: `deleteSession` wrapped in a transaction with an owner check
+  (fixes a pre-existing authorization bypass where a non-owner could wipe
+  another user's session messages)
+- **Security**: public registration is pinned to the default tenant
+  (`X-Tenant-ID` header no longer selects a target tenant)
+- **Security/leak**: JWT guard now reads only the `token_version` column
+  (column projection) and drops the per-request arena free of gpa-owned rows
+- **Performance**: Task table gains a `status + available_at` index
+  (claimNext / listTasks hot path)
+
+### Changed
+
+- Persistence layer refactored onto `zent.crud_helpers`
+  (`get/first/count/exists/latest/paginatedWithOptions`) — 7 modules, ~65
+  lines of hand-rolled Query lifecycles removed
+- zent v0.29.7 dynamic `[]sql.Predicate` Where support adopted: all
+  optional-predicate lists (user/task/notify/file/audit/ai) now use
+  `paginatedWithOptions` with sort whitelists
+- Added `docs/development-guide.md` — secondary-development best practices
+  (module skeleton, zent conventions, transactions, security, performance,
+  testing pitfalls)
+
+### Dependencies
+
+- zigmodu v0.15.22+ (sqlx Threaded-Io, HttpMetrics/AccessLogger thread-safety)
+- zent v0.29.7 (dynamic Where slices, crud_helpers: latest/paginatedWithOptions/
+  increment, Sum → f64, comptime quota fix)
+
 ## [0.2.1] - 2026-08-10
 
 ### Fixed

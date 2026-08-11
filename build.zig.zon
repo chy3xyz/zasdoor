@@ -1,6 +1,6 @@
 .{
     .name = .zenaipa,
-    .version = "0.2.1",
+    .version = "0.2.2",
     .fingerprint = 0x7a594f2f77f13f58,
     .minimum_zig_version = "0.17.0",
     .dependencies = .{
