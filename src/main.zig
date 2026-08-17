@@ -38,6 +38,7 @@ const iam = @import("modules/iam/root.zig");
 const oauth = @import("modules/oauth/root.zig");
 const eventstore = @import("modules/eventstore/root.zig");
 const authz = @import("modules/authz/root.zig");
+const mfa = @import("modules/mfa/root.zig");
 
 /// Set by SIGINT/SIGTERM so the main thread can stop the server gracefully.
 const ShutdownFlag = struct {
@@ -131,6 +132,7 @@ pub fn main(init: std.process.Init) !void {
         ai.persistence.run_infos,
         iam.persistence.infos,
         eventstore.persistence.infos,
+        mfa.persistence.infos,
     }).open(allocator, kind, dsn);
     defer store_env.deinit();
     std.log.info("[zent] migrated schema via {s} ({s})", .{ @tagName(kind), dsn });
@@ -204,6 +206,9 @@ pub fn main(init: std.process.Init) !void {
     var authz_svc = authz.service.AuthzService.init(allocator, &iam_svc);
     ProjectionCtx.svc = &event_svc;
     var authz_api = authz.api.AuthzApi(@TypeOf(authz_svc), @TypeOf(user_svc)).init(&authz_svc, &user_svc);
+    var mfa_store = mfa.persistence.MfaStore.init(allocator, store_env.client);
+    var mfa_svc = mfa.service.MfaService.init(allocator, io, &mfa_store, &sec);
+    var idp_svc = mfa.idp.IdpService.init(allocator, &mfa_store);
 
 
     // ── ZigModu module lifecycle (Application API: scan + validate + start/stop) ──
@@ -222,6 +227,7 @@ pub fn main(init: std.process.Init) !void {
         oauth.module,
         eventstore.module,
         authz.module,
+        mfa.module,
     }, .{});
     defer app.deinit();
     try app.start();
@@ -303,6 +309,8 @@ pub fn main(init: std.process.Init) !void {
     var ai_api = ai.api.AiApi(@TypeOf(ai_svc), @TypeOf(user_svc)).init(&ai_svc, &user_svc);
     var iam_api = iam.api.IamApi(@TypeOf(iam_svc), @TypeOf(user_svc)).init(&iam_svc, &user_svc, &audit_svc, default_tenant_id);
     var oauth_api = oauth.api.OAuthApi(@TypeOf(oauth_svc), @TypeOf(user_svc)).init(&oauth_svc, &user_svc);
+    var mfa_api = mfa.api.MfaApi(@TypeOf(mfa_svc), @TypeOf(user_svc)).init(&mfa_svc, &user_svc, default_tenant_id);
+    var idp_api = mfa.idp_api.IdpApi(@TypeOf(idp_svc), @TypeOf(user_svc)).init(&idp_svc, &user_svc, default_tenant_id);
     var system_api = system.api.SystemApi(@TypeOf(cache), @TypeOf(task_svc)).init(
         &cache,
         &task_svc,
@@ -350,6 +358,8 @@ pub fn main(init: std.process.Init) !void {
     try ai_api.registerRoutes(&v1);
     try iam_api.registerRoutes(&v1);
     try authz_api.registerRoutes(&v1);
+    try mfa_api.registerRoutes(&v1);
+    try idp_api.registerRoutes(&v1);
     try system_api.registerRoutes(&v1);
 
     // OAuth2 / OIDC public protocol endpoints (server root, no /api prefix).

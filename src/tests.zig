@@ -20,6 +20,7 @@ const iam = @import("modules/iam/root.zig");
 const oauth = @import("modules/oauth/root.zig");
 const eventstore = @import("modules/eventstore/root.zig");
 const authzm = @import("modules/authz/root.zig");
+const mfa = @import("modules/mfa/root.zig");
 const cache_svc = @import("services/cache.zig");
 const mail = @import("services/mail.zig");
 
@@ -39,6 +40,7 @@ fn openMemory(allocator: std.mem.Allocator) !db_mod.StoreEnv(schema.infos, .{
     ai.persistence.run_infos,
     iam.persistence.infos,
     eventstore.persistence.infos,
+    mfa.persistence.infos,
 }) {
     return db_mod.StoreEnv(schema.infos, .{
         tenant.persistence.infos,
@@ -55,6 +57,7 @@ fn openMemory(allocator: std.mem.Allocator) !db_mod.StoreEnv(schema.infos, .{
         ai.persistence.run_infos,
         iam.persistence.infos,
         eventstore.persistence.infos,
+        mfa.persistence.infos,
     }).open(allocator, .sqlite, ":memory:");
 }
 
@@ -86,6 +89,7 @@ test "sqlite store query prepares and runs standalone" {
         mail_template.persistence.infos,
         iam.persistence.infos,
         eventstore.persistence.infos,
+        mfa.persistence.infos,
     }).open(allocator, .sqlite, ":memory:");
     defer env.deinit();
     var store = user.persistence.UserStore.init(allocator, env.client);
@@ -1117,4 +1121,131 @@ test "iam: organization create + project scoping" {
     defer list.free(allocator);
     try std.testing.expectEqual(@as(i64, 1), list.total);
     try std.testing.expectEqualStrings("Life++", list.items[0].name);
+}
+
+test "mfa: totp generate + verify round-trip" {
+    const allocator = std.testing.allocator;
+    const totp = @import("modules/mfa/totp.zig");
+    // RFC 4648 base32 round-trip: "Hello" -> "JBSWY3DP"
+    const enc = try totp.base32Encode(allocator, "Hello");
+    defer allocator.free(enc);
+    try std.testing.expectEqualStrings("JBSWY3DP", enc);
+    const dec = try totp.base32Decode(allocator, "JBSWY3DP");
+    defer allocator.free(dec);
+    try std.testing.expectEqualStrings("Hello", dec);
+
+    // Generate a code at a fixed counter and verify it (window 0).
+    const counter: u64 = 12345;
+    const code = try totp.generateCode(allocator, "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", counter);
+    defer allocator.free(code);
+    try std.testing.expect(code.len == 6);
+    try std.testing.expect(try totp.verify(allocator, "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", code, counter, 0));
+    try std.testing.expect(!try totp.verify(allocator, "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", "000000", counter + 1000, 0));
+}
+
+test "mfa: enroll -> verify -> enable -> second-factor login" {
+    const allocator = std.testing.allocator;
+    var env = try openMemory(allocator);
+    defer env.deinit();
+    var mfa_store = mfa.persistence.MfaStore.init(allocator, env.client);
+    var sec = zigmodu.security.AppSecurity.init(allocator, std.testing.io, .{ .jwt_secret = "mfa-secret" });
+    var svc = mfa.service.MfaService.init(allocator, std.testing.io, &mfa_store, &sec);
+    const user_id: i64 = 7;
+
+    const secret = try svc.enrollTotp(1, user_id);
+    defer allocator.free(secret);
+    try std.testing.expect(secret.len > 0);
+
+    // Generate a valid code for the current time step and enable TOTP.
+    const now = zigmodu.time.wallClockSeconds(std.testing.io);
+    const counter = mfa.totp.counterAt(now, 30);
+    const code = try mfa.totp.generateCode(allocator, secret, counter);
+    defer allocator.free(code);
+
+    try svc.verifyAndEnable(user_id, code);
+    try std.testing.expect(svc.userHasMfa(user_id));
+
+    // A fresh code at login time verifies as a second factor.
+    const now2 = zigmodu.time.wallClockSeconds(std.testing.io);
+    const c2 = mfa.totp.counterAt(now2, 30);
+    const code2 = try mfa.totp.generateCode(allocator, secret, c2);
+    defer allocator.free(code2);
+    try std.testing.expect(try svc.verifyTotp(user_id, code2));
+    try std.testing.expect(!try svc.verifyTotp(user_id, "999999"));
+}
+
+test "mfa: recovery codes issue, verify, single-use" {
+    const allocator = std.testing.allocator;
+    var env = try openMemory(allocator);
+    defer env.deinit();
+    var mfa_store = mfa.persistence.MfaStore.init(allocator, env.client);
+    var sec = zigmodu.security.AppSecurity.init(allocator, std.testing.io, .{ .jwt_secret = "mfa-secret" });
+    var svc = mfa.service.MfaService.init(allocator, std.testing.io, &mfa_store, &sec);
+    const user_id: i64 = 9;
+
+    const codes = try svc.generateRecoveryCodes(1, user_id, 5);
+    defer {
+        for (codes) |c| allocator.free(c);
+        allocator.free(codes);
+    }
+    try std.testing.expectEqual(@as(usize, 5), codes.len);
+    try std.testing.expect(codes[0].len > 0);
+
+    // The first code verifies and is consumed.
+    try std.testing.expect(try svc.verifyRecoveryCode(user_id, codes[0]));
+    // Reusing it fails (single use).
+    try std.testing.expectError(error.RecoveryMismatch, svc.verifyRecoveryCode(user_id, codes[0]));
+    // Every code is distinct.
+    try std.testing.expect(!std.mem.eql(u8, codes[0], codes[1]));
+}
+
+test "mfa: idp config parse + build authorize link" {
+    const allocator = std.testing.allocator;
+    var env = try openMemory(allocator);
+    defer env.deinit();
+    var mfa_store = mfa.persistence.MfaStore.init(allocator, env.client);
+    var idp_svc = mfa.idp.IdpService.init(allocator, &mfa_store);
+
+    const config_json = "{\"name\":\"Google\",\"type\":\"oidc\",\"authorize_url\":\"https://accounts.google.com/o/oauth2/v2/auth\",\"client_id\":\"abc123\",\"redirect_uri\":\"https://idp.local/cb\",\"scope\":\"openid profile email\"}";
+    const url = try idp_svc.buildAuthorizeUrl(config_json, "st1", null);
+    defer allocator.free(url);
+    try std.testing.expect(std.mem.indexOf(u8, url, "accounts.google.com") != null);
+    try std.testing.expect(std.mem.indexOf(u8, url, "client_id=abc123") != null);
+    try std.testing.expect(std.mem.indexOf(u8, url, "state=st1") != null);
+
+    // Persist + list round-trip.
+    _ = try idp_svc.create(1, "Google", "oidc", config_json, 0);
+    const rows = try idp_svc.list(1);
+    defer {
+        for (rows) |r| r.free(allocator);
+        allocator.free(rows);
+    }
+    try std.testing.expectEqual(@as(usize, 1), rows.len);
+    try std.testing.expectEqualStrings("Google", rows[0].name);
+}
+
+test "mfa: policy require_mfa + user capability" {
+    const allocator = std.testing.allocator;
+    var env = try openMemory(allocator);
+    defer env.deinit();
+    var mfa_store = mfa.persistence.MfaStore.init(allocator, env.client);
+    var sec = zigmodu.security.AppSecurity.init(allocator, std.testing.io, .{ .jwt_secret = "mfa-secret" });
+    var svc = mfa.service.MfaService.init(allocator, std.testing.io, &mfa_store, &sec);
+
+    // Default: MFA not required.
+    try std.testing.expect(!svc.mfaRequired(1));
+
+    // Enable require_mfa via policy upsert.
+    try mfa_store.upsertPolicy(1, true, true, true, zigmodu.time.wallClockSeconds(std.testing.io));
+    try std.testing.expect(svc.mfaRequired(1));
+    try std.testing.expect(!svc.userHasMfa(5));
+
+    // Enrolling + enabling TOTP makes the user MFA-capable.
+    const secret = try svc.enrollTotp(1, 5);
+    defer allocator.free(secret);
+    const counter = mfa.totp.counterAt(zigmodu.time.wallClockSeconds(std.testing.io), 30);
+    const code = try mfa.totp.generateCode(allocator, secret, counter);
+    defer allocator.free(code);
+    try svc.verifyAndEnable(5, code);
+    try std.testing.expect(svc.userHasMfa(5));
 }
