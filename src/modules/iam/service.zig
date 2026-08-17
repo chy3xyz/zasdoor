@@ -5,6 +5,8 @@ const std = @import("std");
 const zigmodu = @import("zigmodu");
 const persist = @import("persistence.zig");
 
+pub const OrganizationRow = persist.OrganizationRow;
+pub const OrgListResult = persist.OrgListResult;
 pub const ProjectRow = persist.ProjectRow;
 pub const ApplicationRow = persist.ApplicationRow;
 pub const RoleRow = persist.RoleRow;
@@ -50,12 +52,33 @@ pub const IamService = struct {
         return zigmodu.time.wallClockSeconds(self.io);
     }
 
-    // ── Project ──────────────────────────────────────────────
+    // ── Organization ─────────────────────────────────────────
 
-    pub fn createProject(self: *IamService, tenant_id: i64, name: []const u8, description: []const u8) IamError!i64 {
+    pub fn createOrganization(self: *IamService, tenant_id: i64, name: []const u8, description: []const u8, domain: []const u8) IamError!i64 {
         const trimmed = std.mem.trim(u8, name, " \t");
         if (trimmed.len == 0) return error.InvalidName;
-        return self.store.createProject(tenant_id, trimmed, description, self.now()) catch return error.Unexpected;
+        return self.store.createOrganization(tenant_id, trimmed, description, domain, self.now()) catch return error.Unexpected;
+    }
+
+    pub fn getOrganization(self: *IamService, id: i64) !?OrganizationRow {
+        return self.store.getOrganization(id);
+    }
+
+    pub fn listOrganizations(self: *IamService, page: usize, page_size: usize, tenant_id: ?i64) !OrgListResult {
+        return self.store.listOrganizations(page, page_size, tenant_id);
+    }
+
+    pub fn deleteOrganization(self: *IamService, id: i64) !void {
+        try self.store.deleteOrganization(id);
+    }
+
+    // ── Project ──────────────────────────────────────────────
+
+
+    pub fn createProject(self: *IamService, tenant_id: i64, org_id: i64, name: []const u8, description: []const u8) IamError!i64 {
+        const trimmed = std.mem.trim(u8, name, " \t");
+        if (trimmed.len == 0) return error.InvalidName;
+        return self.store.createProject(tenant_id, org_id, trimmed, description, self.now()) catch return error.Unexpected;
     }
 
     pub fn getProject(self: *IamService, id: i64) !?ProjectRow {

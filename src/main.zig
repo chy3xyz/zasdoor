@@ -36,6 +36,8 @@ const mail_template = @import("modules/mail_template/root.zig");
 const ai = @import("modules/ai/root.zig");
 const iam = @import("modules/iam/root.zig");
 const oauth = @import("modules/oauth/root.zig");
+const eventstore = @import("modules/eventstore/root.zig");
+const authz = @import("modules/authz/root.zig");
 
 /// Set by SIGINT/SIGTERM so the main thread can stop the server gracefully.
 const ShutdownFlag = struct {
@@ -72,6 +74,20 @@ fn jobNotifyPrune(ctx: ?*anyopaque) void {
     const now = zigmodu.time.wallClockSeconds(c.io);
     _ = c.notify_store.purgeOlderThan(now, c.notification_max_age) catch {};
 }
+
+/// Runs the Event Store projection worker forward (incremental).
+fn jobEventProjections(ctx: ?*anyopaque) void {
+    _ = ctx;
+    const svc: *eventstore.service.EventService = @ptrCast(@alignCast(ProjectionCtx.svc orelse return));
+    svc.project() catch |err| {
+        std.log.err("[eventstore] projection run failed: {s}", .{@errorName(err)});
+    };
+}
+
+/// Static holder for the projection worker context (job fns are top-level).
+const ProjectionCtx = struct {
+    var svc: ?*eventstore.service.EventService = null;
+};
 
 fn jobOAuthCodesPrune(ctx: ?*anyopaque) void {
     const c: *CleanupCtx = @ptrCast(@alignCast(ctx orelse return));
@@ -114,6 +130,7 @@ pub fn main(init: std.process.Init) !void {
         ai.persistence.approval_infos,
         ai.persistence.run_infos,
         iam.persistence.infos,
+        eventstore.persistence.infos,
     }).open(allocator, kind, dsn);
     defer store_env.deinit();
     std.log.info("[zent] migrated schema via {s} ({s})", .{ @tagName(kind), dsn });
@@ -182,6 +199,13 @@ pub fn main(init: std.process.Init) !void {
     var iam_svc = iam.service.IamService.init(allocator, io, &iam_store, &sec);
     var oauth_svc = oauth.service.OAuthService.init(allocator, io, &iam_svc, &user_svc, &sec, cfg.app_host);
 
+    var event_store = eventstore.persistence.EventStore.init(allocator, store_env.client);
+    var event_svc = eventstore.service.EventService.init(allocator, io, &event_store, &.{}); // projections added below
+    var authz_svc = authz.service.AuthzService.init(allocator, &iam_svc);
+    ProjectionCtx.svc = &event_svc;
+    var authz_api = authz.api.AuthzApi(@TypeOf(authz_svc), @TypeOf(user_svc)).init(&authz_svc, &user_svc);
+
+
     // ── ZigModu module lifecycle (Application API: scan + validate + start/stop) ──
     var app = try zigmodu.Application.init(io, allocator, "zenaipa", .{
         tenant.module,
@@ -196,6 +220,8 @@ pub fn main(init: std.process.Init) !void {
         ai.module,
         iam.module,
         oauth.module,
+        eventstore.module,
+        authz.module,
     }, .{});
     defer app.deinit();
     try app.start();
@@ -238,6 +264,12 @@ pub fn main(init: std.process.Init) !void {
             .interval_seconds = 3600,
             .run = jobOAuthCodesPrune,
             .ctx = &cleanup_ctx,
+        },
+        .{
+            .name = "eventstore.project",
+            .interval_seconds = 30,
+            .run = jobEventProjections,
+            .ctx = null,
         },
     };
     var scheduled_runner = scheduled.ScheduledRunner{ .jobs = &scheduled_jobs };
@@ -317,6 +349,7 @@ pub fn main(init: std.process.Init) !void {
     try mail_template_api.registerRoutes(&v1);
     try ai_api.registerRoutes(&v1);
     try iam_api.registerRoutes(&v1);
+    try authz_api.registerRoutes(&v1);
     try system_api.registerRoutes(&v1);
 
     // OAuth2 / OIDC public protocol endpoints (server root, no /api prefix).

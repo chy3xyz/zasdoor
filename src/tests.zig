@@ -18,6 +18,8 @@ const mail_template = @import("modules/mail_template/root.zig");
 const ai = @import("modules/ai/root.zig");
 const iam = @import("modules/iam/root.zig");
 const oauth = @import("modules/oauth/root.zig");
+const eventstore = @import("modules/eventstore/root.zig");
+const authzm = @import("modules/authz/root.zig");
 const cache_svc = @import("services/cache.zig");
 const mail = @import("services/mail.zig");
 
@@ -36,6 +38,7 @@ fn openMemory(allocator: std.mem.Allocator) !db_mod.StoreEnv(schema.infos, .{
     ai.persistence.approval_infos,
     ai.persistence.run_infos,
     iam.persistence.infos,
+    eventstore.persistence.infos,
 }) {
     return db_mod.StoreEnv(schema.infos, .{
         tenant.persistence.infos,
@@ -51,6 +54,7 @@ fn openMemory(allocator: std.mem.Allocator) !db_mod.StoreEnv(schema.infos, .{
         ai.persistence.approval_infos,
         ai.persistence.run_infos,
         iam.persistence.infos,
+        eventstore.persistence.infos,
     }).open(allocator, .sqlite, ":memory:");
 }
 
@@ -81,6 +85,7 @@ test "sqlite store query prepares and runs standalone" {
         audit.persistence.infos,
         mail_template.persistence.infos,
         iam.persistence.infos,
+        eventstore.persistence.infos,
     }).open(allocator, .sqlite, ":memory:");
     defer env.deinit();
     var store = user.persistence.UserStore.init(allocator, env.client);
@@ -855,7 +860,7 @@ test "iam: project + application + role lifecycle" {
     var iam_svc = iam.service.IamService.init(allocator, std.testing.io, &iam_store, &sec);
 
     // Project
-    const pid = try iam_svc.createProject(1, "CHY", "main project");
+    const pid = try iam_svc.createProject(1, 0, "CHY", "main project");
     const proj = (try iam_svc.getProject(pid)).?;
     defer proj.free(allocator);
     try std.testing.expectEqualStrings("CHY", proj.name);
@@ -919,7 +924,7 @@ test "oauth: authorization code + PKCE full flow" {
     var user_svc = user.service.UserService.init(&user_store, &sec, std.testing.io, 3600, 86400);
     _ = try user_store.createUser("Alice", "alice@example.com", "hash", false, true, 1, 100);
 
-    const pid = try iam_svc.createProject(1, "P", "");
+    const pid = try iam_svc.createProject(1, 0, "P", "");
     var creds = try iam_svc.createApplication(1, pid, "App", "web", "[\"https://app.example/cb\"]", "[]", "[]", "[\"authorization_code\"]", "[\"code\"]", "openid profile email offline_access", 3600, 0, false);
     defer creds.deinit(allocator);
 
@@ -970,7 +975,7 @@ test "oauth: client credentials grant + refresh token rotation" {
     var user_svc = user.service.UserService.init(&user_store, &sec, std.testing.io, 3600, 86400);
     _ = try user_store.createUser("Alice", "alice@example.com", "hash", false, true, 1, 100);
 
-    const pid = try iam_svc.createProject(1, "P", "");
+    const pid = try iam_svc.createProject(1, 0, "P", "");
     var creds = try iam_svc.createApplication(1, pid, "Svc", "machine", "[]", "[]", "[]", "[\"client_credentials\"]", "[\"code\"]", "openid", 3600, 0, false);
     defer creds.deinit(allocator);
 
@@ -1009,3 +1014,107 @@ fn userCreateHelper(allocator: std.mem.Allocator, env: anytype, iam_svc: anytype
     return store.createUser(email, email, "hash", false, false, 1, 100);
 }
 
+
+test "eventstore: append with optimistic concurrency + replay" {
+    const allocator = std.testing.allocator;
+    var env = try openMemory(allocator);
+    defer env.deinit();
+    var es = eventstore.persistence.EventStore.init(allocator, env.client);
+
+    // Fresh aggregate: append with version 0.
+    const e1 = try es.appendNew(1, "user", "usr_1", "user.created", "{\"name\":\"Alice\"}", 7, 100);
+    const e2 = try es.append(1, "user", "usr_1", 1, "user.verified", "{}", 7, 110);
+    try std.testing.expect(e2 > e1);
+
+    // Version conflict: expected 1 but current is 2.
+    try std.testing.expectError(error.VersionConflict, es.append(1, "user", "usr_1", 1, "user.changed", "{}", 7, 120));
+
+    // Replay the stream oldest-first.
+    const stream = try es.streamOf("user", "usr_1");
+    defer {
+        for (stream) |r| r.free(allocator);
+        allocator.free(stream);
+    }
+    try std.testing.expectEqual(@as(usize, 2), stream.len);
+    try std.testing.expectEqualStrings("user.created", stream[0].event_type);
+    try std.testing.expectEqualStrings("user.verified", stream[1].event_type);
+    try std.testing.expectEqual(@as(i64, 2), stream[1].aggregate_version);
+}
+
+test "eventstore: projection high-water mark advances incrementally" {
+    const allocator = std.testing.allocator;
+    var env = try openMemory(allocator);
+    defer env.deinit();
+    var es = eventstore.persistence.EventStore.init(allocator, env.client);
+
+    _ = try es.appendNew(1, "org", "org_1", "organization.created", "{}", 1, 100);
+    _ = try es.appendNew(1, "org", "org_1", "organization.updated", "{}", 1, 110);
+
+    // A trivial "counter" projection: stores event count as its position.
+    const CounterProjection = struct {
+        fn run(a: std.mem.Allocator, store: *eventstore.persistence.EventStore, state: []const u8, ev: eventstore.persistence.EventRow) anyerror![]const u8 {
+            _ = store;
+            _ = state;
+            return std.fmt.allocPrint(a, "{d}", .{ev.id});
+        }
+    };
+    var projections = [_]eventstore.service.Projection{
+        .{ .name = "test_counter", .run = CounterProjection.run },
+    };
+    var ev_svc = eventstore.service.EventService.init(allocator, std.testing.io, &es, &projections);
+    try ev_svc.project();
+
+    // After projecting, the high-water mark equals the second event's id.
+    const pos = try es.getPosition("test_counter");
+    try std.testing.expect(pos >= 2);
+    try std.testing.expectEqual(@as(i64, 2), try es.allCount());
+}
+
+test "authz: role permission resolution -> ALLOW/DENY/UNKNOWN" {
+    const allocator = std.testing.allocator;
+    var env = try openMemory(allocator);
+    defer env.deinit();
+    var iam_store = iam.persistence.IamStore.init(allocator, env.client);
+    var sec = zigmodu.security.AppSecurity.init(allocator, std.testing.io, .{ .jwt_secret = "secret" });
+    var iam_svc = iam.service.IamService.init(allocator, std.testing.io, &iam_store, &sec);
+    var az = authzm.service.AuthzService.init(allocator, &iam_svc);
+
+    const pid = try iam_svc.createProject(1, 0, "DAO", "");
+    const admin_role = try iam_svc.createRole(1, pid, "admin", "Admin", "[\"proposal.vote\",\"proposal.*\"]");
+    const viewer_role = try iam_svc.createRole(1, pid, "viewer", "Viewer", "[\"proposal.read\"]");
+
+    const bob = 2;
+    const alice = 1;
+    _ = try iam_svc.assignRole(1, bob, admin_role, pid);
+    _ = try iam_svc.assignRole(1, alice, viewer_role, pid);
+
+    const ctx = authzm.service.AuthContext{ .project_id = pid };
+    // Admin can vote (exact) and delete (wildcard), but not read explicitly unless wildcard covers it.
+    try std.testing.expectEqual(authzm.service.Decision.allow, try az.authorize(bob, "proposal", "vote", ctx));
+    try std.testing.expectEqual(authzm.service.Decision.allow, try az.authorize(bob, "proposal", "delete", ctx));
+    // Viewer can read but not vote.
+    try std.testing.expectEqual(authzm.service.Decision.allow, try az.authorize(alice, "proposal", "read", ctx));
+    try std.testing.expectEqual(authzm.service.Decision.unknown, try az.authorize(alice, "proposal", "vote", ctx));
+    // Unknown subject: no roles.
+    try std.testing.expectEqual(authzm.service.Decision.unknown, try az.authorize(9999, "proposal", "read", ctx));
+}
+
+test "iam: organization create + project scoping" {
+    const allocator = std.testing.allocator;
+    var env = try openMemory(allocator);
+    defer env.deinit();
+    var iam_store = iam.persistence.IamStore.init(allocator, env.client);
+    var sec = zigmodu.security.AppSecurity.init(allocator, std.testing.io, .{ .jwt_secret = "secret" });
+    var iam_svc = iam.service.IamService.init(allocator, std.testing.io, &iam_store, &sec);
+
+    const org = try iam_svc.createOrganization(1, "Life++", "community", "life.plus");
+    const p1 = try iam_svc.createProject(1, org, "LifeApp", "");
+    const proj = (try iam_svc.getProject(p1)).?;
+    proj.free(allocator);
+    try std.testing.expectEqual(org, proj.org_id);
+
+    var list = try iam_svc.listOrganizations(1, 50, 1);
+    defer list.free(allocator);
+    try std.testing.expectEqual(@as(i64, 1), list.total);
+    try std.testing.expectEqualStrings("Life++", list.items[0].name);
+}

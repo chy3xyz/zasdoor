@@ -26,6 +26,12 @@ pub fn IamApi(comptime Service: type, comptime UserService: type) type {
             var g = try group.use(zigmodu.http.http_middleware.jwtAuthWithSecurity(&self.user_svc.sec.module));
             g = try g.use(mw.tokenVersionGuard(self.user_svc.sec, self.user_svc.store));
 
+            // Organizations
+            try g.get("/iam/organizations", listOrganizations, @ptrCast(@alignCast(self)));
+            try g.get("/iam/organizations/{id}", getOrganization, @ptrCast(@alignCast(self)));
+            try g.post("/iam/organizations", createOrganization, @ptrCast(@alignCast(self)));
+            try g.delete("/iam/organizations/{id}", deleteOrganization, @ptrCast(@alignCast(self)));
+
             // Projects
             try g.get("/iam/projects", listProjects, @ptrCast(@alignCast(self)));
             try g.get("/iam/projects/{id}", getProject, @ptrCast(@alignCast(self)));
@@ -73,9 +79,88 @@ pub fn IamApi(comptime Service: type, comptime UserService: type) type {
             return uid;
         }
 
+        // ── Organizations ──────────────────────────────────────
+
+        const CreateOrgReq = struct { name: []const u8, description: ?[]const u8 = null, domain: ?[]const u8 = null };
+
+        fn listOrganizations(ctx: *http.Context) !void {
+            const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
+            _ = (try requireAdmin(ctx, self)) orelse return;
+            const params = zigmodu.http.PageParams.parse(ctx, .{ .max_page_size = 100 });
+            var result = self.svc.listOrganizations(params.page, params.page_size, null) catch |err| {
+                std.log.err("internal error: {s}", .{@errorName(err)});
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
+                return;
+            };
+            defer result.free(self.svc.allocator);
+            const dtos = try zigmodu.http.Extract.toDtoList(ctx.allocator, result.items, OrgDto, orgToDto);
+            try zigmodu.http.sendPaged(ctx, dtos, @intCast(result.total), params, .ruoyi);
+        }
+
+        fn getOrganization(ctx: *http.Context) !void {
+            const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
+            _ = (try requireAdmin(ctx, self)) orelse return;
+            const id = ctx.paramInt(i64, "id") catch {
+                try ctx.sendErrorResponse(400, 400, "无效的组织 ID");
+                return;
+            };
+            const row_opt = self.svc.getOrganization(id) catch |err| {
+                std.log.err("internal error: {s}", .{@errorName(err)});
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
+                return;
+            };
+            const row = row_opt orelse {
+                try ctx.sendErrorResponse(404, 404, "组织不存在");
+                return;
+            };
+            defer row.free(self.svc.allocator);
+            try ctx.jsonStruct(200, .{ .code = 0, .msg = "", .data = orgToDto(row) });
+        }
+
+        fn createOrganization(ctx: *http.Context) !void {
+            const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
+            const admin_id = (try requireAdmin(ctx, self)) orelse return;
+            const req = ctx.bindJson(CreateOrgReq) catch {
+                try ctx.sendErrorResponse(400, 400, "请求体格式错误");
+                return;
+            };
+            defer ctx.allocator.free(req.name);
+            defer if (req.description) |d| ctx.allocator.free(d);
+            defer if (req.domain) |d| ctx.allocator.free(d);
+            const id = self.svc.createOrganization(self.default_tenant_id, req.name, req.description orelse "", req.domain orelse "") catch |err| switch (err) {
+                error.InvalidName => {
+                    try ctx.sendErrorResponse(400, 400, "组织名称不能为空");
+                    return;
+                },
+                else => {
+                    std.log.err("internal error: {s}", .{@errorName(err)});
+                    try ctx.sendErrorResponse(500, 500, "服务器内部错误");
+                    return;
+                },
+            };
+            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "iam.organization.create", "organization", id, req.name, zigmodu.http.RequestUtil.getRealIp(ctx), true, self.default_tenant_id);
+            try ctx.jsonStruct(201, .{ .code = 0, .msg = "组织已创建", .data = .{ .id = id } });
+        }
+
+        fn deleteOrganization(ctx: *http.Context) !void {
+            const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
+            const admin_id = (try requireAdmin(ctx, self)) orelse return;
+            const id = ctx.paramInt(i64, "id") catch {
+                try ctx.sendErrorResponse(400, 400, "无效的组织 ID");
+                return;
+            };
+            self.svc.deleteOrganization(id) catch |err| {
+                std.log.err("internal error: {s}", .{@errorName(err)});
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
+                return;
+            };
+            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "iam.organization.delete", "organization", id, "", zigmodu.http.RequestUtil.getRealIp(ctx), true, self.default_tenant_id);
+            try ctx.jsonStruct(200, .{ .code = 0, .msg = "ok", .data = null });
+        }
+
         // ── Projects ──────────────────────────────────────────
 
-        const CreateProjectReq = struct { name: []const u8, description: ?[]const u8 = null };
+        const CreateProjectReq = struct { name: []const u8, description: ?[]const u8 = null, org_id: ?i64 = null };
 
         fn listProjects(ctx: *http.Context) !void {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
@@ -120,7 +205,7 @@ pub fn IamApi(comptime Service: type, comptime UserService: type) type {
             };
             defer ctx.allocator.free(req.name);
             defer if (req.description) |d| ctx.allocator.free(d);
-            const id = self.svc.createProject(self.default_tenant_id, req.name, req.description orelse "") catch |err| switch (err) {
+            const id = self.svc.createProject(self.default_tenant_id, req.org_id orelse 0, req.name, req.description orelse "") catch |err| switch (err) {
                 error.InvalidName => {
                     try ctx.sendErrorResponse(400, 400, "项目名称不能为空");
                     return;
@@ -431,6 +516,19 @@ pub fn IamApi(comptime Service: type, comptime UserService: type) type {
 }
 
 // ── DTOs ────────────────────────────────────────────────────────
+
+const OrgDto = struct {
+    id: i64,
+    name: []const u8,
+    description: []const u8,
+    domain: []const u8,
+    active: bool,
+    created_at: i64,
+};
+
+fn orgToDto(row: service.OrganizationRow) OrgDto {
+    return .{ .id = row.id, .name = row.name, .description = row.description, .domain = row.domain, .active = row.active, .created_at = row.created_at };
+}
 
 const ProjectDto = struct {
     id: i64,

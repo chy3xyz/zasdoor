@@ -10,6 +10,7 @@ const model = @import("model.zig");
 const schema = @import("../../schema.zig");
 
 const graph = zent.codegen.graph.buildGraph(&.{
+    model.Organization,
     model.Project,
     model.Application,
     model.Role,
@@ -23,20 +24,39 @@ pub const infos = graph.types;
 /// Shared, application-wide typed client (all schemas registered in schema.zig).
 pub const Client = schema.Client;
 
-pub const ProjectInfo = infos[0];
-pub const ApplicationInfo = infos[1];
-pub const RoleInfo = infos[2];
-pub const RoleAssignmentInfo = infos[3];
-pub const SessionInfo = infos[4];
-pub const AuthorizationCodeInfo = infos[5];
-pub const RefreshTokenInfo = infos[6];
-pub const ConsentInfo = infos[7];
+pub const OrganizationInfo = infos[0];
+pub const ProjectInfo = infos[1];
+pub const ApplicationInfo = infos[2];
+pub const RoleInfo = infos[3];
+pub const RoleAssignmentInfo = infos[4];
+pub const SessionInfo = infos[5];
+pub const AuthorizationCodeInfo = infos[6];
+pub const RefreshTokenInfo = infos[7];
+pub const ConsentInfo = infos[8];
 
 // ── Row DTOs ────────────────────────────────────────────────────────
+
+pub const OrganizationRow = struct {
+    id: i64,
+    tenant_id: i64,
+    name: []const u8,
+    description: []const u8,
+    domain: []const u8,
+    active: bool,
+    created_at: i64,
+    updated_at: i64,
+
+    pub fn free(self: OrganizationRow, a: std.mem.Allocator) void {
+        a.free(self.name);
+        a.free(self.description);
+        a.free(self.domain);
+    }
+};
 
 pub const ProjectRow = struct {
     id: i64,
     tenant_id: i64,
+    org_id: i64,
     name: []const u8,
     description: []const u8,
     active: bool,
@@ -194,6 +214,16 @@ pub const ConsentRow = struct {
     }
 };
 
+pub const OrgListResult = struct {
+    items: []OrganizationRow,
+    total: i64,
+
+    pub fn free(self: *OrgListResult, a: std.mem.Allocator) void {
+        for (self.items) |r| r.free(a);
+        a.free(self.items);
+    }
+};
+
 pub const ProjectListResult = struct {
     items: []ProjectRow,
     total: i64,
@@ -248,12 +278,81 @@ pub const IamStore = struct {
         return @as(?i64, e) orelse 0;
     }
 
+    // ── Organization ─────────────────────────────────────────
+
+    fn dupOrg(self: *IamStore, e: anytype) !OrganizationRow {
+        return .{
+            .id = e.id,
+            .tenant_id = e.tenant_id,
+            .name = try self.allocator.dupe(u8, e.name),
+            .description = try self.allocator.dupe(u8, e.description),
+            .domain = try self.allocator.dupe(u8, e.domain),
+            .active = e.active,
+            .created_at = ts(e.created_at),
+            .updated_at = ts(e.updated_at),
+        };
+    }
+
+    pub fn createOrganization(self: *IamStore, tenant_id: i64, name: []const u8, description: []const u8, domain: []const u8, now: i64) !i64 {
+        var b = try self.client.organization.Create();
+        defer b.deinit();
+        _ = try b.setFieldValue("tenant_id", tenant_id);
+        _ = try b.setFieldValue("name", name);
+        _ = try b.setFieldValue("description", description);
+        _ = try b.setFieldValue("domain", domain);
+        _ = try b.setFieldValue("active", true);
+        _ = try b.setFieldValue("created_at", now);
+        _ = try b.setFieldValue("updated_at", now);
+        var row = try b.Save();
+        defer zent.codegen.deinitEntity(infos, OrganizationInfo, &row, self.allocator);
+        return row.id;
+    }
+
+    pub fn getOrganization(self: *IamStore, id: i64) !?OrganizationRow {
+        var e = (try crud.get(self.client.organization, id)) orelse return null;
+        defer zent.codegen.deinitEntity(infos, OrganizationInfo, &e, self.allocator);
+        return try self.dupOrg(e);
+    }
+
+    pub fn listOrganizations(self: *IamStore, page: usize, page_size: usize, tenant_id: ?i64) !OrgListResult {
+        const preds = self.client.organization.predicates;
+        var preds_buf: [1]zent.sql.Predicate = undefined;
+        var n: usize = 0;
+        if (tenant_id) |tid| {
+            preds_buf[0] = preds.tenant_idEQ(.{ .int = tid });
+            n = 1;
+        }
+        var result = try crud.paginatedWithOptions(self.client.organization, preds_buf[0..n], .{ .sort_col = "id" }, page, page_size);
+        defer result.deinit(infos, OrganizationInfo, self.allocator);
+        var out = try self.allocator.alloc(OrganizationRow, result.items.items.len);
+        var i: usize = 0;
+        errdefer {
+            for (out[0..i]) |r| r.free(self.allocator);
+            self.allocator.free(out);
+        }
+        for (result.items.items) |e| {
+            out[i] = try self.dupOrg(e);
+            i += 1;
+        }
+        return .{ .items = out, .total = result.total };
+    }
+
+    pub fn deleteOrganization(self: *IamStore, id: i64) !void {
+        const preds = self.client.organization.predicates;
+        var d = self.client.organization.Delete();
+        defer d.deinit();
+        _ = try d.Where(.{preds.idEQ(.{ .int = id })});
+        _ = try d.Exec();
+    }
+
     // ── Project ──────────────────────────────────────────────
+
 
     fn dupProject(self: *IamStore, e: anytype) !ProjectRow {
         return .{
             .id = e.id,
             .tenant_id = e.tenant_id,
+            .org_id = e.org_id,
             .name = try self.allocator.dupe(u8, e.name),
             .description = try self.allocator.dupe(u8, e.description),
             .active = e.active,
@@ -262,10 +361,11 @@ pub const IamStore = struct {
         };
     }
 
-    pub fn createProject(self: *IamStore, tenant_id: i64, name: []const u8, description: []const u8, now: i64) !i64 {
+    pub fn createProject(self: *IamStore, tenant_id: i64, org_id: i64, name: []const u8, description: []const u8, now: i64) !i64 {
         var b = try self.client.project.Create();
         defer b.deinit();
         _ = try b.setFieldValue("tenant_id", tenant_id);
+        _ = try b.setFieldValue("org_id", org_id);
         _ = try b.setFieldValue("name", name);
         _ = try b.setFieldValue("description", description);
         _ = try b.setFieldValue("active", true);

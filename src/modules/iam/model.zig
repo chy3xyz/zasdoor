@@ -21,11 +21,27 @@ const zent = @import("zent");
 const field = zent.core.field;
 const Schema = zent.core.schema.Schema;
 
+/// An Organization - the multi-tenant core (ZITADEL Organization). Projects
+/// and users hang off an organization, forming the Instance->Organization->
+/// Project hierarchy (dev.md section 3-4).
+pub const Organization = Schema("Organization", .{
+    .fields = &.{
+        field.Int("tenant_id").Default(1),
+        field.String("name"),
+        field.String("description").Default(""),
+        field.String("domain").Default(""),
+        field.Bool("active").Default(true),
+    },
+    .mixins = &.{zent.core.mixin.TimeMixin},
+});
+
 /// A product-level security boundary (ZITADEL "Project"): applications,
-/// API resources, roles and grants all hang off a project.
+/// API resources, roles and grants all hang off a project (and optionally an
+/// organization).
 pub const Project = Schema("Project", .{
     .fields = &.{
         field.Int("tenant_id").Default(1),
+        field.Int("org_id").Default(0),
         field.String("name"),
         field.String("description").Default(""),
         field.Bool("active").Default(true),
