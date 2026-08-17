@@ -34,6 +34,8 @@ const tenant = @import("modules/tenant/root.zig");
 const audit = @import("modules/audit/root.zig");
 const mail_template = @import("modules/mail_template/root.zig");
 const ai = @import("modules/ai/root.zig");
+const iam = @import("modules/iam/root.zig");
+const oauth = @import("modules/oauth/root.zig");
 
 /// Set by SIGINT/SIGTERM so the main thread can stop the server gracefully.
 const ShutdownFlag = struct {
@@ -51,6 +53,7 @@ const CleanupCtx = struct {
     user_store: *user.persistence.UserStore,
     notify_store: *notify.persistence.NotificationStore,
     audit_store: *audit.persistence.AuditStore,
+    iam_store: *iam.persistence.IamStore,
     password_token_max_age: i64,
     verification_token_max_age: i64,
     notification_max_age: i64,
@@ -68,6 +71,12 @@ fn jobNotifyPrune(ctx: ?*anyopaque) void {
     const c: *CleanupCtx = @ptrCast(@alignCast(ctx orelse return));
     const now = zigmodu.time.wallClockSeconds(c.io);
     _ = c.notify_store.purgeOlderThan(now, c.notification_max_age) catch {};
+}
+
+fn jobOAuthCodesPrune(ctx: ?*anyopaque) void {
+    const c: *CleanupCtx = @ptrCast(@alignCast(ctx orelse return));
+    const now = zigmodu.time.wallClockSeconds(c.io);
+    _ = c.iam_store.purgeExpiredAuthCodes(now) catch {};
 }
 
 fn jobAuditPrune(ctx: ?*anyopaque) void {
@@ -104,6 +113,7 @@ pub fn main(init: std.process.Init) !void {
         ai.persistence.message_infos,
         ai.persistence.approval_infos,
         ai.persistence.run_infos,
+        iam.persistence.infos,
     }).open(allocator, kind, dsn);
     defer store_env.deinit();
     std.log.info("[zent] migrated schema via {s} ({s})", .{ @tagName(kind), dsn });
@@ -168,6 +178,10 @@ pub fn main(init: std.process.Init) !void {
     });
     defer ai_svc.deinit();
 
+    var iam_store = iam.persistence.IamStore.init(allocator, store_env.client);
+    var iam_svc = iam.service.IamService.init(allocator, io, &iam_store, &sec);
+    var oauth_svc = oauth.service.OAuthService.init(allocator, io, &iam_svc, &user_svc, &sec, cfg.app_host);
+
     // ── ZigModu module lifecycle (Application API: scan + validate + start/stop) ──
     var app = try zigmodu.Application.init(io, allocator, "zenaipa", .{
         tenant.module,
@@ -180,6 +194,8 @@ pub fn main(init: std.process.Init) !void {
         audit.module,
         mail_template.module,
         ai.module,
+        iam.module,
+        oauth.module,
     }, .{});
     defer app.deinit();
     try app.start();
@@ -192,6 +208,7 @@ pub fn main(init: std.process.Init) !void {
         .user_store = &store,
         .notify_store = &notify_store,
         .audit_store = &audit_store,
+        .iam_store = &iam_store,
         .password_token_max_age = cfg.password_token_expiration_seconds,
         .verification_token_max_age = cfg.verification_token_expiration_seconds,
         .notification_max_age = 30 * 24 * 3600,
@@ -214,6 +231,12 @@ pub fn main(init: std.process.Init) !void {
             .name = "audit.prune",
             .interval_seconds = 24 * 3600,
             .run = jobAuditPrune,
+            .ctx = &cleanup_ctx,
+        },
+        .{
+            .name = "oauth.codes.prune",
+            .interval_seconds = 3600,
+            .run = jobOAuthCodesPrune,
             .ctx = &cleanup_ctx,
         },
     };
@@ -246,6 +269,8 @@ pub fn main(init: std.process.Init) !void {
     var audit_api = audit.api.AuditApi(@TypeOf(audit_svc), @TypeOf(user_svc)).init(&audit_svc, &user_svc);
     var mail_template_api = mail_template.api.MailTemplateApi(@TypeOf(template_svc), @TypeOf(user_svc)).init(&template_svc, &user_svc);
     var ai_api = ai.api.AiApi(@TypeOf(ai_svc), @TypeOf(user_svc)).init(&ai_svc, &user_svc);
+    var iam_api = iam.api.IamApi(@TypeOf(iam_svc), @TypeOf(user_svc)).init(&iam_svc, &user_svc, &audit_svc, default_tenant_id);
+    var oauth_api = oauth.api.OAuthApi(@TypeOf(oauth_svc), @TypeOf(user_svc)).init(&oauth_svc, &user_svc);
     var system_api = system.api.SystemApi(@TypeOf(cache), @TypeOf(task_svc)).init(
         &cache,
         &task_svc,
@@ -291,7 +316,11 @@ pub fn main(init: std.process.Init) !void {
     try audit_api.registerRoutes(&v1);
     try mail_template_api.registerRoutes(&v1);
     try ai_api.registerRoutes(&v1);
+    try iam_api.registerRoutes(&v1);
     try system_api.registerRoutes(&v1);
+
+    // OAuth2 / OIDC public protocol endpoints (server root, no /api prefix).
+    try oauth_api.registerRoutes(&server);
 
     // Health: liveness at the server root (probe convention) and readiness
     // under the API prefix (checks the data store).

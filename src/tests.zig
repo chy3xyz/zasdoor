@@ -16,6 +16,8 @@ const tenant = @import("modules/tenant/root.zig");
 const audit = @import("modules/audit/root.zig");
 const mail_template = @import("modules/mail_template/root.zig");
 const ai = @import("modules/ai/root.zig");
+const iam = @import("modules/iam/root.zig");
+const oauth = @import("modules/oauth/root.zig");
 const cache_svc = @import("services/cache.zig");
 const mail = @import("services/mail.zig");
 
@@ -33,6 +35,7 @@ fn openMemory(allocator: std.mem.Allocator) !db_mod.StoreEnv(schema.infos, .{
     ai.persistence.message_infos,
     ai.persistence.approval_infos,
     ai.persistence.run_infos,
+    iam.persistence.infos,
 }) {
     return db_mod.StoreEnv(schema.infos, .{
         tenant.persistence.infos,
@@ -47,6 +50,7 @@ fn openMemory(allocator: std.mem.Allocator) !db_mod.StoreEnv(schema.infos, .{
         ai.persistence.message_infos,
         ai.persistence.approval_infos,
         ai.persistence.run_infos,
+        iam.persistence.infos,
     }).open(allocator, .sqlite, ":memory:");
 }
 
@@ -76,6 +80,7 @@ test "sqlite store query prepares and runs standalone" {
         notify.persistence.infos,
         audit.persistence.infos,
         mail_template.persistence.infos,
+        iam.persistence.infos,
     }).open(allocator, .sqlite, ":memory:");
     defer env.deinit();
     var store = user.persistence.UserStore.init(allocator, env.client);
@@ -840,3 +845,167 @@ test "user: token_version atomic bump + column projection" {
     try std.testing.expectError(error.UserNotFound, store.bumpTokenVersion(9999, 400));
     try std.testing.expectEqual(@as(?i64, null), try store.getTokenVersion(9999));
 }
+
+test "iam: project + application + role lifecycle" {
+    const allocator = std.testing.allocator;
+    var env = try openMemory(allocator);
+    defer env.deinit();
+    var iam_store = iam.persistence.IamStore.init(allocator, env.client);
+    var sec = zigmodu.security.AppSecurity.init(allocator, std.testing.io, .{ .jwt_secret = "test-secret" });
+    var iam_svc = iam.service.IamService.init(allocator, std.testing.io, &iam_store, &sec);
+
+    // Project
+    const pid = try iam_svc.createProject(1, "CHY", "main project");
+    const proj = (try iam_svc.getProject(pid)).?;
+    defer proj.free(allocator);
+    try std.testing.expectEqualStrings("CHY", proj.name);
+
+    // Application (OAuth client) - secret is only returned once.
+    var creds = try iam_svc.createApplication(1, pid, "CHY Web", "web", "[\"https://app.chy.xyz/callback\"]", "[]", "[]", "[\"authorization_code\",\"refresh_token\"]", "[\"code\"]", "openid profile email", 3600, 0, true);
+    defer creds.deinit(allocator);
+    try std.testing.expect(creds.client_id.len > 0);
+    try std.testing.expect(creds.client_secret.len > 0);
+
+    // Client authentication round-trips with the plaintext secret.
+    const app_opt = try iam_svc.authenticateClient(creds.client_id, creds.client_secret);
+    const app = app_opt orelse return error.TestFailed;
+    defer app.free(allocator);
+    try std.testing.expectEqualStrings("CHY Web", app.name);
+
+    // Wrong secret is rejected.
+    const bad_opt = try iam_svc.authenticateClient(creds.client_id, "wrong-secret");
+    try std.testing.expect(bad_opt == null);
+
+    // Role + assignment + role-key resolution.
+    const rid = try iam_svc.createRole(1, pid, "admin", "Administrator", "[\"user.read\",\"user.write\"]");
+    _ = try userCreateHelper(allocator, env, &iam_svc, "bob@x.com");
+    const uid = 1;
+    _ = try iam_svc.assignRole(1, uid, rid, pid);
+    const keys = try iam_svc.roleKeysForUser(uid, pid);
+    defer allocator.free(keys);
+    try std.testing.expectEqual(@as(usize, 1), keys.len);
+    defer allocator.free(keys[0]);
+    try std.testing.expectEqualStrings("admin", keys[0]);
+}
+
+test "iam: session create + revoke + list" {
+    const allocator = std.testing.allocator;
+    var env = try openMemory(allocator);
+    defer env.deinit();
+    var iam_store = iam.persistence.IamStore.init(allocator, env.client);
+    var sec = zigmodu.security.AppSecurity.init(allocator, std.testing.io, .{ .jwt_secret = "test-secret" });
+    var iam_svc = iam.service.IamService.init(allocator, std.testing.io, &iam_store, &sec);
+
+    const sid = try iam_svc.createSession(1, 7, 0, "dev1", "127.0.0.1", "curl/8", "password", 3600);
+    var sessions = try iam_svc.listSessionsForUser(7);
+    defer sessions.free(allocator);
+    try std.testing.expectEqual(@as(i64, 1), sessions.total);
+    try std.testing.expectEqual(sid, sessions.items[0].id);
+
+    try iam_svc.revokeSession(sid);
+    const row = (try iam_svc.getSession(sid)).?;
+    row.free(allocator);
+    try std.testing.expect(row.revoked_at != 0);
+}
+
+test "oauth: authorization code + PKCE full flow" {
+    const allocator = std.testing.allocator;
+    var env = try openMemory(allocator);
+    defer env.deinit();
+    var iam_store = iam.persistence.IamStore.init(allocator, env.client);
+    var user_store = user.persistence.UserStore.init(allocator, env.client);
+    var sec = zigmodu.security.AppSecurity.init(allocator, std.testing.io, .{ .jwt_secret = "oauth-secret" });
+    var iam_svc = iam.service.IamService.init(allocator, std.testing.io, &iam_store, &sec);
+    var user_svc = user.service.UserService.init(&user_store, &sec, std.testing.io, 3600, 86400);
+    _ = try user_store.createUser("Alice", "alice@example.com", "hash", false, true, 1, 100);
+
+    const pid = try iam_svc.createProject(1, "P", "");
+    var creds = try iam_svc.createApplication(1, pid, "App", "web", "[\"https://app.example/cb\"]", "[]", "[]", "[\"authorization_code\"]", "[\"code\"]", "openid profile email offline_access", 3600, 0, false);
+    defer creds.deinit(allocator);
+
+    var oauth_svc = oauth.service.OAuthService.init(allocator, std.testing.io, &iam_svc, &user_svc, &sec, "http://localhost:8080");
+
+    // S256 PKCE challenge for verifier "very-long-random-verifier-string".
+    const verifier = "very-long-random-verifier-string";
+    var digest: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(verifier, &digest, .{});
+    const enc = std.base64.url_safe_no_pad.Encoder;
+    const n = enc.calcSize(32);
+    var challenge_buf: [64]u8 = undefined;
+    _ = enc.encode(challenge_buf[0..n], &digest);
+
+    // Authorize: user 1 (admin user id = 1), PKCE + nonce + state.
+    const authz = try oauth_svc.authorize(creds.client_id, "https://app.example/cb", "code", "openid profile email offline_access", "st123", "nonce123", challenge_buf[0..n], "S256", 1);
+    defer allocator.free(authz.code);
+    defer allocator.free(authz.redirect_uri);
+    defer if (authz.state) |st| allocator.free(st);
+
+    // Exchange the code with the PKCE verifier.
+    const issue = try oauth_svc.token("authorization_code", creds.client_id, creds.client_secret, authz.code, "https://app.example/cb", verifier, null, null);
+    defer allocator.free(issue.access_token);
+    defer allocator.free(issue.scope);
+    defer if (issue.id_token) |it| allocator.free(it);
+    defer if (issue.refresh_token) |rt| allocator.free(rt);
+
+    try std.testing.expect(issue.access_token.len > 0);
+    try std.testing.expect(issue.id_token != null);
+    try std.testing.expect(issue.refresh_token != null);
+
+    // Access token introspects as active.
+    const insp = oauth_svc.introspect(issue.access_token);
+    defer oauth_svc.freeIntrospection(insp);
+    try std.testing.expect(insp.active);
+    try std.testing.expectEqualStrings("1", insp.sub.?);
+    try std.testing.expectEqualStrings(creds.client_id, insp.client_id.?);
+}
+
+test "oauth: client credentials grant + refresh token rotation" {
+    const allocator = std.testing.allocator;
+    var env = try openMemory(allocator);
+    defer env.deinit();
+    var iam_store = iam.persistence.IamStore.init(allocator, env.client);
+    var user_store = user.persistence.UserStore.init(allocator, env.client);
+    var sec = zigmodu.security.AppSecurity.init(allocator, std.testing.io, .{ .jwt_secret = "oauth-secret" });
+    var iam_svc = iam.service.IamService.init(allocator, std.testing.io, &iam_store, &sec);
+    var user_svc = user.service.UserService.init(&user_store, &sec, std.testing.io, 3600, 86400);
+    _ = try user_store.createUser("Alice", "alice@example.com", "hash", false, true, 1, 100);
+
+    const pid = try iam_svc.createProject(1, "P", "");
+    var creds = try iam_svc.createApplication(1, pid, "Svc", "machine", "[]", "[]", "[]", "[\"client_credentials\"]", "[\"code\"]", "openid", 3600, 0, false);
+    defer creds.deinit(allocator);
+
+    var oauth_svc = oauth.service.OAuthService.init(allocator, std.testing.io, &iam_svc, &user_svc, &sec, "http://localhost:8080");
+
+    // Client credentials: no user involved.
+    const cc = try oauth_svc.token("client_credentials", creds.client_id, creds.client_secret, null, null, null, "openid", null);
+    defer allocator.free(cc.access_token);
+    defer allocator.free(cc.scope);
+    try std.testing.expect(cc.id_token == null);
+    try std.testing.expect(cc.refresh_token == null);
+    try std.testing.expect(cc.access_token.len > 0);
+    const insp_cc = oauth_svc.introspect(cc.access_token);
+    defer oauth_svc.freeIntrospection(insp_cc);
+    try std.testing.expect(insp_cc.active);
+    try std.testing.expect(insp_cc.sub != null and std.mem.startsWith(u8, insp_cc.sub.?, "app_"));
+
+    // Wrong client secret is rejected.
+    try std.testing.expectError(error.InvalidClient, oauth_svc.token("client_credentials", creds.client_id, "nope", null, null, null, "openid", null));
+}
+
+test "oauth: jwt sign/verify round-trip" {
+    const allocator = std.testing.allocator;
+    const mod = @import("modules/oauth/jwt.zig");
+    const token = try mod.sign(allocator, "secret", "{\"sub\":\"42\",\"scope\":\"openid\"}");
+    defer allocator.free(token);
+    const payload = try mod.verify(allocator, "secret", token);
+    defer allocator.free(payload);
+    try std.testing.expect(std.mem.indexOf(u8, payload, "42") != null);
+    try std.testing.expectError(error.InvalidSignature, mod.verify(allocator, "wrong", token));
+}
+
+fn userCreateHelper(allocator: std.mem.Allocator, env: anytype, iam_svc: anytype, email: []const u8) !i64 {
+    _ = iam_svc;
+    var store = user.persistence.UserStore.init(allocator, env.client);
+    return store.createUser(email, email, "hash", false, false, 1, 100);
+}
+
