@@ -38,6 +38,10 @@ const AuditLogs = lazy(() => import('#ui/pages/AuditLogs'));
 const MailTemplates = lazy(() => import('#ui/pages/MailTemplates'));
 const AiChat = lazy(() => import('#ui/pages/AiChat'));
 const AiAdmin = lazy(() => import('#ui/pages/AiAdmin'));
+const Organizations = lazy(() => import('#ui/pages/Organizations'));
+const Projects = lazy(() => import('#ui/pages/Projects'));
+const Agents = lazy(() => import('#ui/pages/Agents'));
+const MfaSettings = lazy(() => import('#ui/pages/MfaSettings'));
 const NotFound = lazy(() => import('#ui/pages/NotFound'));
 
 function BootFallback() {
@@ -214,6 +218,38 @@ if (root) {
             component={() => (
               <AdminGate>
                 <Tenants />
+              </AdminGate>
+            )}
+          />
+          <Route
+            path={ROUTE_PATH.organizations}
+            component={() => (
+              <AdminGate>
+                <Organizations />
+              </AdminGate>
+            )}
+          />
+          <Route
+            path={ROUTE_PATH.projects}
+            component={() => (
+              <AdminGate>
+                <Projects />
+              </AdminGate>
+            )}
+          />
+          <Route
+            path={ROUTE_PATH.agents}
+            component={() => (
+              <AdminGate>
+                <Agents />
+              </AdminGate>
+            )}
+          />
+          <Route
+            path={ROUTE_PATH.mfaSettings}
+            component={() => (
+              <AdminGate>
+                <MfaSettings />
               </AdminGate>
             )}
           />

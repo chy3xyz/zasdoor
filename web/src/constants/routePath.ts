@@ -16,5 +16,9 @@ export const ROUTE_PATH = {
   mailTemplates: '/mail-templates',
   aiChat: '/ai/chat',
   aiAdmin: '/ai/admin',
+  organizations: '/iam/organizations',
+  projects: '/iam/projects',
+  agents: '/agents',
+  mfaSettings: '/security/mfa',
   notFound: '/404',
 } as const;
