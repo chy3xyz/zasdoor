@@ -1,6 +1,6 @@
-//! ZenaIAM domain model - the ZITADEL-style identity/authorization kernel.
+//! IAM domain model - the identity/authorization kernel.
 //!
-//! Mirrors ZITADEL's Organization / Project / Application / Role hierarchy,
+//! Organization / Project / Application / Role hierarchy,
 //! laid on top of zasdoor's existing multi-tenant (tenant_id) isolation.
 //!
 //! Entities:
@@ -21,7 +21,7 @@ const zent = @import("zent");
 const field = zent.core.field;
 const Schema = zent.core.schema.Schema;
 
-/// An Organization - the multi-tenant core (ZITADEL Organization). Projects
+/// An Organization - the multi-tenant core. Projects
 /// and users hang off an organization, forming the Instance->Organization->
 /// Project hierarchy (dev.md section 3-4).
 pub const Organization = Schema("Organization", .{
@@ -35,7 +35,7 @@ pub const Organization = Schema("Organization", .{
     .mixins = &.{zent.core.mixin.TimeMixin},
 });
 
-/// A product-level security boundary (ZITADEL "Project"): applications,
+/// A product-level security boundary ("Project"): applications,
 /// API resources, roles and grants all hang off a project (and optionally an
 /// organization).
 pub const Project = Schema("Project", .{
@@ -51,7 +51,7 @@ pub const Project = Schema("Project", .{
 
 /// An OAuth/OIDC client. client_id is a stable public identifier;
 /// client_secret_hash stores only a hash (Sensitive), never the plaintext.
-/// Application types follow ZITADEL: web | spa | native | machine.
+/// Application types: web | spa | native | machine.
 pub const Application = Schema("Application", .{
     .fields = &.{
         field.Int("tenant_id").Default(1),
@@ -74,7 +74,7 @@ pub const Application = Schema("Application", .{
     .mixins = &.{zent.core.mixin.TimeMixin},
 });
 
-/// A project-scoped named role (ZITADEL project roles).
+/// A project-scoped named role.
 pub const Role = Schema("Role", .{
     .fields = &.{
         field.Int("tenant_id").Default(1),

@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Project renamed to Zasdoor**(formerly Zenaipa): package, binaries,
   env prefix (`ZASDOOR_*`), web UI branding, and docs updated end-to-end.
-- **IAM module (ZITADEL-style)**: organizations / projects / applications
+- **IAM module**: organizations / projects / applications
   (OAuth2 clients with `client_id`/`client_secret`) / roles & assignments /
   sessions; admin HTTP API under `/api/v1/iam/*`.
 - **Authz module**: generic `POST /api/v1/iam/authz/check` authorization endpoint.

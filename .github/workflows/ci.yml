@@ -11,8 +11,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # zasdoor 的 build.zig.zon 以相对路径依赖 zig_ws/{zigmodu,zent};
-      # 在 CI 中复现该布局后构建。
+      # build.zig.zon depends on sibling checkouts of zigmodu/zent under zig_ws/;
+      # recreate that layout inside CI before building.
       - name: Recreate sibling dependency layout
         run: |
           mkdir -p /tmp/ci/w4_proj/zig_ws /tmp/ci/w4_proj/dev_machine/_adm_frame_

@@ -1,6 +1,6 @@
 # OAuth2 / OIDC 模块
 
-> ZITADEL 兼容的协议表面:discovery、JWKS、authorize、token、introspect、revoke、userinfo。
+> OAuth2 / OIDC 协议表面:discovery、JWKS、authorize、token、introspect、revoke、userinfo。
 > 对应代码:`src/modules/oauth/`(service.zig 协议逻辑、jwt.zig 令牌、api.zig 路由)。
 
 ## 1. 支持的流程
@@ -11,7 +11,7 @@
 | `client_credentials` | 客户端凭证(机器对机器),以 `client_id`/`client_secret` 换 token |
 | `refresh_token` | 刷新令牌续期 |
 
-- 签名算法:**HS256**(对称),与主 JWT 共用 HMAC secret(按 ZITADEL 风格的 `kid=null`)。
+- 签名算法:**HS256**(对称),与主 JWT 共用 HMAC secret(`kid=null`)。
 - Scope:`openid`、`profile`、`email`、`offline_access`。
 - ID Token 由授权码兑换时签发,`sub` 为用户 ID,含 `iss`(issuer)、`aud`(client_id)、`exp`。
 

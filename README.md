@@ -2,9 +2,9 @@
 
 # ⚡ Zasdoor
 
-**One binary. A production-grade full-stack admin platform — Zig backend + SolidJS frontend.**
+**Open-source Identity & Access Management (IAM) — one binary, self-hosted.**
 
-Ship your internal console faster than your coffee gets cold.
+Organizations, projects, applications, roles, OAuth2/OIDC, MFA, SIWE — with a Zig backend and a SolidJS admin console.
 
 [![Zig](https://img.shields.io/badge/Zig-0.17-orange?logo=zig&logoColor=white)](https://ziglang.org)
 [![zigmodu](https://img.shields.io/badge/zigmodu-v0.15.22-blue)](https://github.com/chy3xyz/zigmodu)
@@ -13,19 +13,20 @@ Ship your internal console faster than your coffee gets cold.
 [![Tests](https://img.shields.io/badge/tests-58%20backend%20%2B%205%20frontend-green)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-**English** · [**简体中文**](README.zh-CN.md)
-
 </div>
 
 ---
 
 ## 🚀 Why Zasdoor?
 
+Zasdoor is a self-hosted identity & access management platform. It gives you the identity layer your product needs — users, organizations, projects, applications, roles, and standards-based sign-in — without stitching together half a dozen services.
+
 | | |
 |---|---|
-| 🧩 **Batteries included** | Auth (JWT+PBKDF2), email verification, background jobs, file uploads, notifications, caching, multi-tenancy, audit log, dashboard, email templates — working out of the box, no glue code required |
-| 🤖 **Agentic AI built in** | LLM assistant with encrypted provider keys, platform skills, human approval for write actions, quotas, workflow orchestration, reasoning-chain display, run audit & model tracking |
-| 🛡️ **Security by default** | Per-IP login rate limiting, server-side **session revocation** (kick users offline instantly), file type allow-list, encrypted secrets, fail-closed production startup, redacted errors |
+| 🏛️ **Identity core** | Organizations / projects / applications hierarchy, per-project roles & assignments, sessions, and a generic `authz/check` authorization endpoint |
+| 🔐 **Standards-based auth** | OAuth2 / OIDC (authorization code + PKCE, client credentials, refresh tokens, discovery/JWKS/userinfo/introspection), JWT + PBKDF2, session revocation |
+| 🛡️ **Strong second factor** | TOTP (HmacSHA1), recovery codes, per-tenant MFA policy; Web3 / SIWE (EIP-4361) wallet sign-in with single-use nonces |
+| 🤖 **Machine identities** | AI agents with capability/scope allow-lists and a per-period **budget ledger** (`budget_remaining` claim) |
 | 📦 **One binary** | Zig backend compiles to a single static binary; the SolidJS SPA is a static bundle. No runtime, no interpreter, no containers required (but Docker is included) |
 | 🚢 **Deploy-ready** | Multi-stage Dockerfile, GitHub Actions CI, graceful shutdown with request draining, backup playbook, Prometheus metrics |
 
@@ -33,22 +34,21 @@ Ship your internal console faster than your coffee gets cold.
 
 ## ✨ Features
 
-### 🔐 Authentication & accounts
+### 🏛️ IAM & identity
+- **Organizations / Projects / Applications** — resource hierarchy; applications are OAuth2 clients with `client_id` + `client_secret`
+- **Roles & assignments** — per-project roles bound to users, plus a generic `POST /iam/authz/check` authorization endpoint
+- **Sessions** — list / revoke individual or all sessions for a user; server-side revocation kills tokens instantly
+- **Event store** — append-only domain-event persistence (foundation for audit trails & projections)
+
+### 🔐 Authentication
 - Register / login / logout, forgot & reset password, `GET /me` — **JWT + PBKDF2**
 - Email verification with one-click links and in-app banners
 - Admin bootstrap CLI: `zasdoor-admin create-admin --email you@example.com`
 - **Per-client-IP rate limiting** (an attacker can't lock out everyone), anti-enumeration
-- **Session revocation**: change password or kick a user → all their tokens die instantly
-
-### 🏛️ IAM & identity (ZITADEL-style)
-- **Organizations / Projects / Applications** — resource hierarchy; applications are OAuth2 clients with `client_id` + `client_secret`
-- **Roles & assignments** — per-project roles bound to users, plus a generic `POST /iam/authz/check` authorization endpoint
-- **Sessions** — list / revoke individual or all sessions for a user
 - **OAuth2 / OIDC** — `authorization_code` (+ PKCE `plain`/`S256`), `client_credentials`, `refresh_token`; `.well-known/openid-configuration`, JWKS, `userinfo`, token introspection & revocation
 - **MFA** — TOTP enrollment/verification (HmacSHA1, 6-digit), recovery codes, per-tenant MFA policy
 - **Web3 / SIWE** — EIP-4361 sign-in, single-use nonce, wallet↔user binding, JWT issuance for bound wallets
 - **AI Agents** — machine identities: capability & scope allow-lists, per-period **budget ledger** (`budget_remaining` claim), token verify endpoint
-- **Event store** — append-only domain-event persistence (foundation for audit trails & projections)
 
 ### 🏗️ Platform services
 - **Background jobs** — durable queue with retries + management UI
@@ -71,13 +71,13 @@ Ship your internal console faster than your coffee gets cold.
 - **Skills** — LLM-callable platform tools: user search, task stats, audit search, tenant list (read-only) + `notify.send` (write, human-approved)
 - **Chat** — per-user sessions with persisted history, **reasoning-chain display** (DeepSeek-R1 etc.)
 - **Human-in-the-loop** — approval queue, approve executes the action
-- **Governance** — rolling 24h quota, 4-way concurrency bulkhead,**circuit breaker** (5-failure → 60s OPEN + half-open probe), provider health check, run audit with the **actual model** + **per-run usage snapshot** (tokens/steps/tool calls via `Metrics.toStats()`, zigmodu v0.15.17), Prometheus AI metrics
+- **Governance** — rolling 24h quota, 4-way concurrency bulkhead, **circuit breaker** (5-failure → 60s OPEN + half-open probe), provider health check, run audit with the **actual model** + **per-run usage snapshot**, Prometheus AI metrics
 - **Workflow** — read-only health-report orchestration via zigmodu.ai
 
 ### 💎 Engineering quality
 - Schema-as-code migrations (auto at startup), SQLite ↔ PostgreSQL via one env var
 - Type-safe queries end-to-end (no SQL string building)
-- **58 backend tests** (stores, services, HTTP via Testkit, JWT/multi-tenancy, audit, AI crypto/approval/quota, admin-gate 401/403/200, session revocation, IAM, OAuth PKCE, MFA TOTP, SIWE EIP-4361, agent budget) + **5 frontend tests** (vitest)
+- **58 backend tests** (stores, services, HTTP via Testkit, JWT/multi-tenancy, audit, IAM, OAuth PKCE, MFA TOTP, SIWE EIP-4361, agent budget, AI crypto/approval/quota, session revocation) + **5 frontend tests** (vitest)
 - `zig fmt` clean, zero TODOs, graceful shutdown, documented backup strategy
 
 ---
@@ -103,6 +103,10 @@ Zig HTTP server (zigmodu, async fibers)
    ▼
 Module APIs ──► Services ──► Persistence (zent, type-safe) ──► SQLite / PostgreSQL
    │
+   ├── IAM (organizations / projects / applications / roles / authz)
+   ├── OAuth2 / OIDC (authorize / token / userinfo / introspection)
+   ├── MFA (TOTP / recovery / policy)
+   ├── Web3 (SIWE nonce / verify / wallet bind)
    ├── Task Dispatcher (background thread)
    │     └── durable queue · mail.send handler · housekeeping (tokens/audit)
    └── AI Agent (zigmodu.ai)
@@ -124,7 +128,7 @@ zig build
 zig-out/bin/zasdoor-admin create-admin --email admin@example.com --password 'YourPass123' --name Boss
 
 # 3. Frontend
-cd web && npm install && npm run dev
+cd web && pnpm install && pnpm run dev
 ```
 
 Open <http://localhost:3001>. No SMTP configured? Verification/reset mails print to the backend console instead.
@@ -158,10 +162,10 @@ All settings are `ZASDOOR_*` env vars (see [`src/config.zig`](src/config.zig) fo
 
 ## 🤖 AI Assistant — in depth
 
-1. **Configure a provider** (admin): AI 管理 → Provider — OpenAI-compatible `endpoint`, JSON array of `api_keys`, comma-separated `models`. Keys are AES-256-GCM encrypted (set `ZASDOOR_AI_KEY_SECRET` first). Use the **测试** button to verify connectivity.
-2. **Chat** (AI 助手): ask the agent about your platform — *"任务队列现在什么情况?"* It calls read-only skills (user/task/audit/tenant) and shows its **reasoning chain** in a collapsible block.
+1. **Configure a provider** (admin): AI Management → Provider — OpenAI-compatible `endpoint`, JSON array of `api_keys`, comma-separated `models`. Keys are AES-256-GCM encrypted (set `ZASDOOR_AI_KEY_SECRET` first). Use the **Test** button to verify connectivity.
+2. **Chat** (AI Assistant): ask the agent about your platform — e.g. *"What is the task queue status?"* It calls read-only skills (user/task/audit/tenant) and shows its **reasoning chain** in a collapsible block.
 3. **Write actions need approval**: `notify.send` lands in the approval queue; approving it performs the send (audit-logged, optimistic-locked).
-4. **Governance**: rolling 24h quota, 4-way bulkhead, **circuit breaker**, provider health checks, run audit records the **actual model** answered + **per-run usage snapshot** (tokens/steps/tool calls via `AgentMetrics.toStats()`), Prometheus AI metrics.
+4. **Governance**: rolling 24h quota, 4-way bulkhead, **circuit breaker**, provider health checks, run audit records the **actual model** answered + **per-run usage snapshot** (tokens/steps/tool calls), Prometheus AI metrics.
 
 ---
 
@@ -201,7 +205,7 @@ Envelope: `{ code, msg, data }`, `code === 0` = success.
 
 ```bash
 zig build test                     # 58 backend tests (in-memory SQLite + Testkit HTTP)
-cd web && npm run typecheck && npm test && npm run build   # vitest + build
+cd web && pnpm run typecheck && pnpm run test && pnpm run build   # vitest + build
 ```
 
 ## 🚢 Deployment
@@ -220,23 +224,25 @@ cd web && npm run typecheck && npm test && npm run build   # vitest + build
 
 | Status | Item |
 | --- | --- |
-| ✅ Done | AI assistant (providers/skills/chat/approvals/workflow/quota), audit log + CSV, dashboard, email templates, per-IP rate limiting, **session revocation**, file allow-list, graceful shutdown, Docker/CI, frontend tests, theme toggle |
-| ✅ Done | **Streaming chat** — Agent `chatStream` + `on_delta` (zigmodu v0.15.16); SSE reasoning/delta/done feed with typing effect, JSON fallback |
-| ✅ Done | **Run usage audit** — zigmodu v0.15.17 `Metrics.toStats()`; every AI run persists tokens/steps/tool-call usage, admin runs table shows it |
-| ✅ Done | **Streaming tool-JSON fix** — zigmodu v0.15.18 (`b28444a`); SkillRegistry tools_json now emits valid JSON (extra `}` removed) so DeepSeek/OpenAI no longer reject tool schemas with 400 → `ProviderError` in streaming chat |
-| ✅ Done | **Deps at latest** — zigmodu v0.15.22 + zent v0.29.4; zent `Sum` → f64 adapted (`@intFromFloat`), `migrate.zig` comptime quota fix (`10ab9ce`) |
-| ✅ Done | **ZITADEL-style IAM** — organizations / projects / applications / roles / sessions + `authz/check` |
+| ✅ Done | **IAM core** — organizations / projects / applications / roles / sessions + `authz/check` |
 | ✅ Done | **OAuth2 / OIDC** — authorization code + PKCE, client credentials, refresh tokens, discovery/JWKS/userinfo/introspection/revocation |
 | ✅ Done | **MFA** — TOTP enrollment & verification, recovery codes, per-tenant policy |
 | ✅ Done | **Web3 / SIWE** — EIP-4361 message parsing, nonce reservation, wallet binding, JWT login |
 | ✅ Done | **AI Agents** — machine identities with capability/scopes + per-period budget ledger |
 | ✅ Done | **Event store** — append-only domain events |
+| ✅ Done | AI assistant (providers/skills/chat/approvals/workflow/quota), audit log + CSV, dashboard, email templates, per-IP rate limiting, **session revocation**, file allow-list, graceful shutdown, Docker/CI, frontend tests, theme toggle |
+| ✅ Done | **Streaming chat** — Agent `chatStream` + `on_delta` (zigmodu v0.15.16); SSE reasoning/delta/done feed with typing effect, JSON fallback |
+| ✅ Done | **Run usage audit** — zigmodu v0.15.17 `Metrics.toStats()`; every AI run persists tokens/steps/tool-call usage, admin runs table shows it |
+| ✅ Done | **Streaming tool-JSON fix** — zigmodu v0.15.18; SkillRegistry tools_json emits valid JSON so models no longer reject tool schemas |
+| ✅ Done | **Deps at latest** — zigmodu v0.15.22 + zent v0.29.4 |
 
 ---
 
 ## 🤝 Contributing
 
 PRs welcome! Keep `zig fmt` clean and make `zig build test` pass. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+Also available in [简体中文](README.zh-CN.md).
 
 ## 📄 License
 

@@ -1,6 +1,6 @@
 //! Event Store domain model - the system's append-only source of records.
 //!
-//! Mirrors ZITADEL's event-sourcing model (dev.md section 14): every state
+//! Event-sourcing model (dev.md section 14): every state
 //! change is an immutable event appended to one aggregate's stream, guarded by
 //! optimistic concurrency (aggregate_version). Projections replay these events
 //! to build query models.

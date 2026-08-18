@@ -1,6 +1,6 @@
 //! OAuth2 / OIDC HTTP endpoints (public protocol surface).
 //!
-//! These routes implement the standard ZITADEL-compatible surface:
+//! These routes implement the standard OAuth2 / OIDC protocol surface:
 //! discovery, jwks, authorize, token, introspect, revoke, userinfo.
 
 const std = @import("std");

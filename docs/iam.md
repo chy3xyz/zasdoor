@@ -1,6 +1,6 @@
 # IAM 模块(组织 / 项目 / 应用 / 角色)
 
-> ZITADEL 风格的身份与访问管理内核,在 zasdoor 既有多租户(`tenant_id` 行隔离)之上构建。
+> 身份与访问管理内核,在 zasdoor 既有多租户(`tenant_id` 行隔离)之上构建。
 > 对应代码:`src/modules/iam/`(model → persistence → service → api)。
 
 ## 1. 资源层级

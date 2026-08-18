@@ -23,9 +23,10 @@
 
 | | |
 |---|---|
-| 🧩 **开箱即用** | 认证（JWT+PBKDF2）、邮箱验证、后台任务、文件上传、通知、缓存、多租户、审计日志、概览面板、邮件模板——全部开箱即用,无需胶水代码 |
-| 🤖 **内置智能助手** | LLM 助手:密钥加密存储、平台技能、写操作人工审批、配额、工作流编排、推理链展示、运行审计与模型追踪 |
-| 🛡️ **安全默认** | 按 IP 登录限流、**服务端会话吊销**(一键踢下线)、文件类型白名单、密钥加密、生产 fail-closed、错误信息脱敏 |
+| 🏛️ **身份内核** | 组织 / 项目 / 应用资源层级、项目级角色与分配、会话管理、通用 `authz/check` 鉴权端点 |
+| 🔐 **标准认证** | OAuth2 / OIDC(授权码 + PKCE、客户端凭证、刷新令牌、discovery/JWKS/userinfo/introspection)、JWT + PBKDF2、会话吊销 |
+| 🛡️ **强第二因子** | TOTP(HmacSHA1)、恢复码、租户级 MFA 策略;Web3 / SIWE(EIP-4361)钱包登录 + 一次性 nonce |
+| 🤖 **机器身份** | AI Agent:能力/scope 白名单 + 按周期**预算账本**(`budget_remaining` 声明) |
 | 📦 **单二进制** | Zig 后端编译为单个静态二进制;SolidJS 前端为静态包。无运行时、无解释器——但 Docker 也已备好 |
 | 🚢 **开箱可部署** | 多阶段 Dockerfile、GitHub Actions CI、优雅关闭（排空在途请求）、备份手册、Prometheus 指标 |
 
@@ -40,7 +41,7 @@
 - **按客户端 IP 限流**(攻击者无法锁死全体用户)、防枚举应答
 - **会话吊销**:改密或踢下线 → 该用户所有 token 立即失效
 
-### 🏛️ IAM 与身份(ZITADEL 风格)
+### 🏛️ IAM 与身份
 - **组织 / 项目 / 应用** —— 资源层级;应用即 OAuth2 客户端,带 `client_id` + `client_secret`
 - **角色与授权** —— 项目级角色绑定用户,另有通用 `POST /iam/authz/check` 鉴权端点
 - **会话管理** —— 列出 / 吊销单个用户或全部会话
@@ -124,7 +125,7 @@ zig build
 zig-out/bin/zasdoor-admin create-admin --email admin@example.com --password 'YourPass123' --name Boss
 
 # 3. 前端
-cd web && npm install && npm run dev
+cd web && pnpm install && pnpm run dev
 ```
 
 打开 <http://localhost:3001>。未配置 SMTP?验证/重置邮件会打印在后端控制台。
@@ -201,7 +202,7 @@ cd web && npm install && npm run dev
 
 ```bash
 zig build test                     # 58 个后端测试(内存 SQLite + Testkit HTTP)
-cd web && npm run typecheck && npm test && npm run build   # vitest + 构建
+cd web && pnpm run typecheck && pnpm run test && pnpm run build   # vitest + 构建
 ```
 
 ## 🚢 部署
@@ -225,7 +226,7 @@ cd web && npm run typecheck && npm test && npm run build   # vitest + 构建
 | ✅ 已完成 | **运行用量审计** —— zigmodu v0.15.17 `Metrics.toStats()`;每次 AI run 持久化 tokens/steps/工具调用用量,管理端 runs 表格展示 |
 | ✅ 已完成 | **流式工具 JSON 修复** —— zigmodu v0.15.18(`b28444a`);SkillRegistry tools_json 输出合法 JSON(去掉多余 `}`),修复流式 chat 中 DeepSeek/OpenAI 以 400 拒绝工具 schema(`ProviderError`)的问题 |
 | ✅ 已完成 | **依赖升级到最新** —— zigmodu v0.15.22 + zent v0.29.4;zent `Sum` 改为 f64 已适配(`@intFromFloat`),`migrate.zig` comptime 配额修复(`10ab9ce`) |
-| ✅ 已完成 | **ZITADEL 风格 IAM** —— 组织 / 项目 / 应用 / 角色 / 会话 + `authz/check` |
+| ✅ 已完成 | **IAM 核心** —— 组织 / 项目 / 应用 / 角色 / 会话 + `authz/check` |
 | ✅ 已完成 | **OAuth2 / OIDC** —— 授权码 + PKCE、客户端凭证、刷新令牌、discovery/JWKS/userinfo/introspection/revocation |
 | ✅ 已完成 | **MFA** —— TOTP 注册与校验、恢复码、租户级策略 |
 | ✅ 已完成 | **Web3 / SIWE** —— EIP-4361 消息解析、nonce 预留、钱包绑定、JWT 登录 |
