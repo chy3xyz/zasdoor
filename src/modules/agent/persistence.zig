@@ -35,6 +35,16 @@ pub const AgentRow = struct {
     }
 };
 
+pub const AgentListResult = struct {
+    items: []AgentRow,
+    total: i64,
+
+    pub fn free(self: *AgentListResult, a: std.mem.Allocator) void {
+        for (self.items) |r| r.free(a);
+        a.free(self.items);
+    }
+};
+
 pub const AgentUsageRow = struct {
     id: i64,
     agent_id: i64,
@@ -116,6 +126,29 @@ pub const AgentStore = struct {
         var e = (try crud.get(self.client.agent, id)) orelse return null;
         defer zent.codegen.deinitEntity(infos, AgentInfo, &e, self.allocator);
         return try self.dup(e);
+    }
+
+    pub fn listAgents(self: *AgentStore, page: usize, page_size: usize, owner: ?i64) !AgentListResult {
+        const preds = self.client.agent.predicates;
+        var preds_buf: [1]zent.sql.Predicate = undefined;
+        var n: usize = 0;
+        if (owner) |oid| {
+            preds_buf[0] = preds.owner_user_idEQ(.{ .int = oid });
+            n = 1;
+        }
+        var result = try crud.paginatedWithOptions(self.client.agent, preds_buf[0..n], .{ .sort_col = "id" }, page, page_size);
+        defer result.deinit(infos, AgentInfo, self.allocator);
+        var out = try self.allocator.alloc(AgentRow, result.items.items.len);
+        var i: usize = 0;
+        errdefer {
+            for (out[0..i]) |r| r.free(self.allocator);
+            self.allocator.free(out);
+        }
+        for (result.items.items) |e| {
+            out[i] = try self.dup(e);
+            i += 1;
+        }
+        return .{ .items = out, .total = result.total };
     }
 
     pub fn setActive(self: *AgentStore, id: i64, active: bool, now: i64) !void {

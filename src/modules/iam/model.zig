@@ -1,7 +1,7 @@
 //! ZenaIAM domain model - the ZITADEL-style identity/authorization kernel.
 //!
 //! Mirrors ZITADEL's Organization / Project / Application / Role hierarchy,
-//! laid on top of zenaipa's existing multi-tenant (tenant_id) isolation.
+//! laid on top of zasdoor's existing multi-tenant (tenant_id) isolation.
 //!
 //! Entities:
 //!   - Project          a product-level security boundary.

@@ -1,4 +1,4 @@
-# zenaipa — production image (API service).
+# zasdoor — production image (API service).
 # The frontend is a static SPA: serve `web/dist` from any static host and
 # proxy `/api` (and `/health`, `/metrics`) to this image on :8000.
 #
@@ -24,14 +24,14 @@ RUN cd web && npm ci && npm run build
 FROM alpine:3.20
 RUN apk add --no-cache libc6-compat ca-certificates
 WORKDIR /app
-COPY --from=backend-build /build/w4_proj/dev_machine/_adm_frame_/zmadmin/zig-out/bin/zenaipa /usr/local/bin/zenaipa
-COPY --from=backend-build /build/w4_proj/dev_machine/_adm_frame_/zmadmin/zig-out/bin/zenaipa-admin /usr/local/bin/zenaipa-admin
+COPY --from=backend-build /build/w4_proj/dev_machine/_adm_frame_/zmadmin/zig-out/bin/zasdoor /usr/local/bin/zasdoor
+COPY --from=backend-build /build/w4_proj/dev_machine/_adm_frame_/zmadmin/zig-out/bin/zasdoor-admin /usr/local/bin/zasdoor-admin
 # Optional: bake the SPA into the image (served by your static host / nginx).
 COPY --from=web-build /build/web/dist /app/web-dist
-ENV ZENAIPA_HTTP_PORT=8000 \
-    ZENAIPA_DB_DRIVER=sqlite \
-    ZENAIPA_SQLITE_PATH=/data/zenaipa.db \
-    ZENAIPA_UPLOAD_DIR=/data/uploads
+ENV ZASDOOR_HTTP_PORT=8000 \
+    ZASDOOR_DB_DRIVER=sqlite \
+    ZASDOOR_SQLITE_PATH=/data/zasdoor.db \
+    ZASDOOR_UPLOAD_DIR=/data/uploads
 VOLUME ["/data"]
 EXPOSE 8000
-CMD ["zenaipa"]
+CMD ["zasdoor"]

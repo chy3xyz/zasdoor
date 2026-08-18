@@ -67,7 +67,7 @@ pub const AuthzService = struct {
             const role = role_opt orelse continue;
             defer role.free(self.allocator);
             // role.permissions is a JSON string array like ["user.read","user.write"].
-                        var it = std.mem.tokenizeAny(u8, role.permissions, "[],\" \t\n");
+            var it = std.mem.tokenizeAny(u8, role.permissions, "[],\" \t\n");
             while (it.next()) |perm| {
                 if (hasPermissionHave(perm, resource, action)) {
                     matched = true;

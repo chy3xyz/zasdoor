@@ -1,4 +1,4 @@
-//! Auth helpers for zenaipa HTTP handlers.
+//! Auth helpers for zasdoor HTTP handlers.
 //!
 //! JWT verification uses zigmodu's built-in `jwtAuthWithSecurity` middleware
 //! (mounted per route group in the module `api.zig` files). The helpers here

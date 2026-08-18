@@ -115,7 +115,6 @@ pub const MfaService = struct {
     }
 };
 
-
 fn fillEntropy(io: std.Io, buf: []u8) !void {
     var file = try std.Io.Dir.cwd().openFile(io, "/dev/urandom", .{});
     defer file.close(io);

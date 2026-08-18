@@ -5,6 +5,36 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-02-11
+
+### Added
+
+- **Project renamed to Zasdoor**(formerly Zenaipa): package, binaries,
+  env prefix (`ZASDOOR_*`), web UI branding, and docs updated end-to-end.
+- **IAM module (ZITADEL-style)**: organizations / projects / applications
+  (OAuth2 clients with `client_id`/`client_secret`) / roles & assignments /
+  sessions; admin HTTP API under `/api/v1/iam/*`.
+- **Authz module**: generic `POST /api/v1/iam/authz/check` authorization endpoint.
+- **OAuth2 / OIDC**: authorization code + PKCE (`plain`/`S256`),
+  `client_credentials`, `refresh_token`; discovery, JWKS, userinfo,
+  introspection, revocation.
+- **MFA**: TOTP (HmacSHA1) enroll/verify, recovery codes, per-tenant policy.
+- **Web3 / SIWE**: EIP-4361 message parsing, single-use nonce reservation,
+  wallet↔user binding, JWT issuance for bound wallets.
+- **Agent module**: machine identities with capability/scope allow-lists,
+  per-period budget ledger (`budget_remaining` JWT claim), token verify endpoint.
+- **Event store**: append-only domain-event persistence.
+- Web frontend pages: IAM (organizations/projects/applications/roles),
+  agents, MFA settings, web3 wallet binding.
+
+### Changed
+
+- Env var prefix `ZENAIPA_*` → `ZASDOOR_*`; binaries `zenaipa`/`zenaipa-admin`
+  → `zasdoor`/`zasdoor-admin`; web package `zenaipa-web` → `zasdoor-web`.
+- Backend test suite grown to 56 tests (IAM, OAuth PKCE, MFA TOTP,
+  SIWE EIP-4361, agent budget ledger).
+
+---
 ## [0.2.2] - 2026-08-11
 
 ### Fixed
@@ -67,7 +97,7 @@ assistant, streaming chat, governance and security hardening.
 
 - **Full-stack admin framework** — task dispatcher (durable queue + mail.send),
   email templates + verification, files, notifications, cache, admin CLI
-  (`zenaipa-admin create-admin`)
+  (`zasdoor-admin create-admin`)
 - **Multi-tenant isolation** — Tenant entity, JWT `aud` binding, row-level
   scoping
 - **Audit & ops** — audit log with CSV export & retention, dashboard stats,
@@ -90,7 +120,7 @@ assistant, streaming chat, governance and security hardening.
 ### Fixed
 
 - Streaming tool schemas rejected by DeepSeek/OpenAI (HTTP 400 →
-  `ProviderError`): upstream zigmodu v0.15.18 `tools_json` brace fix; zenaipa
+  `ProviderError`): upstream zigmodu v0.15.18 `tools_json` brace fix; zasdoor
   consumes it via `SkillRegistry`
 - zent `migrate.zig` comptime branch-quota overflow on 15+ table schemas
   (upstream `10ab9ce`); schemas now compile on zent v0.29.2+

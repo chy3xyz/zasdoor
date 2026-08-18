@@ -29,27 +29,27 @@ pub const Metrics = struct {
         var buf = std.ArrayList(u8).empty;
         defer buf.deinit(allocator);
 
-        try buf.print(allocator, "# HELP zenaipa_http_requests_total Total HTTP requests processed.\n", .{});
-        try buf.print(allocator, "# TYPE zenaipa_http_requests_total counter\n", .{});
-        try buf.print(allocator, "zenaipa_http_requests_total {d}\n", .{c.request_count});
-        try buf.print(allocator, "# HELP zenaipa_http_requests_in_flight Requests currently being processed.\n", .{});
-        try buf.print(allocator, "# TYPE zenaipa_http_requests_in_flight gauge\n", .{});
-        try buf.print(allocator, "zenaipa_http_requests_in_flight {d}\n", .{c.in_flight});
+        try buf.print(allocator, "# HELP zasdoor_http_requests_total Total HTTP requests processed.\n", .{});
+        try buf.print(allocator, "# TYPE zasdoor_http_requests_total counter\n", .{});
+        try buf.print(allocator, "zasdoor_http_requests_total {d}\n", .{c.request_count});
+        try buf.print(allocator, "# HELP zasdoor_http_requests_in_flight Requests currently being processed.\n", .{});
+        try buf.print(allocator, "# TYPE zasdoor_http_requests_in_flight gauge\n", .{});
+        try buf.print(allocator, "zasdoor_http_requests_in_flight {d}\n", .{c.in_flight});
         inline for (.{
             .{ "2xx", 1 },
             .{ "3xx", 2 },
             .{ "4xx", 3 },
             .{ "5xx", 4 },
         }) |pair| {
-            try buf.print(allocator, "zenaipa_http_requests_{s}{{class=\"{s}\"}} {d}\n", .{ pair[0], pair[0], c.status_counts[pair[1]] });
+            try buf.print(allocator, "zasdoor_http_requests_{s}{{class=\"{s}\"}} {d}\n", .{ pair[0], pair[0], c.status_counts[pair[1]] });
         }
-        try buf.print(allocator, "# HELP zenaipa_http_request_duration_seconds Request latency summary.\n", .{});
-        try buf.print(allocator, "# TYPE zenaipa_http_request_duration_seconds gauge\n", .{});
-        try buf.print(allocator, "zenaipa_http_request_duration_seconds_avg {d:.6}\n", .{c.avgDuration()});
-        try buf.print(allocator, "zenaipa_http_request_duration_seconds_max {d:.6}\n", .{if (c.max_duration_seconds == std.math.floatMax(f64)) 0 else c.max_duration_seconds});
-        try buf.print(allocator, "# HELP zenaipa_uptime_seconds Process uptime.\n", .{});
-        try buf.print(allocator, "# TYPE zenaipa_uptime_seconds gauge\n", .{});
-        try buf.print(allocator, "zenaipa_uptime_seconds {d}\n", .{now - self.started_at});
+        try buf.print(allocator, "# HELP zasdoor_http_request_duration_seconds Request latency summary.\n", .{});
+        try buf.print(allocator, "# TYPE zasdoor_http_request_duration_seconds gauge\n", .{});
+        try buf.print(allocator, "zasdoor_http_request_duration_seconds_avg {d:.6}\n", .{c.avgDuration()});
+        try buf.print(allocator, "zasdoor_http_request_duration_seconds_max {d:.6}\n", .{if (c.max_duration_seconds == std.math.floatMax(f64)) 0 else c.max_duration_seconds});
+        try buf.print(allocator, "# HELP zasdoor_uptime_seconds Process uptime.\n", .{});
+        try buf.print(allocator, "# TYPE zasdoor_uptime_seconds gauge\n", .{});
+        try buf.print(allocator, "zasdoor_uptime_seconds {d}\n", .{now - self.started_at});
         return buf.toOwnedSlice(allocator);
     }
 };

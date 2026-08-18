@@ -1,4 +1,4 @@
-# Contributing to Zenaipa
+# Contributing to Zasdoor
 
 Thanks for taking the time to contribute! This project follows a small set of
 conventions to keep reviews fast and the codebase consistent.
@@ -32,7 +32,7 @@ conventions to keep reviews fast and the codebase consistent.
   client stay in sync.
 - Add tests for new backend behavior in `src/tests.zig` (in-memory SQLite is
   available via the `openMemory` helper).
-- Keep environment configuration in `src/config.zig` with the `ZENAIPA_` prefix,
+- Keep environment configuration in `src/config.zig` with the `ZASDOOR_` prefix,
   and document it in both `README.md` and `README.zh-CN.md`.
 
 ## Report issues

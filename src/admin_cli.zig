@@ -1,4 +1,4 @@
-//! zenaipa-admin — CLI for creating and listing administrator accounts.
+//! zasdoor-admin — CLI for creating and listing administrator accounts.
 //!
 //! Commands:
 //!   create-admin --email you@example.com [--password secret123] [--name Admin]
@@ -7,8 +7,8 @@
 //!   list-admins
 //!     Lists all admin accounts.
 //!
-//! DB selection uses the same env vars as the server (ZENAIPA_DB_DRIVER,
-//! ZENAIPA_SQLITE_PATH, ZENAIPA_PG_CONNINFO).
+//! DB selection uses the same env vars as the server (ZASDOOR_DB_DRIVER,
+//! ZASDOOR_SQLITE_PATH, ZASDOOR_PG_CONNINFO).
 
 const std = @import("std");
 const zigmodu = @import("zigmodu");
@@ -74,7 +74,7 @@ pub fn main(init: std.process.Init) !void {
 
 fn printHelp(io: std.Io) !void {
     try std.Io.File.stdout().writeStreamingAll(io,
-        \\zenaipa-admin — bootstrap administrators for zenaipa
+        \\zasdoor-admin — bootstrap administrators for zasdoor
         \\
         \\  create-admin --email you@example.com [--password secret123] [--name Admin]
         \\  list-admins

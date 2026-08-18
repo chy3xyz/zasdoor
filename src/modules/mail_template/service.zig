@@ -9,7 +9,7 @@ pub const TemplateListResult = persist.TemplateListResult;
 
 /// Variables available in template bodies/subjects:
 /// `{app_name}` — product name, `{link}` — the action URL, `{email}` — recipient.
-pub const app_name = "zenaipa";
+pub const app_name = "zasdoor";
 
 pub const RenderVars = struct {
     link: []const u8,

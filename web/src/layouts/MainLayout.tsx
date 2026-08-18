@@ -127,10 +127,10 @@ function NotificationBell() {
 
 function MainLayout(props: { children?: JSX.Element }) {
   const [auth, actions] = useAuth();
-  const [dark, setDark] = createSignal(localStorage.getItem('zenaipa.theme') === 'dark');
+  const [dark, setDark] = createSignal(localStorage.getItem('zasdoor.theme') === 'dark');
   createEffect(() => {
     document.documentElement.setAttribute('data-theme', dark() ? 'dark' : 'light');
-    localStorage.setItem('zenaipa.theme', dark() ? 'dark' : 'light');
+    localStorage.setItem('zasdoor.theme', dark() ? 'dark' : 'light');
   });
   const toggleTheme = () => setDark((d) => !d);
 
@@ -138,7 +138,7 @@ function MainLayout(props: { children?: JSX.Element }) {
     <div class="flex h-screen overflow-hidden bg-base-100">
       <aside class="flex w-56 shrink-0 flex-col border-r border-base-300 bg-base-200">
         <div class="flex h-16 items-center gap-2 border-b border-base-300 px-4">
-          <span class="text-lg font-bold">Zenaipa</span>
+          <span class="text-lg font-bold">Zasdoor</span>
         </div>
         <nav class="flex-1 space-y-1 p-3">
           <Show when={auth.user?.admin}>

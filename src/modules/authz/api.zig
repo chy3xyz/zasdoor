@@ -51,11 +51,7 @@ pub fn AuthzApi(comptime Service: type, comptime UserService: type) type {
                 .deny => "deny",
                 .unknown => "unknown",
             };
-            try ctx.jsonStruct(200, .{
-                .code = 0,
-                .msg = "",
-                .data = .{ .allowed = allowed, .decision = label }
-            });
+            try ctx.jsonStruct(200, .{ .code = 0, .msg = "", .data = .{ .allowed = allowed, .decision = label } });
         }
     };
 }

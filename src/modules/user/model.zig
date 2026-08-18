@@ -1,4 +1,4 @@
-//! zent schema-as-code — user domain for zenaipa.
+//! zent schema-as-code — user domain for zasdoor.
 //!
 //! User-domain entities: `User`, `PasswordToken`, `EmailVerification`.
 //! Email is unique + lowercased on write, password is stored hashed

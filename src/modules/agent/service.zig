@@ -57,6 +57,10 @@ pub const AgentService = struct {
         return self.store.getById(id);
     }
 
+    pub fn listAgents(self: *AgentService, page: usize, page_size: usize, owner: ?i64) !persist.AgentListResult {
+        return self.store.listAgents(page, page_size, owner);
+    }
+
     pub fn setActive(self: *AgentService, id: i64, active: bool) !void {
         try self.store.setActive(id, active, self.now());
     }

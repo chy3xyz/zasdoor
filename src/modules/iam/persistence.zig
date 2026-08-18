@@ -347,7 +347,6 @@ pub const IamStore = struct {
 
     // ── Project ──────────────────────────────────────────────
 
-
     fn dupProject(self: *IamStore, e: anytype) !ProjectRow {
         return .{
             .id = e.id,

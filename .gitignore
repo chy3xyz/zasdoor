@@ -22,7 +22,7 @@ web/.env
 _ref/
 
 # Local database (dev data)
-zenaipa.db
+zasdoor.db
 *.db
 
 # Uploaded files (runtime data)

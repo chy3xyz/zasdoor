@@ -1,8 +1,9 @@
 import { http } from '#ui/api/client';
 import { unwrapEnvelope } from '#ui/api/envelope';
 
-import { AGENT_PATH, agentDeactivate, agentDetail, agentToken } from './path';
+import { AGENT_PATH, agentDeactivate, agentDetail, agentToken, agentsQuery } from './path';
 import type { AgentItem, AgentTokenResult, CreateAgentRequest, VerifyTokenRequest } from './types';
+import type { PagedResult } from '../iam/types';
 
 async function getEnvelope<T>(path: string): Promise<T> {
   const { data } = await http.get<{ code: number; msg: string; data: T }>(path);
@@ -12,6 +13,10 @@ async function getEnvelope<T>(path: string): Promise<T> {
 async function postEnvelope<T>(path: string, body: unknown): Promise<T> {
   const { data } = await http.post<{ code: number; msg: string; data: T }>(path, body);
   return unwrapEnvelope(data);
+}
+
+export async function listAgents(page: number, pageSize: number): Promise<PagedResult<AgentItem>> {
+  return getEnvelope<PagedResult<AgentItem>>(agentsQuery(page, pageSize));
 }
 
 export async function getAgent(id: number): Promise<AgentItem> {

@@ -24,7 +24,7 @@ export function setUnauthorizedHandler(fn: UnauthorizedHandler | null) {
   unauthorizedHandler = fn;
 }
 
-/** Shared HTTP client for the zenaipa backend. */
+/** Shared HTTP client for the zasdoor backend. */
 export const http = axios.create({
   baseURL: APP_CONFIG.apiBaseUrl || undefined,
   timeout: 30_000,

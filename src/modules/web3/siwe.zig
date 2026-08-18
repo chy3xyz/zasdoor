@@ -81,7 +81,6 @@ const secp256k1_scalar = struct {
     pub const rejectNonCanonical = Secp256k1.scalar.rejectNonCanonical;
 };
 
-
 /// EIP-191 "personal_sign" digest: the message is prefixed with the standard
 /// \\x19Ethereum Signed Message:\\n<len> header before Keccak-256. This is what
 /// most wallets (MetaMask etc.) sign for SIWE-style login.
@@ -96,4 +95,3 @@ pub fn personalSignDigest(message: []const u8, out: *[32]u8) !void {
     try data.appendSlice(std.heap.page_allocator, message);
     std.crypto.hash.sha3.Keccak256.hash(data.items, out, .{});
 }
-

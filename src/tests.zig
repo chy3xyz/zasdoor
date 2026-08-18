@@ -1,4 +1,4 @@
-//! Unit tests for zenaipa. DB-backed tests use an in-memory zent store;
+//! Unit tests for zasdoor. DB-backed tests use an in-memory zent store;
 //! HTTP-layer tests dispatch through zigmodu's Testkit without a socket.
 //! Tenant tests cover default bootstrap, JWT aud binding and row isolation.
 
@@ -461,7 +461,7 @@ test "mail template: default fallback, upsert override, variable render" {
     // 未配置时回退内置默认,变量被替换。
     var r1 = (try tsvc.render("verify_email", .{ .link = "https://a/verify", .email = "x@y.z" })).?;
     defer r1.free(allocator);
-    try std.testing.expect(std.mem.indexOf(u8, r1.subject, "zenaipa") != null);
+    try std.testing.expect(std.mem.indexOf(u8, r1.subject, "zasdoor") != null);
     try std.testing.expect(std.mem.indexOf(u8, r1.body, "https://a/verify") != null);
     try std.testing.expect(std.mem.indexOf(u8, r1.body, "x@y.z") != null);
 
@@ -469,7 +469,7 @@ test "mail template: default fallback, upsert override, variable render" {
     try tsvc.upsert("verify_email", "自定义主题 {app_name}", "链接: {link}");
     var r2 = (try tsvc.render("verify_email", .{ .link = "https://b/verify", .email = "a@b.c" })).?;
     defer r2.free(allocator);
-    try std.testing.expectEqualStrings("自定义主题 zenaipa", r2.subject);
+    try std.testing.expectEqualStrings("自定义主题 zasdoor", r2.subject);
     try std.testing.expectEqualStrings("链接: https://b/verify", r2.body);
 
     // 未知 code → null。
@@ -636,7 +636,7 @@ test "ai: notify.send approval pending → approve executes, double-resolve reje
     defer svc.deinit();
 
     _ = try user_store.createUser("Alice", "a@x.com", "hash", false, false, 1, 100);
-    const approval_id = try ai_store.createApproval(1, 7, "zenaipa.notify.send", "{\"user_id\":1,\"title\":\"hi\",\"body\":\"hello\",\"kind\":\"info\"}", 100);
+    const approval_id = try ai_store.createApproval(1, 7, "zasdoor.notify.send", "{\"user_id\":1,\"title\":\"hi\",\"body\":\"hello\",\"kind\":\"info\"}", 100);
     try std.testing.expectEqual(@as(i64, 0), try notify_svc.unreadCount(1));
 
     // 批准 → 实际发送通知。
@@ -788,7 +788,7 @@ test "ai: approval resolve writes audit log" {
     var svc = try ai.service.AiService.init(allocator, std.testing.io, &ai_store, .{ .key_secret = "master-secret" }, refs);
     defer svc.deinit();
 
-    const approval_id = try ai_store.createApproval(1, 7, "zenaipa.notify.send", "{\"user_id\":1,\"title\":\"t\",\"body\":\"b\",\"kind\":\"info\"}", 100);
+    const approval_id = try ai_store.createApproval(1, 7, "zasdoor.notify.send", "{\"user_id\":1,\"title\":\"t\",\"body\":\"b\",\"kind\":\"info\"}", 100);
     _ = try user_store.createUser("Boss", "boss@x.com", "hash", false, true, 1, 100);
     _ = try svc.approve(allocator, approval_id, 2, true);
 
@@ -1025,7 +1025,6 @@ fn userCreateHelper(allocator: std.mem.Allocator, env: anytype, iam_svc: anytype
     var store = user.persistence.UserStore.init(allocator, env.client);
     return store.createUser(email, email, "hash", false, false, 1, 100);
 }
-
 
 test "eventstore: append with optimistic concurrency + replay" {
     const allocator = std.testing.allocator;
@@ -1294,7 +1293,7 @@ test "web3: ecdsa sign -> recover round-trip matches wallet address" {
     _ = siwe_mod.addressFromPublicKey(&(Q.toUncompressedSec1()), &true_addr);
 
     // Pick an ephemeral k whose R.x < n so recovery is unambiguous.
-    const nval = [_]u8{0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xfe,0xba,0xae,0xdc,0xe6,0xaf,0x48,0xa0,0x3b,0xbf,0xd2,0x5e,0x8c,0xd0,0x36,0x41,0x41};
+    const nval = [_]u8{ 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfe, 0xba, 0xae, 0xdc, 0xe6, 0xaf, 0x48, 0xa0, 0x3b, 0xbf, 0xd2, 0x5e, 0x8c, 0xd0, 0x36, 0x41, 0x41 };
     var digest: [32]u8 = undefined;
     std.crypto.hash.sha3.Keccak256.hash("web3 siwe test message", &digest, .{});
 

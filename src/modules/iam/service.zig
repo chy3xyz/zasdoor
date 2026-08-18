@@ -74,7 +74,6 @@ pub const IamService = struct {
 
     // ── Project ──────────────────────────────────────────────
 
-
     pub fn createProject(self: *IamService, tenant_id: i64, org_id: i64, name: []const u8, description: []const u8) IamError!i64 {
         const trimmed = std.mem.trim(u8, name, " \t");
         if (trimmed.len == 0) return error.InvalidName;

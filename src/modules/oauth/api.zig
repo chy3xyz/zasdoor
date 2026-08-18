@@ -123,7 +123,8 @@ pub fn OAuthApi(comptime Service: type, comptime UserService: type) type {
 
         fn discovery(self: *Self, ctx: *http.Context) !void {
             const iss = self.svc.issuer;
-            const json = try std.fmt.allocPrint(ctx.allocator,
+            const json = try std.fmt.allocPrint(
+                ctx.allocator,
                 "{{\"issuer\":\"{s}\",\"authorization_endpoint\":\"{s}/oauth/authorize\",\"token_endpoint\":\"{s}/oauth/token\",\"introspection_endpoint\":\"{s}/oauth/introspect\",\"revocation_endpoint\":\"{s}/oauth/revoke\",\"userinfo_endpoint\":\"{s}/oauth/userinfo\",\"jwks_uri\":\"{s}/.well-known/jwks.json\",\"response_types_supported\":[\"code\"],\"grant_types_supported\":[\"authorization_code\",\"client_credentials\",\"refresh_token\"],\"subject_types_supported\":[\"public\"],\"id_token_signing_alg_values_supported\":[\"HS256\"],\"scopes_supported\":[\"openid\",\"profile\",\"email\",\"offline_access\"],\"token_endpoint_auth_methods_supported\":[\"client_secret_basic\",\"client_secret_post\"],\"code_challenge_methods_supported\":[\"plain\",\"S256\"]}}",
                 .{ iss, iss, iss, iss, iss, iss, iss },
             );
@@ -271,7 +272,8 @@ pub fn OAuthApi(comptime Service: type, comptime UserService: type) type {
                 return;
             };
             const r = self.svc.introspect(tok);
-            const json = try std.fmt.allocPrint(ctx.allocator,
+            const json = try std.fmt.allocPrint(
+                ctx.allocator,
                 "{{\"active\":{s},\"sub\":{s},\"scope\":{s},\"client_id\":{s},\"exp\":{s}}}",
                 .{
                     if (r.active) "true" else "false",
@@ -349,7 +351,8 @@ pub fn OAuthApi(comptime Service: type, comptime UserService: type) type {
             defer row.free(self.users.store.allocator);
 
             const scope = self.objStr(root, "scope") orelse "";
-            const json = try std.fmt.allocPrint(ctx.allocator,
+            const json = try std.fmt.allocPrint(
+                ctx.allocator,
                 "{{\"sub\":\"{s}\",\"name\":\"{s}\",\"email\":\"{s}\",\"email_verified\":{s}}}",
                 .{ sub, row.name, row.email, if (row.verified) "true" else "false" },
             );

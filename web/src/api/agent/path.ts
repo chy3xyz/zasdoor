@@ -8,3 +8,6 @@ export const AGENT_PATH = {
 export const agentDetail = (id: number | string) => `${AGENT_PATH.list}/${id}`;
 export const agentDeactivate = (id: number | string) => `${AGENT_PATH.list}/${id}/deactivate`;
 export const agentToken = (id: number | string) => `${AGENT_PATH.list}/${id}/token`;
+
+export const agentsQuery = (page: number, pageSize: number) =>
+  `${AGENT_PATH.list}?${new URLSearchParams({ page: String(page), page_size: String(pageSize) }).toString()}`;

@@ -9,6 +9,7 @@ const user_svc = @import("../user/service.zig");
 
 pub const WalletRow = persist.WalletRow;
 pub const SiweNonceRow = persist.SiweNonceRow;
+pub const Signature = siwe.Signature;
 
 pub const VerifySiweError = error{
     InvalidSiweMessage,
@@ -82,12 +83,12 @@ pub const Web3Service = struct {
         defer parsed.free(self.allocator);
         const now_s = self.now();
         if (parsed.expiration_time) |exp| {
-            if (now_s > exp) return error.ParseError; // Expired
+            if (now_s > exp) return error.InvalidSiweMessage; // Expired
         }
         if (parsed.not_before) |nb| {
-            if (now_s < nb) return error.ParseError; // NotYetValid
+            if (now_s < nb) return error.InvalidSiweMessage; // NotYetValid
         }
-        if (!std.mem.eql(u8, parsed.domain, expected_domain)) return error.ParseError; // DomainMismatch
+        if (!std.mem.eql(u8, parsed.domain, expected_domain)) return error.InvalidSiweMessage; // DomainMismatch
         // Recover signer from the personal_sign digest.
         var recovered: [20]u8 = undefined;
         if (!self.verifySignature(parsed.raw, sig, &recovered)) return error.SignatureInvalid;
@@ -103,6 +104,44 @@ pub const Web3Service = struct {
     /// Find a wallet by (chain, address).
     pub fn findWallet(self: *Web3Service, chain: []const u8, address: []const u8) !?WalletRow {
         return self.store.findByAddress(chain, address);
+    }
+
+    /// Generate a cryptographically-random 32-hex-char SIWE nonce.
+    pub fn generateNonce(self: *Web3Service) ![]const u8 {
+        var buf: [16]u8 = undefined;
+        try fillEntropy(self.io, &buf);
+        return hexEncode(self.allocator, &buf);
+    }
+
+    /// One-shot SIWE login: verify signature + consume nonce, then look up the
+    /// wallet's bound user. Returns (token, user_id); token is null when the
+    /// wallet is not yet bound to a user (caller should prompt binding).
+    pub fn siweLogin(
+        self: *Web3Service,
+        tenant_id: i64,
+        message: []const u8,
+        sig: siwe.Signature,
+        expected_domain: []const u8,
+    ) VerifySiweError!struct { token: ?[]const u8, user_id: i64 } {
+        const result = try self.verifySiwe(tenant_id, message, sig, expected_domain);
+        defer result.message.free(self.allocator);
+        var addr_hex: [40]u8 = undefined;
+        const hex = "0123456789abcdef";
+        for (result.address, 0..) |b, i| {
+            addr_hex[i * 2] = hex[b >> 4];
+            addr_hex[i * 2 + 1] = hex[b & 0xf];
+        }
+        const wallet_opt = self.store.findByAddress("evm", addr_hex[0..]) catch return error.Unexpected;
+        var wallet_user: i64 = 0;
+        if (wallet_opt) |w| {
+            wallet_user = w.user_id;
+            w.free(self.allocator);
+        }
+        if (wallet_user == 0) return .{ .token = null, .user_id = 0 };
+        const sub = std.fmt.allocPrint(self.allocator, "{d}", .{wallet_user}) catch return error.Unexpected;
+        defer self.allocator.free(sub);
+        const token = self.sec.module.generateToken(sub, &.{}) catch return error.Unexpected;
+        return .{ .token = token, .user_id = wallet_user };
     }
 
     /// Bind a wallet address to a user (creating the wallet if needed).
@@ -124,3 +163,20 @@ pub const Web3Service = struct {
         return self.store.findByAddress(chain, address);
     }
 };
+
+fn fillEntropy(io: std.Io, buf: []u8) !void {
+    var file = try std.Io.Dir.cwd().openFile(io, "/dev/urandom", .{});
+    defer file.close(io);
+    const read = try file.readPositionalAll(io, buf, 0);
+    if (read != buf.len) return error.Unexpected;
+}
+
+fn hexEncode(allocator: std.mem.Allocator, bytes: []const u8) ![]const u8 {
+    const hex_chars = "0123456789abcdef";
+    const out = try allocator.alloc(u8, bytes.len * 2);
+    for (bytes, 0..) |b, i| {
+        out[i * 2] = hex_chars[b >> 4];
+        out[i * 2 + 1] = hex_chars[b & 0xf];
+    }
+    return out;
+}

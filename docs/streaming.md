@@ -1,11 +1,11 @@
 # 流式聊天接入契约(Streaming Chat)
 
 > 状态:**已落地**。zigmodu v0.15.16(`e7cf9df`)修复 `requestStream` 本地路径并
-> 完成 Agent 流式切换(TODO #4);zenaipa 已按本契约接入(后端 SSE + 前端打字机)。
+> 完成 Agent 流式切换(TODO #4);zasdoor 已按本契约接入(后端 SSE + 前端打字机)。
 >
 > **v0.15.18 补丁(`b28444a`)**:`SkillRegistry.toOpenAiFunctionsAlloc` 曾为每个
 > 工具多输出一个 `}` 使 tools JSON 非法,DeepSeek/OpenAI 以 HTTP 400 拒绝 → 流式
-> chat 出现 `ProviderError`。上游已修复(闭合改为 `]}}}`),zenaipa 的工具 schema
+> chat 出现 `ProviderError`。上游已修复(闭合改为 `]}}}`),zasdoor 的工具 schema
 > 全量走 `SkillRegistry`,无需改动即恢复;上游测试新增 `std.json` 解析守卫。
 >
 > **关键澄清(消除误解)**:流式切换**不影响工具决策**——`chatStream` 内部先聚合
@@ -15,7 +15,7 @@
 >
 > **唯一阻塞是测试基建,且已定位为框架 bug 候选**:`requestStream` 对本地 HTTP
 > (非 TLS)连接读取挂起(真实 HTTPS 正常)——不是 mock 写法问题(4 种写法均复现)。
-> 待上游修复 `requestStream` 本地路径后,Agent 切换(3-5 行)与 zenaipa 接入即可落地。
+> 待上游修复 `requestStream` 本地路径后,Agent 切换(3-5 行)与 zasdoor 接入即可落地。
 
 ## 契约(SSE 事件流)
 
@@ -40,7 +40,7 @@ data: {"answer":"<完整回答>","reasoning_content":"<完整推理>","budget_ex
 - 与现有非流式响应**完全兼容**的 `done` 事件携带完整结果(落库用)。
 - 断流/失败降级:前端未收到 `done` 即按现有 JSON 路径重试或展示错误。
 
-## zenaipa 接入步骤(上游 TODO #4 落地后)
+## zasdoor 接入步骤(上游 TODO #4 落地后)
 
 ### 1. `src/modules/ai/service.zig` — 给 Agent 挂 `hooks.on_delta`
 
@@ -84,4 +84,4 @@ agent.hooks = .{
 - [ ] zigmodu Agent 主循环 `chatWith → chatStream + DeltaBridge` 已切换(`agent.zig` 无 `TODO(#4)`)
 - [ ] zigmodu `requestStream` 本地(非 TLS)路径修复(框架 bug 候选;真实 HTTPS 已验证正常)
 - [ ] Agent 主循环切换后 `on_delta` 触发;Testkit 增加 SSE 直连测试
-- [ ] zenaipa `zig build test` 通过后接 SSE 测试(Testkit 直连 chat 端点)
+- [ ] zasdoor `zig build test` 通过后接 SSE 测试(Testkit 直连 chat 端点)

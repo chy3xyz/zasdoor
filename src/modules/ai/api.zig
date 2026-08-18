@@ -234,7 +234,7 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
             }
             const encrypted = self.svc.encryptKeys(ctx.allocator, req.api_keys) catch |err| switch (err) {
                 error.MissingKeySecret => {
-                    try ctx.sendErrorResponse(400, 400, "未配置 ZENAIPA_AI_KEY_SECRET,无法保存密钥");
+                    try ctx.sendErrorResponse(400, 400, "未配置 ZASDOOR_AI_KEY_SECRET,无法保存密钥");
                     return;
                 },
                 else => {
@@ -289,7 +289,7 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
                 if (keys.len > 0) {
                     encrypted_owned = self.svc.encryptKeys(ctx.allocator, keys) catch |err| switch (err) {
                         error.MissingKeySecret => {
-                            try ctx.sendErrorResponse(400, 400, "未配置 ZENAIPA_AI_KEY_SECRET,无法保存密钥");
+                            try ctx.sendErrorResponse(400, 400, "未配置 ZASDOOR_AI_KEY_SECRET,无法保存密钥");
                             return;
                         },
                         else => {
@@ -649,7 +649,7 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
             _ = (try requireAdmin(ctx, self)) orelse return;
             // 技能目录(名称切片;std.json 0.17 对裸 ArrayList 无序列化分支)。
-            const names = [_][]const u8{ "zenaipa.user.search", "zenaipa.task.stats", "zenaipa.audit.search", "zenaipa.tenant.list", "zenaipa.notify.send" };
+            const names = [_][]const u8{ "zasdoor.user.search", "zasdoor.task.stats", "zasdoor.audit.search", "zasdoor.tenant.list", "zasdoor.notify.send" };
             try ctx.jsonStruct(200, .{ .code = 0, .msg = "", .data = .{ .skills = names[0..] } });
         }
     };

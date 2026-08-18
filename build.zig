@@ -27,12 +27,12 @@ pub fn build(b: *std.Build) void {
     exe_mod.addImport("zent", zent_dep.module("zent"));
     db_link.link(exe_mod, b, features);
 
-    const exe = b.addExecutable(.{ .name = "zenaipa", .root_module = exe_mod });
+    const exe = b.addExecutable(.{ .name = "zasdoor", .root_module = exe_mod });
     b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
-    const run_step = b.step("run", "Run the zenaipa server");
+    const run_step = b.step("run", "Run the zasdoor server");
     run_step.dependOn(&run_cmd.step);
 
     // Admin CLI (create/list administrator accounts)
@@ -46,12 +46,12 @@ pub fn build(b: *std.Build) void {
     admin_mod.addImport("zent", zent_dep.module("zent"));
     db_link.link(admin_mod, b, features);
 
-    const admin_exe = b.addExecutable(.{ .name = "zenaipa-admin", .root_module = admin_mod });
+    const admin_exe = b.addExecutable(.{ .name = "zasdoor-admin", .root_module = admin_mod });
     b.installArtifact(admin_exe);
 
     const admin_cmd = b.addRunArtifact(admin_exe);
     admin_cmd.step.dependOn(b.getInstallStep());
-    const admin_step = b.step("admin", "Admin CLI help; run zig-out/bin/zenaipa-admin create-admin --email you@example.com");
+    const admin_step = b.step("admin", "Admin CLI help; run zig-out/bin/zasdoor-admin create-admin --email you@example.com");
     admin_step.dependOn(&admin_cmd.step);
 
     // Unit tests

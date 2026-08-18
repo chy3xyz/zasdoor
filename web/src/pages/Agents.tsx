@@ -1,7 +1,7 @@
 import { Show, createSignal } from 'solid-js';
 import { useToast } from '#ui/components';
 
-import { createAgent, deactivateAgent, getAgent, issueAgentToken, toApiError } from '#ui/api';
+import { createAgent, deactivateAgent, getAgent, issueAgentToken, listAgents, toApiError } from '#ui/api';
 import type { AgentItem } from '#ui/api';
 
 function Agents() {
@@ -16,17 +16,12 @@ function Agents() {
   const [tokenResult, setTokenResult] = createSignal<string | null>(null);
 
   const loadAll = async () => {
-    // 后端未提供列表端点,按 1..N 探测(最多 50 个)
-    const out: AgentItem[] = [];
-    for (let id = 1; id <= 50; id += 1) {
-      try {
-        const a = await getAgent(id);
-        out.push(a);
-      } catch {
-        break;
-      }
+    try {
+      const res = await listAgents(1, 50);
+      setAgents(res.list);
+    } catch (err) {
+      toast.show(toApiError(err).message, 'error');
     }
-    setAgents(out);
   };
 
   const onCreate = async (e: SubmitEvent) => {
@@ -136,7 +131,7 @@ function Agents() {
             </Show>
           </div>
         ))}
-        {agents().length === 0 && <p class="text-sm text-base-content/50">暂无 Agent（或 ID 从 1 起探测失败）</p>}
+        {agents().length === 0 && <p class="text-sm text-base-content/50">暂无 Agent</p>}
       </div>
 
       <Show when={tokenResult()}>

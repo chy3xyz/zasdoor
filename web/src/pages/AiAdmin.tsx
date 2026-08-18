@@ -257,7 +257,7 @@ function AiAdmin() {
                 <Show when={providers().length === 0}>
                   <tr>
                     <td colspan={6} class="py-8 text-center text-base-content/50">
-                      暂无 Provider。配置一个 OpenAI 兼容端点(需设置 ZENAIPA_AI_KEY_SECRET)
+                      暂无 Provider。配置一个 OpenAI 兼容端点(需设置 ZASDOOR_AI_KEY_SECRET)
                     </td>
                   </tr>
                 </Show>

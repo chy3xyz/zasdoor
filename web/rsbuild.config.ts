@@ -10,7 +10,7 @@ const { publicVars } = loadEnv();
 
 export default defineConfig({
   html: {
-    title: 'Zenaipa Admin',
+    title: 'Zasdoor Admin',
     lang: 'zh-CN',
   },
   source: {

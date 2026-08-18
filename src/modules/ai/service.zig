@@ -31,7 +31,7 @@ pub const RunListResult = persist.RunListResult;
 pub const PERM_ADMIN = "admin";
 
 pub const AiConfig = struct {
-    /// Master key (ZENAIPA_AI_KEY_SECRET) used to encrypt stored API keys.
+    /// Master key (ZASDOOR_AI_KEY_SECRET) used to encrypt stored API keys.
     key_secret: []const u8,
     /// Max agent runs per user per rolling 24h (quota).
     daily_run_limit: i64 = 100,
@@ -272,7 +272,7 @@ pub const AiService = struct {
     fn registerSkills(self: *AiService) !void {
         const tools = [_]ai.Tool{
             .{
-                .name = "zenaipa.user.search",
+                .name = "zasdoor.user.search",
                 .description = "按关键词搜索平台用户,返回 ID/姓名/邮箱/角色/租户",
                 .parameters = &.{
                     .{ .name = "keyword", .type = .string, .description = "姓名或邮箱关键词", .required = true },
@@ -281,14 +281,14 @@ pub const AiService = struct {
                 .handler = skillUserSearch,
             },
             .{
-                .name = "zenaipa.task.stats",
+                .name = "zasdoor.task.stats",
                 .description = "获取后台任务队列统计(pending/claimed/done/failed/canceled)",
                 .parameters = &.{},
                 .required_permission = PERM_ADMIN,
                 .handler = skillTaskStats,
             },
             .{
-                .name = "zenaipa.audit.search",
+                .name = "zasdoor.audit.search",
                 .description = "按操作类型/关键词检索审计日志(最近 limit 条)",
                 .parameters = &.{
                     .{ .name = "action", .type = .string, .description = "操作类型前缀,如 user.", .required = false },
@@ -299,14 +299,14 @@ pub const AiService = struct {
                 .handler = skillAuditSearch,
             },
             .{
-                .name = "zenaipa.tenant.list",
+                .name = "zasdoor.tenant.list",
                 .description = "列出全部租户(ID/名称/状态)",
                 .parameters = &.{},
                 .required_permission = PERM_ADMIN,
                 .handler = skillTenantList,
             },
             .{
-                .name = "zenaipa.notify.send",
+                .name = "zasdoor.notify.send",
                 .description = "向指定用户发送站内通知(需管理员审批)",
                 .parameters = &.{
                     .{ .name = "user_id", .type = .number, .description = "目标用户 ID", .required = true },
@@ -444,7 +444,7 @@ pub const AiService = struct {
         const session_id = ctx.run_id orelse "0";
         const sid = std.fmt.parseInt(i64, session_id, 10) catch 0;
         const now_sec = @divTrunc(zigmodu.time.monotonicNowMilliseconds(), 1000);
-        const approval_id = try refs.ai_store.createApproval(sid, ctx.user_id orelse 0, "zenaipa.notify.send", args_json, now_sec);
+        const approval_id = try refs.ai_store.createApproval(sid, ctx.user_id orelse 0, "zasdoor.notify.send", args_json, now_sec);
 
         var obj = std.json.ObjectMap{};
         try obj.put(ctx.allocator, try ctx.allocator.dupe(u8, "status"), .{ .string = try ctx.allocator.dupe(u8, "pending_approval") });
@@ -517,7 +517,7 @@ pub const AiService = struct {
         var agent = ai.Agent{
             .provider = &provider,
             .registry = &self.registry,
-            .allowlist = &.{ "zenaipa.user.search", "zenaipa.task.stats", "zenaipa.audit.search", "zenaipa.tenant.list", "zenaipa.notify.send" },
+            .allowlist = &.{ "zasdoor.user.search", "zasdoor.task.stats", "zasdoor.audit.search", "zasdoor.tenant.list", "zasdoor.notify.send" },
             .tool_timeout_ms = self.cfg.tool_timeout_ms,
             .budget = &budget,
             .metrics = start_metrics,
@@ -579,8 +579,8 @@ pub const AiService = struct {
     /// 平台健康工作流:任务统计 + 租户列表两个只读技能编排(无 LLM 步骤)。
     pub fn runHealthWorkflow(self: *AiService, allocator: std.mem.Allocator, user_id: i64, tenant_id: i64) !ai.workflow.WorkflowResult {
         var workflow = ai.workflow.Workflow.init(&self.registry, &.{
-            .{ .name = "task_stats", .kind = .{ .skill = .{ .name = "zenaipa.task.stats", .args = .{ .object = .{} } } } },
-            .{ .name = "tenant_list", .kind = .{ .skill = .{ .name = "zenaipa.tenant.list", .args = .{ .object = .{} } } } },
+            .{ .name = "task_stats", .kind = .{ .skill = .{ .name = "zasdoor.task.stats", .args = .{ .object = .{} } } } },
+            .{ .name = "tenant_list", .kind = .{ .skill = .{ .name = "zasdoor.tenant.list", .args = .{ .object = .{} } } } },
         });
         var skill_ctx = ai.SkillContext{
             .allocator = allocator,
@@ -638,7 +638,7 @@ pub const AiService = struct {
         return self.store.runCountForUser(user_id, now - 24 * 3600);
     }
 
-    /// Approve a pending approval. For `zenaipa.notify.send` this performs
+    /// Approve a pending approval. For `zasdoor.notify.send` this performs
     /// the actual notification. Returns false when already resolved.
     pub fn approve(self: *AiService, allocator: std.mem.Allocator, id: i64, approved_by: i64, do_approve: bool) !bool {
         const row_opt = try self.store.getApproval(id);
@@ -657,7 +657,7 @@ pub const AiService = struct {
         const detail = try std.fmt.bufPrint(&detail_buf, "AI 审批 {s}: {s} #{d}", .{ if (do_approve) "批准" else "拒绝", row.skill_name, id });
         _ = self.refs.audit_store.create(approved_by, "", "ai.approval", "ai_approval", id, detail, "", true, 0, now_s) catch {};
 
-        if (do_approve and std.mem.eql(u8, row.skill_name, "zenaipa.notify.send")) {
+        if (do_approve and std.mem.eql(u8, row.skill_name, "zasdoor.notify.send")) {
             const parsed = try std.json.parseFromSlice(std.json.Value, allocator, row.args, .{});
             defer parsed.deinit();
             const o = parsed.value.object;

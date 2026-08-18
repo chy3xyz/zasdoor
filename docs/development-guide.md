@@ -1,6 +1,6 @@
-# Zenaipa 二次开发最佳实践
+# Zasdoor 二次开发最佳实践
 
-本文面向在 zenaipa 全栈管理框架上扩展业务模块的开发者。它记录本仓库
+本文面向在 zasdoor 全栈管理框架上扩展业务模块的开发者。它记录本仓库
 沉淀下来的架构约定、zent/zigmodu 用法、安全与性能规范,以及踩过的坑。
 
 配套阅读:`docs/streaming.md`(AI 流式契约)、`docs/backup.md`(备份剧本)、

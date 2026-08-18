@@ -1,5 +1,5 @@
 /**
- * zenaipa JSON envelope: `{ code, msg, data }`.
+ * zasdoor JSON envelope: `{ code, msg, data }`.
  * `code === 0` means success (RuoYi-compatible).
  */
 export interface ApiEnvelope<T = unknown> {

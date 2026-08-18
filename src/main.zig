@@ -1,9 +1,9 @@
-//! zenaipa — a production-grade admin framework built on zigmodu + zent.
+//! zasdoor — a production-grade admin framework built on zigmodu + zent.
 //!
 //! Single binary serves the JSON admin API; the Solid SPA in `web/`
 //! talks to it over `/api/v1`. Run:
-//!   zig build run                          # sqlite (zenaipa.db)
-//!   ZENAIPA_DB_DRIVER=postgres ZENAIPA_PG_CONNINFO='host=... dbname=zenaipa user=postgres password=...' zig build run
+//!   zig build run                          # sqlite (zasdoor.db)
+//!   ZASDOOR_DB_DRIVER=postgres ZASDOOR_PG_CONNINFO='host=... dbname=zasdoor user=postgres password=...' zig build run
 //!   zig build admin -- --email you@example.com   # create the first admin
 //!
 //! Feature surface:
@@ -111,10 +111,10 @@ pub fn main(init: std.process.Init) !void {
     const cfg = config_mod.Config.fromEnv(init.environ_map);
     // 生产(PostgreSQL)必须显式设置 JWT 密钥,拒绝使用默认值。
     if (!cfg.jwt_secret_explicit and std.mem.eql(u8, cfg.db_driver, "postgres")) {
-        std.log.err("ZENAIPA_JWT_SECRET must be set explicitly in production (PostgreSQL). Refusing to start with the default dev secret.", .{});
+        std.log.err("ZASDOOR_JWT_SECRET must be set explicitly in production (PostgreSQL). Refusing to start with the default dev secret.", .{});
         return error.MissingJwtSecret;
     }
-    std.log.info("zenaipa starting (db={s}, port={d})", .{ cfg.db_driver, cfg.http_port });
+    std.log.info("zasdoor starting (db={s}, port={d})", .{ cfg.db_driver, cfg.http_port });
 
     // ── Data store: zent driver + schema-as-code migration ──
     const kind: db_mod.DriverKind = if (std.mem.eql(u8, cfg.db_driver, "postgres")) .postgres else .sqlite;
@@ -219,9 +219,8 @@ pub fn main(init: std.process.Init) !void {
     var agent_svc = agent.service.AgentService.init(allocator, io, &agent_store, &user_svc, &sec, cfg.app_host);
     var agent_api = agent.api.AgentApi(@TypeOf(agent_svc), @TypeOf(user_svc)).init(&agent_svc, &user_svc, default_tenant_id);
 
-
     // ── ZigModu module lifecycle (Application API: scan + validate + start/stop) ──
-    var app = try zigmodu.Application.init(io, allocator, "zenaipa", .{
+    var app = try zigmodu.Application.init(io, allocator, "zasdoor", .{
         tenant.module,
         user.module,
         auth.module,
@@ -341,7 +340,7 @@ pub fn main(init: std.process.Init) !void {
 
     var server = zigmodu.http.Server.initWithConfig(io, allocator, .{
         .port = cfg.http_port,
-        .name = "zenaipa",
+        .name = "zasdoor",
         .max_body_size = cfg.upload_max_bytes + 64 * 1024,
     });
     defer server.deinit();
@@ -452,7 +451,7 @@ pub fn main(init: std.process.Init) !void {
         }.handle,
     });
 
-    std.log.info("zenaipa listening on http://127.0.0.1:{d} (admin CLI: zig build admin -- --help)", .{cfg.http_port});
+    std.log.info("zasdoor listening on http://127.0.0.1:{d} (admin CLI: zig build admin -- --help)", .{cfg.http_port});
 
     // 优雅关闭:SIGINT/SIGTERM → 停止 accept → 排空在途请求 → 停 modules。
     const sig = std.posix.Sigaction{
@@ -481,7 +480,7 @@ pub fn main(init: std.process.Init) !void {
     std.log.info("server stopped gracefully", .{});
 }
 
-/// Parse `ZENAIPA_CORS_ORIGINS` ("*" or a comma-separated allow-list) into
+/// Parse `ZASDOOR_CORS_ORIGINS` ("*" or a comma-separated allow-list) into
 /// the `[]const []const u8` slice the CORS middleware expects.
 fn parseCorsOrigins(allocator: std.mem.Allocator, spec: []const u8) ![]const []const u8 {
     const trimmed = std.mem.trim(u8, spec, " \t");

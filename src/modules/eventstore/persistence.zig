@@ -177,7 +177,6 @@ pub const EventStore = struct {
     }
 
     /// Total event rows (approx. tail sequence since id is monotonic).
-
     pub fn allCount(self: *EventStore) !i64 {
         return @intCast(try crud.count(self.client.event, .{}));
     }

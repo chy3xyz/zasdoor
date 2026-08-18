@@ -99,7 +99,7 @@ pub fn SystemApi(comptime CacheT: type, comptime TaskSvcT: type) type {
                 .code = 0,
                 .msg = "",
                 .data = .{
-                    .app = "zenaipa",
+                    .app = "zasdoor",
                     .version = "0.2.0",
                     .uptime_seconds = now - self.started_at,
                     .db = self.db_kind,

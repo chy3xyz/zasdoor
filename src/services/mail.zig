@@ -1,6 +1,6 @@
 //! Mail service — console sink (dev) + real SMTP transport (prod).
 //!
-//! SMTP supports AUTH PLAIN and optional STARTTLS. When `ZENAIPA_SMTP_HOST`
+//! SMTP supports AUTH PLAIN and optional STARTTLS. When `ZASDOOR_SMTP_HOST`
 //! is empty the mailer only logs, so the rest of the app works without a
 //! mail server (SMTP becomes a drop-in for the console sink).
 
@@ -188,7 +188,7 @@ const SmtpConnection = struct {
     }
 
     fn ehlo(self: *SmtpConnection, hostname: []const u8) !void {
-        try self.sendLine("EHLO zenaipa");
+        try self.sendLine("EHLO zasdoor");
         try self.expectCode('2', "EHLO");
         _ = hostname;
     }

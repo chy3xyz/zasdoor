@@ -5,12 +5,12 @@ function env(key: string, fallback = ''): string {
 }
 
 export const APP_CONFIG = {
-  /** zenaipa backend origin, e.g. http://127.0.0.1:8600 */
+  /** zasdoor backend origin, e.g. http://127.0.0.1:8600 */
   apiBaseUrl: env('PUBLIC_API_BASE_URL', ''),
   /** API path prefix registered by the Zig backend */
   apiPrefix: env('PUBLIC_API_PREFIX', '/api/v1'),
   storage: {
-    token: 'zenaipa.token',
-    user: 'zenaipa.user',
+    token: 'zasdoor.token',
+    user: 'zasdoor.user',
   },
 } as const;

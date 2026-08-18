@@ -22,15 +22,55 @@ pub fn AgentApi(comptime Service: type, comptime UserService: type) type {
         pub fn registerRoutes(self: *Self, group: *http.RouteGroup) !void {
             var g = try group.use(zigmodu.http.http_middleware.jwtAuthWithSecurity(&self.users.sec.module));
             g = try g.use(mw.tokenVersionGuard(self.users.sec, self.users.store));
+            try g.get("/agents", list, @ptrCast(@alignCast(self)));
             try g.post("/agents", create, @ptrCast(@alignCast(self)));
+            try g.post("/agents/token/verify", verifyToken, @ptrCast(@alignCast(self)));
             try g.get("/agents/{id}", get, @ptrCast(@alignCast(self)));
             try g.post("/agents/{id}/deactivate", deactivate, @ptrCast(@alignCast(self)));
             try g.post("/agents/{id}/token", issueToken, @ptrCast(@alignCast(self)));
-            try g.post("/agents/token/verify", verifyToken, @ptrCast(@alignCast(self)));
         }
 
         fn requireUser(ctx: *http.Context) ?i64 {
             return mw.authUserId(ctx);
+        }
+
+        const AgentDto = struct {
+            id: i64,
+            name: []const u8,
+            owner_user_id: i64,
+            budget: i64,
+            budget_period_seconds: i64,
+            expires_at: i64,
+            active: bool,
+        };
+
+        fn agentToDto(row: service.AgentRow) AgentDto {
+            return .{
+                .id = row.id,
+                .name = row.name,
+                .owner_user_id = row.owner_user_id,
+                .budget = row.budget,
+                .budget_period_seconds = row.budget_period_seconds,
+                .expires_at = row.expires_at,
+                .active = row.active,
+            };
+        }
+
+        fn list(ctx: *http.Context) !void {
+            const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
+            _ = requireUser(ctx) orelse {
+                try ctx.sendErrorResponse(401, 401, "未登录或登录已过期");
+                return;
+            };
+            const params = zigmodu.http.PageParams.parse(ctx, .{ .max_page_size = 100 });
+            var result = self.svc.listAgents(params.page, params.page_size, null) catch |err| {
+                std.log.err("internal error: {s}", .{@errorName(err)});
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
+                return;
+            };
+            defer result.free(self.svc.allocator);
+            const dtos = try zigmodu.http.Extract.toDtoList(ctx.allocator, result.items, AgentDto, agentToDto);
+            try zigmodu.http.sendPaged(ctx, dtos, @intCast(result.total), params, .ruoyi);
         }
 
         const CreateAgentReq = struct {
