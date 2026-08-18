@@ -21,6 +21,8 @@ const oauth = @import("modules/oauth/root.zig");
 const eventstore = @import("modules/eventstore/root.zig");
 const authzm = @import("modules/authz/root.zig");
 const mfa = @import("modules/mfa/root.zig");
+const web3 = @import("modules/web3/root.zig");
+const agent = @import("modules/agent/root.zig");
 const cache_svc = @import("services/cache.zig");
 const mail = @import("services/mail.zig");
 
@@ -41,6 +43,8 @@ fn openMemory(allocator: std.mem.Allocator) !db_mod.StoreEnv(schema.infos, .{
     iam.persistence.infos,
     eventstore.persistence.infos,
     mfa.persistence.infos,
+    web3.persistence.infos,
+    agent.persistence.infos,
 }) {
     return db_mod.StoreEnv(schema.infos, .{
         tenant.persistence.infos,
@@ -58,6 +62,8 @@ fn openMemory(allocator: std.mem.Allocator) !db_mod.StoreEnv(schema.infos, .{
         iam.persistence.infos,
         eventstore.persistence.infos,
         mfa.persistence.infos,
+        web3.persistence.infos,
+        agent.persistence.infos,
     }).open(allocator, .sqlite, ":memory:");
 }
 
@@ -90,6 +96,8 @@ test "sqlite store query prepares and runs standalone" {
         iam.persistence.infos,
         eventstore.persistence.infos,
         mfa.persistence.infos,
+        web3.persistence.infos,
+        agent.persistence.infos,
     }).open(allocator, .sqlite, ":memory:");
     defer env.deinit();
     var store = user.persistence.UserStore.init(allocator, env.client);
@@ -1249,3 +1257,143 @@ test "mfa: policy require_mfa + user capability" {
     try svc.verifyAndEnable(5, code);
     try std.testing.expect(svc.userHasMfa(5));
 }
+
+test "web3: siwe address derivation (privkey 1 -> known address)" {
+    _ = std.testing.allocator;
+    const Secp = std.crypto.ecc.Secp256k1;
+    const siwe_mod = @import("modules/web3/siwe.zig");
+
+    var prv: [32]u8 = std.mem.zeroes([32]u8);
+    prv[31] = 1;
+    const Q = try Secp.basePoint.mul(prv, .big);
+    const uncompressed = Q.toUncompressedSec1();
+    var addr: [20]u8 = undefined;
+    try std.testing.expect(siwe_mod.addressFromPublicKey(&uncompressed, &addr));
+
+    // The well-known address for private key 1.
+    const expected_hex = "7e5f4552091a69125d5dfcb7b8c2659029395bdf";
+    const hex = "0123456789abcdef";
+    var b: [41]u8 = undefined;
+    for (addr, 0..) |bb, i| {
+        b[i * 2] = hex[bb >> 4];
+        b[i * 2 + 1] = hex[bb & 0xf];
+    }
+    try std.testing.expectEqualStrings(expected_hex, b[0..40]);
+}
+
+test "web3: ecdsa sign -> recover round-trip matches wallet address" {
+    _ = std.testing.allocator;
+    const Secp = std.crypto.ecc.Secp256k1;
+    const siwe_mod = @import("modules/web3/siwe.zig");
+
+    var prv: [32]u8 = std.mem.zeroes([32]u8);
+    prv[31] = 1;
+    // The signer's true address.
+    const Q = try Secp.basePoint.mul(prv, .big);
+    var true_addr: [20]u8 = undefined;
+    _ = siwe_mod.addressFromPublicKey(&(Q.toUncompressedSec1()), &true_addr);
+
+    // Pick an ephemeral k whose R.x < n so recovery is unambiguous.
+    const nval = [_]u8{0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xfe,0xba,0xae,0xdc,0xe6,0xaf,0x48,0xa0,0x3b,0xbf,0xd2,0x5e,0x8c,0xd0,0x36,0x41,0x41};
+    var digest: [32]u8 = undefined;
+    std.crypto.hash.sha3.Keccak256.hash("web3 siwe test message", &digest, .{});
+
+    var matched = false;
+    var k: u16 = 1;
+    while (k < 200 and !matched) : (k += 1) {
+        var kk: [32]u8 = std.mem.zeroes([32]u8);
+        kk[30] = @intCast((k >> 8) & 0xff);
+        kk[31] = @intCast(k & 0xff);
+        const R = try Secp.basePoint.mul(kk, .big);
+        const ra = R.affineCoordinates();
+        const rx = ra.x.toBytes(.big);
+        if (std.mem.order(u8, &rx, &nval) != .lt) continue;
+        // Sign: r = x (mod n, no reduction), s = k^-1(z + r*d)
+        const r_scalar = Secp.scalar.Scalar.fromBytes(rx, .big) catch continue;
+        const d_scalar = (Secp.scalar.Scalar.fromBytes(digest, .big) catch continue);
+        const k_scalar = (Secp.scalar.Scalar.fromBytes(kk, .big) catch continue);
+        const kinv = k_scalar.invert();
+        const prv_s = (Secp.scalar.Scalar.fromBytes(prv, .big) catch continue);
+        const s_val = kinv.mul(d_scalar.add(r_scalar.mul(prv_s)));
+        const odd = (ra.y.toBytes(.big)[31] & 1) == 1;
+        const sig = siwe_mod.Signature{ .r = r_scalar.toBytes(.big), .s = s_val.toBytes(.big), .v = if (odd) @as(u8, 28) else 27 };
+        var rec: [20]u8 = undefined;
+        if (siwe_mod.recoverAddress(digest, sig, &rec)) {
+            if (std.mem.eql(u8, &rec, &true_addr)) matched = true;
+        }
+    }
+    try std.testing.expect(matched);
+}
+
+test "web3: wallet store create/find/bind" {
+    const allocator = std.testing.allocator;
+    var env = try openMemory(allocator);
+    defer env.deinit();
+    var ws = web3.persistence.WalletStore.init(allocator, env.client);
+    const id = try ws.create(1, "evm", "0xabc123", 100);
+    const row_opt = try ws.findByAddress("evm", "0xabc123");
+    const row = row_opt orelse return error.TestFailed;
+    row.free(allocator);
+    try std.testing.expectEqual(id, row.id);
+    try std.testing.expectEqual(@as(i64, 0), row.user_id);
+    try ws.bindUser(id, 7, 200);
+    const bound = (try ws.findByAddress("evm", "0xabc123")).?;
+    bound.free(allocator);
+    try std.testing.expectEqual(@as(i64, 7), bound.user_id);
+}
+
+test "agent: create, capability check, expire, token issuance" {
+    const allocator = std.testing.allocator;
+    var env = try openMemory(allocator);
+    defer env.deinit();
+    var a_store = agent.persistence.AgentStore.init(allocator, env.client);
+    var user_store = user.persistence.UserStore.init(allocator, env.client);
+    var sec = zigmodu.security.AppSecurity.init(allocator, std.testing.io, .{ .jwt_secret = "agent-secret" });
+    var user_svc = user.service.UserService.init(&user_store, &sec, std.testing.io, 3600, 86400);
+    _ = try user_store.createUser("Owner", "o@x.com", "hash", false, true, 1, 100);
+    var a_svc = agent.service.AgentService.init(allocator, std.testing.io, &a_store, &user_svc, &sec, "http://iam.local");
+    const now = zigmodu.time.wallClockSeconds(std.testing.io);
+
+    const aid = try a_svc.createAgent(1, 1, "treasury-bot", "reads balances", "[\"wallet.balance\",\"swap.execute\"]", "[\"read:wallet\",\"write:swap\"]", 500, 86400, now + 3600);
+
+    const row = (try a_svc.getAgent(aid)).?;
+    defer row.free(allocator);
+    try std.testing.expect(a_svc.isUsable(row, now));
+    try std.testing.expect(a_svc.hasCapability(row, "wallet.balance"));
+    try std.testing.expect(!a_svc.hasCapability(row, "admin.delete"));
+
+    // Expired agent is unusable and yields no token.
+    try std.testing.expect(!a_svc.isUsable(row, now + 7200));
+
+    // Token issuance for the active agent carries sub=agent_<id> and actor=owner.
+    const token_opt = try a_svc.issueAgentToken(aid, 60);
+    const token = token_opt orelse return error.TestFailed;
+    defer allocator.free(token);
+    const payload = try oauth.jwt.verify(allocator, sec.module.jwt_secret, token);
+    defer allocator.free(payload);
+    try std.testing.expect(std.mem.indexOf(u8, payload, "\"sub\":\"agent_") != null);
+    try std.testing.expect(std.mem.indexOf(u8, payload, "\"actor\":\"1\"") != null);
+}
+
+test "agent: session revocation after agent deactivated" {
+    const allocator = std.testing.allocator;
+    var env = try openMemory(allocator);
+    defer env.deinit();
+    var a_store = agent.persistence.AgentStore.init(allocator, env.client);
+    var user_store = user.persistence.UserStore.init(allocator, env.client);
+    var sec = zigmodu.security.AppSecurity.init(allocator, std.testing.io, .{ .jwt_secret = "agent-secret" });
+    var user_svc = user.service.UserService.init(&user_store, &sec, std.testing.io, 3600, 86400);
+    var a_svc = agent.service.AgentService.init(allocator, std.testing.io, &a_store, &user_svc, &sec, "http://iam.local");
+
+    const aid = try a_svc.createAgent(1, 2, "bot", "", "[]", "[]", 0, 86400, 0);
+    const tok = (try a_svc.issueAgentToken(aid, 60)).?;
+    defer allocator.free(tok);
+    // Deactivating makes the agent unusable, so no future tokens are issued.
+    const now = zigmodu.time.wallClockSeconds(std.testing.io);
+    try a_store.setActive(aid, false, now);
+    const row = (try a_svc.getAgent(aid)).?;
+    row.free(allocator);
+    try std.testing.expect(!a_svc.isUsable(row, now));
+    try std.testing.expect((try a_svc.issueAgentToken(aid, 60)) == null);
+}
+

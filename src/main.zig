@@ -39,6 +39,8 @@ const oauth = @import("modules/oauth/root.zig");
 const eventstore = @import("modules/eventstore/root.zig");
 const authz = @import("modules/authz/root.zig");
 const mfa = @import("modules/mfa/root.zig");
+const web3 = @import("modules/web3/root.zig");
+const agent = @import("modules/agent/root.zig");
 
 /// Set by SIGINT/SIGTERM so the main thread can stop the server gracefully.
 const ShutdownFlag = struct {
@@ -133,6 +135,8 @@ pub fn main(init: std.process.Init) !void {
         iam.persistence.infos,
         eventstore.persistence.infos,
         mfa.persistence.infos,
+        web3.persistence.infos,
+        agent.persistence.infos,
     }).open(allocator, kind, dsn);
     defer store_env.deinit();
     std.log.info("[zent] migrated schema via {s} ({s})", .{ @tagName(kind), dsn });
@@ -209,6 +213,11 @@ pub fn main(init: std.process.Init) !void {
     var mfa_store = mfa.persistence.MfaStore.init(allocator, store_env.client);
     var mfa_svc = mfa.service.MfaService.init(allocator, io, &mfa_store, &sec);
     var idp_svc = mfa.idp.IdpService.init(allocator, &mfa_store);
+    var wallet_store = web3.persistence.WalletStore.init(allocator, store_env.client);
+    var web3_svc = web3.service.Web3Service.init(allocator, io, &wallet_store, &user_svc, &sec);
+    var agent_store = agent.persistence.AgentStore.init(allocator, store_env.client);
+    var agent_svc = agent.service.AgentService.init(allocator, io, &agent_store, &user_svc, &sec, cfg.app_host);
+    _ = &agent_svc; // wired into an agent API endpoint below
 
 
     // ── ZigModu module lifecycle (Application API: scan + validate + start/stop) ──
@@ -228,6 +237,8 @@ pub fn main(init: std.process.Init) !void {
         eventstore.module,
         authz.module,
         mfa.module,
+        web3.module,
+        agent.module,
     }, .{});
     defer app.deinit();
     try app.start();
@@ -310,6 +321,7 @@ pub fn main(init: std.process.Init) !void {
     var iam_api = iam.api.IamApi(@TypeOf(iam_svc), @TypeOf(user_svc)).init(&iam_svc, &user_svc, &audit_svc, default_tenant_id);
     var oauth_api = oauth.api.OAuthApi(@TypeOf(oauth_svc), @TypeOf(user_svc)).init(&oauth_svc, &user_svc);
     var mfa_api = mfa.api.MfaApi(@TypeOf(mfa_svc), @TypeOf(user_svc)).init(&mfa_svc, &user_svc, default_tenant_id);
+    var web3_api = web3.api.Web3Api(@TypeOf(web3_svc), @TypeOf(user_svc)).init(&web3_svc, &user_svc, default_tenant_id);
     var idp_api = mfa.idp_api.IdpApi(@TypeOf(idp_svc), @TypeOf(user_svc)).init(&idp_svc, &user_svc, default_tenant_id);
     var system_api = system.api.SystemApi(@TypeOf(cache), @TypeOf(task_svc)).init(
         &cache,
@@ -360,6 +372,7 @@ pub fn main(init: std.process.Init) !void {
     try authz_api.registerRoutes(&v1);
     try mfa_api.registerRoutes(&v1);
     try idp_api.registerRoutes(&v1);
+    try web3_api.registerRoutes(&v1);
     try system_api.registerRoutes(&v1);
 
     // OAuth2 / OIDC public protocol endpoints (server root, no /api prefix).

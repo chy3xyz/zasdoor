@@ -17,6 +17,8 @@ const ai_model = @import("modules/ai/model.zig");
 const iam_model = @import("modules/iam/model.zig");
 const eventstore_model = @import("modules/eventstore/model.zig");
 const mfa_model = @import("modules/mfa/model.zig");
+const web3_model = @import("modules/web3/model.zig");
+const agent_model = @import("modules/agent/model.zig");
 
 // zent's `buildGraph` comptime edge-resolution has a per-call branch quota;
 // keeping the graph small avoids it, so the app schema and the standalone
@@ -64,5 +66,12 @@ const mfa_graph = zent.codegen.graph.buildGraph(&.{
     mfa_model.MfaPolicy,
 });
 
-pub const infos = graph.types ++ template_graph.types ++ ai_graph.types ++ iam_graph.types ++ eventstore_graph.types ++ mfa_graph.types;
+const web3_graph = zent.codegen.graph.buildGraph(&.{
+    web3_model.Wallet,
+});
+const agent_graph = zent.codegen.graph.buildGraph(&.{
+    agent_model.Agent,
+});
+
+pub const infos = graph.types ++ template_graph.types ++ ai_graph.types ++ iam_graph.types ++ eventstore_graph.types ++ mfa_graph.types ++ web3_graph.types ++ agent_graph.types;
 pub const Client = zent.codegen.client.Client(infos);
