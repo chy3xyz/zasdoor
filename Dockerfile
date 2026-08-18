@@ -18,7 +18,8 @@ RUN zig build -Doptimize=ReleaseSafe
 FROM node:22-alpine AS web-build
 WORKDIR /build
 COPY web/ ./web/
-RUN cd web && npm ci && npm run build
+RUN corepack enable \
+ && cd web && pnpm install --frozen-lockfile && pnpm run build
 
 # ── Stage 3: runtime ───────────────────────────────────────────────────────
 FROM alpine:3.20
