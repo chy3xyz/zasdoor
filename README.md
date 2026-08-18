@@ -10,7 +10,7 @@ Ship your internal console faster than your coffee gets cold.
 [![zigmodu](https://img.shields.io/badge/zigmodu-v0.15.22-blue)](https://github.com/chy3xyz/zigmodu)
 [![zent](https://img.shields.io/badge/zent-ORM-6b46c1)](https://github.com/chy3xyz/zent)
 [![SolidJS](https://img.shields.io/badge/Frontend-SolidJS-2c4f7c?logo=solid&logoColor=white)](https://www.solidjs.com)
-[![Tests](https://img.shields.io/badge/tests-56%20backend%20%2B%205%20frontend-green)]()
+[![Tests](https://img.shields.io/badge/tests-58%20backend%20%2B%205%20frontend-green)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 **English** · [**简体中文**](README.zh-CN.md)
@@ -77,7 +77,7 @@ Ship your internal console faster than your coffee gets cold.
 ### 💎 Engineering quality
 - Schema-as-code migrations (auto at startup), SQLite ↔ PostgreSQL via one env var
 - Type-safe queries end-to-end (no SQL string building)
-- **56 backend tests** (stores, services, HTTP via Testkit, JWT/multi-tenancy, audit, AI crypto/approval/quota, admin-gate 401/403/200, session revocation, IAM, OAuth PKCE, MFA TOTP, SIWE EIP-4361, agent budget) + **5 frontend tests** (vitest)
+- **58 backend tests** (stores, services, HTTP via Testkit, JWT/multi-tenancy, audit, AI crypto/approval/quota, admin-gate 401/403/200, session revocation, IAM, OAuth PKCE, MFA TOTP, SIWE EIP-4361, agent budget) + **5 frontend tests** (vitest)
 - `zig fmt` clean, zero TODOs, graceful shutdown, documented backup strategy
 
 ---
@@ -200,7 +200,7 @@ Envelope: `{ code, msg, data }`, `code === 0` = success.
 ## 🧪 Testing
 
 ```bash
-zig build test                     # 56 backend tests (in-memory SQLite + Testkit HTTP)
+zig build test                     # 58 backend tests (in-memory SQLite + Testkit HTTP)
 cd web && npm run typecheck && npm test && npm run build   # vitest + build
 ```
 

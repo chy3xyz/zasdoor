@@ -2,7 +2,7 @@ import { useNavigate } from '@solidjs/router';
 import { type JSX, onMount } from 'solid-js';
 import { createStore } from 'solid-js/store';
 
-import { type AuthUser, login as apiLogin, logout as apiLogout, register as apiRegister, setAuthToken, setUnauthorizedHandler } from '#ui/api';
+import { type AuthUser, login as apiLogin, logout as apiLogout, me as apiMe, register as apiRegister, setAuthToken, setUnauthorizedHandler, verifySiwe } from '#ui/api';
 import { APP_CONFIG } from '#ui/config';
 import { ROUTE_PATH } from '#ui/constants';
 import { AuthContext, type AuthActions, type AuthContextValue, type AuthState } from '#ui/context';
@@ -65,6 +65,26 @@ export function AuthProvider(props: JSX.HTMLAttributes<HTMLElement>) {
   });
 
   const actions: AuthActions = {
+    async siweLogin(message, signature, domain) {
+      setStore('error', null);
+      try {
+        const result = await verifySiwe({ message, signature, domain });
+        if (!result.token) {
+          const err = new Error('该钱包尚未绑定账号，请先登录后在我的资料中绑定');
+          setStore('error', err.message);
+          throw err;
+        }
+        setAuthToken(result.token);
+        const user = await apiMe();
+        applySession(result.token, user);
+        navigate(ROUTE_PATH.index, { replace: true });
+      } catch (err) {
+        if (!(err instanceof Error && err.message.includes('尚未绑定'))) {
+          setStore('error', err instanceof Error ? err.message : '钱包登录失败，请稍后重试');
+        }
+        throw err;
+      }
+    },
     async login(email, password) {
       setStore('error', null);
       try {

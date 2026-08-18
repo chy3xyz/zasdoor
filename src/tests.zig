@@ -1463,3 +1463,108 @@ test "agent: token includes budget_remaining claim" {
     defer a.free(payload);
     try std.testing.expect(std.mem.indexOf(u8, payload, "\"budget_remaining\":100") != null);
 }
+test "web3: personalSignDigest uses the 0x19 EIP-191 prefix byte" {
+    const siwe_mod = @import("modules/web3/siwe.zig");
+    var digest: [32]u8 = undefined;
+    try siwe_mod.personalSignDigest("test", &digest);
+    // Independent: keccak256(0x19 ++ "Ethereum Signed Message:\n" ++ "4" ++ "test")
+    const header = "Ethereum Signed Message:\n";
+    var buf: [128]u8 = undefined;
+    var off: usize = 0;
+    buf[off] = 0x19;
+    off += 1;
+    @memcpy(buf[off..][0..header.len], header);
+    off += header.len;
+    buf[off] = '4';
+    off += 1;
+    const msg = "test";
+    @memcpy(buf[off..][0..msg.len], msg);
+    off += msg.len;
+    var expect: [32]u8 = undefined;
+    std.crypto.hash.sha3.Keccak256.hash(buf[0..off], &expect, .{});
+    try std.testing.expectEqualSlices(u8, &expect, &digest);
+}
+
+test "web3: siweLogin binds wallet then issues JWT (full flow)" {
+    const a = std.testing.allocator;
+    var env = try openMemory(a);
+    defer env.deinit();
+    var wallet_store = web3.persistence.WalletStore.init(a, env.client);
+    var user_store = user.persistence.UserStore.init(a, env.client);
+    var sec = zigmodu.security.AppSecurity.init(a, std.testing.io, .{ .jwt_secret = "siwe-secret" });
+    var user_svc = user.service.UserService.init(&user_store, &sec, std.testing.io, 3600, 86400);
+    const uid = try user_store.createUser("WalletUser", "w@x.com", "hash", true, true, 1, 100);
+    var w3 = web3.service.Web3Service.init(a, std.testing.io, &wallet_store, &user_svc, &sec);
+
+    // Privkey 1 -> known address (stored normalized lowercase).
+    const addr = "0x7E5F4552091a69125d5dfcb7b8c2659029395bdf";
+    const bound = (try w3.bindWallet(1, uid, "evm", addr)).?;
+    bound.free(a);
+    const stored = (try wallet_store.findByAddress("evm", "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf")).?;
+    stored.free(a);
+    try std.testing.expectEqual(uid, stored.user_id);
+
+    // Nonce + message.
+    const nonce = try w3.generateNonce();
+    defer a.free(nonce);
+    try w3.reserveNonce(1, nonce, "example.com", addr, 600);
+    const message = try std.fmt.allocPrint(a, "example.com wants you to sign in with your Ethereum account:\n{s}\n\n" ++
+        "Sign in to the app.\n\nURI: https://example.com\nVersion: 1\nChain ID: 1\n" ++
+        "Nonce: {s}\nIssued At: 2099-01-01T00:00:00Z", .{ addr, nonce });
+    defer a.free(message);
+
+    // EIP-191 digest + sign with privkey 1.
+    const siwe_mod = @import("modules/web3/siwe.zig");
+    var digest: [32]u8 = undefined;
+    siwe_mod.personalSignDigest(message, &digest) catch return error.TestFailed;
+    const Secp = std.crypto.ecc.Secp256k1;
+    var prv: [32]u8 = std.mem.zeroes([32]u8);
+    prv[31] = 1;
+    const nval = [_]u8{ 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfe, 0xba, 0xae, 0xdc, 0xe6, 0xaf, 0x48, 0xa0, 0x3b, 0xbf, 0xd2, 0x5e, 0x8c, 0xd0, 0x36, 0x41, 0x41 };
+    const true_addr = [_]u8{ 0x7e, 0x5f, 0x45, 0x52, 0x09, 0x1a, 0x69, 0x12, 0x5d, 0x5d, 0xfc, 0xb7, 0xb8, 0xc2, 0x65, 0x90, 0x29, 0x39, 0x5b, 0xdf };
+    var sig: web3.service.Signature = undefined;
+    var found = false;
+    var k: u16 = 1;
+    while (k < 2000 and !found) : (k += 1) {
+        var kk: [32]u8 = std.mem.zeroes([32]u8);
+        kk[30] = @intCast((k >> 8) & 0xff);
+        kk[31] = @intCast(k & 0xff);
+        const R = try Secp.basePoint.mul(kk, .big);
+        const ra = R.affineCoordinates();
+        const rx = ra.x.toBytes(.big);
+        if (std.mem.order(u8, &rx, &nval) != .lt) continue;
+        const r_scalar = Secp.scalar.Scalar.fromBytes(rx, .big) catch continue;
+        const d_scalar = Secp.scalar.Scalar.fromBytes(digest, .big) catch continue;
+        const k_scalar = Secp.scalar.Scalar.fromBytes(kk, .big) catch continue;
+        const s_val = k_scalar.invert().mul(d_scalar.add(r_scalar.mul((Secp.scalar.Scalar.fromBytes(prv, .big) catch continue))));
+        const odd = (ra.y.toBytes(.big)[31] & 1) == 1;
+        const r_fe = Secp.Fe.fromBytes(rx, .big) catch continue;
+        const r_y = Secp.recoverY(r_fe, odd) catch continue;
+        const Rp = Secp.fromAffineCoordinates(.{ .x = r_fe, .y = r_y }) catch continue;
+        const sR = Rp.mul(s_val.toBytes(.big), .big) catch continue;
+        const eG = Secp.basePoint.mul(digest, .big) catch continue;
+        const Q = sR.sub(eG).mul(r_scalar.invert().toBytes(.big), .big) catch continue;
+        const qa = Q.affineCoordinates();
+        var qx: [32]u8 = undefined;
+        var qy: [32]u8 = undefined;
+        qx = qa.x.toBytes(.big);
+        qy = qa.y.toBytes(.big);
+        var qbuf: [64]u8 = undefined;
+        @memcpy(qbuf[0..32], &qx);
+        @memcpy(qbuf[32..64], &qy);
+        var qhash: [32]u8 = undefined;
+        std.crypto.hash.sha3.Keccak256.hash(&qbuf, &qhash, .{});
+        if (!std.mem.eql(u8, qhash[12..32], &true_addr)) continue;
+        sig = .{ .r = r_scalar.toBytes(.big), .s = s_val.toBytes(.big), .v = if (odd) @as(u8, 28) else 27 };
+        found = true;
+    }
+    try std.testing.expect(found);
+
+    // siweLogin: verify + nonce consume + wallet lookup + JWT.
+    const login = try w3.siweLogin(1, message, sig, "example.com");
+    try std.testing.expect(login.token != null);
+    defer if (login.token) |t| a.free(t);
+    try std.testing.expectEqual(uid, login.user_id);
+    // Nonce is single-use: a second login attempt fails on the nonce.
+    try std.testing.expectError(error.NonceUnavailable, w3.siweLogin(1, message, sig, "example.com"));
+}

@@ -85,7 +85,7 @@ const secp256k1_scalar = struct {
 /// \\x19Ethereum Signed Message:\\n<len> header before Keccak-256. This is what
 /// most wallets (MetaMask etc.) sign for SIWE-style login.
 pub fn personalSignDigest(message: []const u8, out: *[32]u8) !void {
-    const prefix = "\\x19Ethereum Signed Message:\\n";
+    const prefix = "\x19Ethereum Signed Message:\n";
     var len_buf: [24]u8 = undefined;
     const len_str = try std.fmt.bufPrint(&len_buf, "{d}", .{message.len});
     var data = std.ArrayList(u8).empty;

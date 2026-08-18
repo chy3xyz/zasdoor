@@ -1,6 +1,7 @@
 import { createSignal, Show } from 'solid-js';
 
 import {
+  bindWallet,
   changePassword,
   sendVerification,
   toApiError,
@@ -31,6 +32,13 @@ function Profile() {
   // Verification
   const [verifySending, setVerifySending] = createSignal(false);
   const [verifyMsg, setVerifyMsg] = createSignal<string | null>(null);
+
+  // Web3 wallet binding
+  const [walletAddress, setWalletAddress] = createSignal('');
+  const [walletChain, setWalletChain] = createSignal('evm');
+  const [walletMsg, setWalletMsg] = createSignal<string | null>(null);
+  const [walletErr, setWalletErr] = createSignal<string | null>(null);
+  const [walletSaving, setWalletSaving] = createSignal(false);
 
   const onSaveProfile = async (e: SubmitEvent) => {
     e.preventDefault();
@@ -72,6 +80,28 @@ function Profile() {
       setPwError(toApiError(err).message);
     } finally {
       setPwSaving(false);
+    }
+  };
+
+  const onBindWallet = async (e: SubmitEvent) => {
+    e.preventDefault();
+    if (walletSaving()) return;
+    const addr = walletAddress().trim();
+    if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) {
+      setWalletErr('地址格式无效，应为 0x + 40 位十六进制');
+      return;
+    }
+    setWalletSaving(true);
+    setWalletMsg(null);
+    setWalletErr(null);
+    try {
+      const res = await bindWallet({ chain: walletChain().trim() || 'evm', address: addr });
+      setWalletMsg(`钱包已绑定: ${res.address}`);
+      setWalletAddress('');
+    } catch (err) {
+      setWalletErr(toApiError(err).message);
+    } finally {
+      setWalletSaving(false);
     }
   };
 
@@ -161,6 +191,34 @@ function Profile() {
         </div>
 
         <div class="space-y-4">
+          <form onSubmit={onBindWallet} class="card w-full bg-base-100 shadow-sm">
+            <div class="card-body gap-3">
+              <h3 class="card-title text-base">绑定 Web3 钱包</h3>
+              <p class="text-sm text-base-content/60">绑定后可用该钱包通过 SIWE 免密登录</p>
+              <Show when={walletErr()}>
+                <div role="alert" class="alert alert-error py-2 text-sm">
+                  {walletErr()}
+                </div>
+              </Show>
+              <Show when={walletMsg()}>
+                <div role="alert" class="alert alert-success py-2 text-sm">
+                  {walletMsg()}
+                </div>
+              </Show>
+              <label class="form-control w-full">
+                <span class="label-text mb-1">链</span>
+                <input type="text" class="input input-bordered input-sm" value={walletChain()} onInput={(e) => setWalletChain(e.currentTarget.value)} placeholder="evm" />
+              </label>
+              <label class="form-control w-full">
+                <span class="label-text mb-1">钱包地址</span>
+                <input type="text" class="input input-bordered input-sm" value={walletAddress()} onInput={(e) => setWalletAddress(e.currentTarget.value)} placeholder="0x…" />
+              </label>
+              <button type="submit" class="btn btn-primary btn-sm self-end" disabled={walletSaving()}>
+                {walletSaving() ? '绑定中…' : '绑定钱包'}
+              </button>
+            </div>
+          </form>
+
           <form onSubmit={onSaveProfile} class="card w-full bg-base-100 shadow-sm">
             <div class="card-body gap-3">
               <h3 class="card-title text-base">编辑资料</h3>

@@ -80,7 +80,9 @@ pub const Web3Service = struct {
         expected_domain: []const u8,
     ) VerifySiweError!VerifySiweResult {
         var parsed = siwe_msg.parse(self.allocator, message) catch return error.InvalidSiweMessage;
-        defer parsed.free(self.allocator);
+        // Ownership of `parsed` transfers to the caller on success (it is part
+        // of the returned result); free it only on error paths.
+        errdefer parsed.free(self.allocator);
         const now_s = self.now();
         if (parsed.expiration_time) |exp| {
             if (now_s > exp) return error.InvalidSiweMessage; // Expired
@@ -92,8 +94,16 @@ pub const Web3Service = struct {
         // Recover signer from the personal_sign digest.
         var recovered: [20]u8 = undefined;
         if (!self.verifySignature(parsed.raw, sig, &recovered)) return error.SignatureInvalid;
-        // Lower-case compare (hex addresses are case-insensitive).
-        if (!std.ascii.eqlIgnoreCase(parsed.address, &recovered)) return error.AddressMismatch;
+        // Compare the recovered 20-byte address against the message address
+        // (a 0x-prefixed hex string). Normalize by stripping the 0x prefix and
+        // comparing case-insensitively.
+        const rec_hex = hexEncode(self.allocator, &recovered) catch return error.Unexpected;
+        defer self.allocator.free(rec_hex);
+        const msg_addr = if (std.mem.startsWith(u8, parsed.address, "0x") or std.mem.startsWith(u8, parsed.address, "0X"))
+            parsed.address[2..]
+        else
+            parsed.address;
+        if (!std.ascii.eqlIgnoreCase(msg_addr, rec_hex)) return error.AddressMismatch;
         // Single-use nonce: must match the reserved (domain, address).
         const nonce_row = self.store.consumeNonce(tenant_id, parsed.nonce, parsed.domain, parsed.address, now_s) catch return error.Unexpected;
         const row = nonce_row orelse return error.NonceUnavailable;
@@ -131,9 +141,20 @@ pub const Web3Service = struct {
             addr_hex[i * 2] = hex[b >> 4];
             addr_hex[i * 2 + 1] = hex[b & 0xf];
         }
+        // Wallets are stored 0x-prefixed (as bound via the API), so look up with
+        // the "0x" prefix to match the exact string stored by bindWallet.
         const wallet_opt = self.store.findByAddress("evm", addr_hex[0..]) catch return error.Unexpected;
+        var wallet: ?persist.WalletRow = wallet_opt;
+        if (wallet == null) {
+            var prefixed: [42]u8 = undefined;
+            prefixed[0] = '0';
+            prefixed[1] = 'x';
+            @memcpy(prefixed[2..42], addr_hex[0..]);
+            wallet = self.store.findByAddress("evm", prefixed[0..]) catch return error.Unexpected;
+        }
+        const wallet_row = wallet;
         var wallet_user: i64 = 0;
-        if (wallet_opt) |w| {
+        if (wallet_row) |w| {
             wallet_user = w.user_id;
             w.free(self.allocator);
         }
@@ -152,15 +173,19 @@ pub const Web3Service = struct {
         chain: []const u8,
         address: []const u8,
     ) !?WalletRow {
-        const row_opt = try self.store.findByAddress(chain, address);
+        // Normalize the address to lowercase hex (with 0x prefix) so lookups
+        // from SIWE (which derives lowercase hex from the recovered key) match.
+        const norm = normalizeAddress(self.allocator, address) catch return error.Unexpected;
+        defer self.allocator.free(norm);
+        const row_opt = try self.store.findByAddress(chain, norm);
         if (row_opt) |row| {
             errdefer row.free(self.allocator);
             _ = self.store.bindUser(row.id, user_id, self.now()) catch return error.Unexpected;
             return row;
         }
-        const id = try self.store.create(tenant_id, chain, address);
+        const id = try self.store.create(tenant_id, chain, norm);
         _ = try self.store.bindUser(id, user_id, self.now());
-        return self.store.findByAddress(chain, address);
+        return self.store.findByAddress(chain, norm);
     }
 };
 
@@ -169,6 +194,22 @@ fn fillEntropy(io: std.Io, buf: []u8) !void {
     defer file.close(io);
     const read = try file.readPositionalAll(io, buf, 0);
     if (read != buf.len) return error.Unexpected;
+}
+
+/// Normalize an EVM address string: strip a "0x"/"0X" prefix and lowercase
+/// the remaining hex so stored values are canonical.
+fn normalizeAddress(allocator: std.mem.Allocator, address: []const u8) ![]const u8 {
+    const body = if (std.mem.startsWith(u8, address, "0x") or std.mem.startsWith(u8, address, "0X"))
+        address[2..]
+    else
+        address;
+    const out = try allocator.alloc(u8, body.len + 2);
+    out[0] = '0';
+    out[1] = 'x';
+    for (body, 0..) |c, i| {
+        out[i + 2] = std.ascii.toLower(c);
+    }
+    return out;
 }
 
 fn hexEncode(allocator: std.mem.Allocator, bytes: []const u8) ![]const u8 {

@@ -10,7 +10,7 @@
 [![zigmodu](https://img.shields.io/badge/zigmodu-v0.15.22-blue)](https://github.com/chy3xyz/zigmodu)
 [![zent](https://img.shields.io/badge/zent-ORM-6b46c1)](https://github.com/chy3xyz/zent)
 [![SolidJS](https://img.shields.io/badge/前端-SolidJS-2c4f7c?logo=solid&logoColor=white)](https://www.solidjs.com)
-[![Tests](https://img.shields.io/badge/测试-56%20后端%20%2B%205%20前端-green)]()
+[![Tests](https://img.shields.io/badge/测试-58%20后端%20%2B%205%20前端-green)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 [**English**](README.md) · **简体中文**
@@ -77,7 +77,7 @@
 ### 💎 工程品质
 - Schema-as-code 迁移(启动自动);SQLite ↔ PostgreSQL 一个环境变量切换
 - 全链路类型安全查询(零 SQL 字符串拼接)
-- **56 个后端测试**(store/service、Testkit HTTP、JWT/多租户、审计、AI 加密/审批/配额、管理端门禁 401/403/200、会话吊销、IAM、OAuth PKCE、MFA TOTP、SIWE EIP-4361、Agent 预算)+ **5 个前端测试**(vitest)
+- **58 个后端测试**(store/service、Testkit HTTP、JWT/多租户、审计、AI 加密/审批/配额、管理端门禁 401/403/200、会话吊销、IAM、OAuth PKCE、MFA TOTP、SIWE EIP-4361、Agent 预算)+ **5 个前端测试**(vitest)
 - `zig fmt` 全绿、零 TODO、优雅关闭、备份策略文档化
 
 ---
@@ -200,7 +200,7 @@ cd web && npm install && npm run dev
 ## 🧪 测试
 
 ```bash
-zig build test                     # 56 个后端测试(内存 SQLite + Testkit HTTP)
+zig build test                     # 58 个后端测试(内存 SQLite + Testkit HTTP)
 cd web && npm run typecheck && npm test && npm run build   # vitest + 构建
 ```
 

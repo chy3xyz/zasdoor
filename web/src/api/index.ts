@@ -11,6 +11,7 @@ export * from './ai';
 export * from './iam';
 export * from './mfa';
 export * from './agent';
+export * from './web3';
 export { getAuthToken, setAuthToken, setUnauthorizedHandler } from './client';
 export { ApiError, unwrapEnvelope } from './envelope';
 export type { ApiEnvelope } from './envelope';
