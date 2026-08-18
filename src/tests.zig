@@ -1330,7 +1330,7 @@ test "web3: wallet store create/find/bind" {
     var env = try openMemory(allocator);
     defer env.deinit();
     var ws = web3.persistence.WalletStore.init(allocator, env.client);
-    const id = try ws.create(1, "evm", "0xabc123", 100);
+    const id = try ws.create(1, "evm", "0xabc123");
     const row_opt = try ws.findByAddress("evm", "0xabc123");
     const row = row_opt orelse return error.TestFailed;
     row.free(allocator);
@@ -1397,3 +1397,70 @@ test "agent: session revocation after agent deactivated" {
     try std.testing.expect((try a_svc.issueAgentToken(aid, 60)) == null);
 }
 
+test "web3: EIP-4361 message parsing extracts domain/address/nonce" {
+    const a = std.testing.allocator;
+    const message = "example.com wants you to sign in with your Ethereum account:\n0xAbCdEf0123456789aBcDeF0123456789AbCdEf01\n\nI am a statement.\nURI: https://example.com/login\nVersion: 1\nChain ID: 1\nNonce: abc123def\nIssued At: 2024-01-15T10:00:00Z\nExpiration Time: 2099-01-15T10:00:00Z\nNot Before: 2024-01-01T00:00:00Z\nResources:\n- https://example.com/api\n- https://example.com/data";
+    const m = web3.siwe_message.parse(a, message) catch return error.TestFailed;
+    defer m.free(a);
+    try std.testing.expectEqualStrings("example.com", m.domain);
+    try std.testing.expectEqualStrings("0xAbCdEf0123456789aBcDeF0123456789AbCdEf01", m.address);
+    try std.testing.expectEqualStrings("abc123def", m.nonce);
+    try std.testing.expectEqualStrings("https://example.com/login", m.uri);
+    try std.testing.expectEqual(@as(u8, 1), m.version);
+    try std.testing.expectEqual(@as(i64, 1), m.chain_id);
+    try std.testing.expect(m.statement != null);
+    try std.testing.expect(m.expiration_time != null);
+    try std.testing.expectEqual(@as(usize, 2), m.resources.len);
+}
+
+test "web3: SIWE nonce single-use reserve + consume" {
+    const a = std.testing.allocator;
+    var env = try openMemory(a);
+    defer env.deinit();
+    var ws = web3.persistence.WalletStore.init(a, env.client);
+    _ = try ws.reserveNonce(1, "nonce-xyz", "example.com", "0xabc", 0, 100);
+    const r1 = try ws.consumeNonce(1, "nonce-xyz", "example.com", "0xabc", 100);
+    try std.testing.expect(r1 != null);
+    defer if (r1) |row| row.free(a);
+    const r2 = try ws.consumeNonce(1, "nonce-xyz", "example.com", "0xabc", 100);
+    try std.testing.expect(r2 == null);
+}
+
+test "agent: budget ledger consume/resume/remaining" {
+    const a = std.testing.allocator;
+    var env = try openMemory(a);
+    defer env.deinit();
+    var a_store = agent.persistence.AgentStore.init(a, env.client);
+    var user_store = user.persistence.UserStore.init(a, env.client);
+    var sec = zigmodu.security.AppSecurity.init(a, std.testing.io, .{ .jwt_secret = "agent-budget" });
+    var user_svc = user.service.UserService.init(&user_store, &sec, std.testing.io, 3600, 86400);
+    _ = try user_store.createUser("Owner", "o@x.com", "hash", false, true, 1, 100);
+    var a_svc = agent.service.AgentService.init(a, std.testing.io, &a_store, &user_svc, &sec, "http://iam.local");
+    const now = zigmodu.time.wallClockSeconds(std.testing.io);
+    const aid = try a_svc.createAgent(1, 1, "budget-bot", "", "[]", "[]", 100, 86400, 0);
+    const row = (try a_svc.getAgent(aid)).?;
+    defer row.free(a);
+    try std.testing.expectEqual(@as(i64, 100), try a_svc.remainingBudget(row, now));
+    try std.testing.expectEqual(@as(i64, 60), try a_svc.consumeBudget(row, 40, now));
+    try std.testing.expectError(error.InsufficientBudget, a_svc.consumeBudget(row, 70, now));
+    try a_svc.resumeBudget(row, 10, now);
+    try std.testing.expectEqual(@as(i64, 70), try a_svc.remainingBudget(row, now));
+}
+
+test "agent: token includes budget_remaining claim" {
+    const a = std.testing.allocator;
+    var env = try openMemory(a);
+    defer env.deinit();
+    var a_store = agent.persistence.AgentStore.init(a, env.client);
+    var user_store = user.persistence.UserStore.init(a, env.client);
+    var sec = zigmodu.security.AppSecurity.init(a, std.testing.io, .{ .jwt_secret = "agent-budget" });
+    var user_svc = user.service.UserService.init(&user_store, &sec, std.testing.io, 3600, 86400);
+    _ = try user_store.createUser("Owner", "o@x.com", "hash", false, true, 1, 100);
+    var a_svc = agent.service.AgentService.init(a, std.testing.io, &a_store, &user_svc, &sec, "http://iam.local");
+    const aid = try a_svc.createAgent(1, 1, "budget-bot", "", "[]", "[]", 100, 86400, 0);
+    const tok = (try a_svc.issueAgentToken(aid, 60)).?;
+    defer a.free(tok);
+    const payload = try oauth.jwt.verify(a, sec.module.jwt_secret, tok);
+    defer a.free(payload);
+    try std.testing.expect(std.mem.indexOf(u8, payload, "\"budget_remaining\":100") != null);
+}

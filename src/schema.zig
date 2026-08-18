@@ -68,9 +68,11 @@ const mfa_graph = zent.codegen.graph.buildGraph(&.{
 
 const web3_graph = zent.codegen.graph.buildGraph(&.{
     web3_model.Wallet,
+    web3_model.SiweNonce,
 });
 const agent_graph = zent.codegen.graph.buildGraph(&.{
     agent_model.Agent,
+    agent_model.AgentUsage,
 });
 
 pub const infos = graph.types ++ template_graph.types ++ ai_graph.types ++ iam_graph.types ++ eventstore_graph.types ++ mfa_graph.types ++ web3_graph.types ++ agent_graph.types;

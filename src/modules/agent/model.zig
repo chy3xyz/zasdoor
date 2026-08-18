@@ -10,12 +10,22 @@ pub const Agent = Schema("Agent", .{
         field.Int("owner_user_id"),
         field.String("name"),
         field.String("description").Default(""),
-        field.Text("capabilities").Default("[]"), // JSON array, e.g. ["wallet.balance","swap.execute"]
-        field.Text("scopes").Default("[]"), // JSON array, e.g. ["read:wallet","write:swap"]
-        field.Int("budget").Default(0), // max units per period (0 = unlimited)
+        field.Text("capabilities").Default("[]"),
+        field.Text("scopes").Default("[]"),
+        field.Int("budget").Default(0),
         field.Int("budget_period_seconds").Default(86400),
-        field.Int("expires_at").Default(0), // 0 = never
+        field.Int("expires_at").Default(0),
         field.Bool("active").Default(true),
+    },
+    .mixins = &.{zent.core.mixin.TimeMixin},
+});
+
+/// Per-agent budget accounting ledger (one row per budget period).
+pub const AgentUsage = Schema("AgentUsage", .{
+    .fields = &.{
+        field.Int("agent_id"),
+        field.Int("period_start"),
+        field.Int("used").Default(0),
     },
     .mixins = &.{zent.core.mixin.TimeMixin},
 });

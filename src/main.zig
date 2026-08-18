@@ -217,7 +217,7 @@ pub fn main(init: std.process.Init) !void {
     var web3_svc = web3.service.Web3Service.init(allocator, io, &wallet_store, &user_svc, &sec);
     var agent_store = agent.persistence.AgentStore.init(allocator, store_env.client);
     var agent_svc = agent.service.AgentService.init(allocator, io, &agent_store, &user_svc, &sec, cfg.app_host);
-    _ = &agent_svc; // wired into an agent API endpoint below
+    var agent_api = agent.api.AgentApi(@TypeOf(agent_svc), @TypeOf(user_svc)).init(&agent_svc, &user_svc, default_tenant_id);
 
 
     // ── ZigModu module lifecycle (Application API: scan + validate + start/stop) ──
@@ -373,6 +373,7 @@ pub fn main(init: std.process.Init) !void {
     try mfa_api.registerRoutes(&v1);
     try idp_api.registerRoutes(&v1);
     try web3_api.registerRoutes(&v1);
+    try agent_api.registerRoutes(&v1);
     try system_api.registerRoutes(&v1);
 
     // OAuth2 / OIDC public protocol endpoints (server root, no /api prefix).

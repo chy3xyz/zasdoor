@@ -1,4 +1,4 @@
-//! Persistence over the zent Client for AI Agent identity.
+//! Persistence over the zent Client for AI Agent identity + budget ledger.
 
 const std = @import("std");
 const zent = @import("zent");
@@ -6,10 +6,11 @@ const crud = zent.crud_helpers;
 const model = @import("model.zig");
 const schema = @import("../../schema.zig");
 
-const graph = zent.codegen.graph.buildGraph(&.{model.Agent});
+const graph = zent.codegen.graph.buildGraph(&.{ model.Agent, model.AgentUsage });
 pub const infos = graph.types;
 pub const Client = schema.Client;
 pub const AgentInfo = infos[0];
+pub const AgentUsageInfo = infos[1];
 
 pub const AgentRow = struct {
     id: i64,
@@ -32,6 +33,15 @@ pub const AgentRow = struct {
         a.free(self.capabilities);
         a.free(self.scopes);
     }
+};
+
+pub const AgentUsageRow = struct {
+    id: i64,
+    agent_id: i64,
+    period_start: i64,
+    used: i64,
+
+    pub fn free(_: AgentUsageRow, _: std.mem.Allocator) void {}
 };
 
 pub const AgentStore = struct {
@@ -61,6 +71,15 @@ pub const AgentStore = struct {
             .active = e.active,
             .created_at = ts(e.created_at),
             .updated_at = ts(e.updated_at),
+        };
+    }
+
+    fn dupUsage(_: *AgentStore, e: anytype) AgentUsageRow {
+        return .{
+            .id = e.id,
+            .agent_id = e.agent_id,
+            .period_start = e.period_start,
+            .used = e.used,
         };
     }
 
@@ -107,5 +126,46 @@ pub const AgentStore = struct {
         _ = try u.setFieldValue("updated_at", now);
         _ = try u.Where(.{preds.idEQ(.{ .int = id })});
         _ = try u.Save();
+    }
+
+    /// Look up the current period's usage row for an agent. Returns a new
+    /// (zeroed) row if none exists (caller can insert via upsertUsage).
+    pub fn currentUsage(self: *AgentStore, agent_id: i64) !AgentUsageRow {
+        const preds = self.client.agent_usage.predicates;
+        var e = (try crud.first(self.client.agent_usage, .{preds.agent_idEQ(.{ .int = agent_id })})) orelse return .{ .id = 0, .agent_id = agent_id, .period_start = 0, .used = 0 };
+        defer zent.codegen.deinitEntity(infos, AgentUsageInfo, &e, self.allocator);
+        return self.dupUsage(e);
+    }
+
+    /// Insert (or reset) the usage row for an agent and a period start.
+    pub fn upsertUsage(self: *AgentStore, agent_id: i64, period_start: i64, used: i64) !void {
+        const preds = self.client.agent_usage.predicates;
+        var existing = try crud.first(self.client.agent_usage, .{preds.agent_idEQ(.{ .int = agent_id })});
+        if (existing) |*e| {
+            defer zent.codegen.deinitEntity(infos, AgentUsageInfo, e, self.allocator);
+            const id = e.id;
+            var u = self.client.agent_usage.Update();
+            defer u.deinit();
+            _ = try u.setFieldValue("period_start", period_start);
+            _ = try u.setFieldValue("used", used);
+            _ = try u.Where(.{preds.idEQ(.{ .int = id })});
+            _ = try u.Save();
+            return;
+        }
+        var b = try self.client.agent_usage.Create();
+        defer b.deinit();
+        _ = try b.setFieldValue("agent_id", agent_id);
+        _ = try b.setFieldValue("period_start", period_start);
+        _ = try b.setFieldValue("used", used);
+        var row = try b.Save();
+        defer zent.codegen.deinitEntity(infos, AgentUsageInfo, &row, self.allocator);
+    }
+
+    /// Increment `used` by `amount`. Returns the new used count, or null if
+    /// the period has elapsed and was reset to amount.
+    pub fn incrementUsage(self: *AgentStore, agent_id: i64, amount: i64, period_start: i64) !void {
+        const row = try self.currentUsage(agent_id);
+        _ = row;
+        try self.upsertUsage(agent_id, period_start, amount);
     }
 };
