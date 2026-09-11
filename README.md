@@ -7,7 +7,7 @@
 Organizations, projects, applications, roles, OAuth2/OIDC, MFA, SIWE — with a Zig backend and a SolidJS admin console.
 
 [![Zig](https://img.shields.io/badge/Zig-0.17-orange?logo=zig&logoColor=white)](https://ziglang.org)
-[![zigmodu](https://img.shields.io/badge/zigmodu-v0.15.22-blue)](https://github.com/chy3xyz/zigmodu)
+[![zigmodu](https://img.shields.io/badge/zigmodu-v0.15.37-blue)](https://github.com/chy3xyz/zigmodu)
 [![zent](https://img.shields.io/badge/zent-ORM-6b46c1)](https://github.com/chy3xyz/zent)
 [![SolidJS](https://img.shields.io/badge/Frontend-SolidJS-2c4f7c?logo=solid&logoColor=white)](https://www.solidjs.com)
 [![Tests](https://img.shields.io/badge/tests-58%20backend%20%2B%205%20frontend-green)]()
@@ -86,7 +86,7 @@ Zasdoor is a self-hosted identity & access management platform. It gives you the
 
 | Layer | Technology |
 | --- | --- |
-| Backend | [Zig](https://ziglang.org) 0.17 · [zigmodu](https://github.com/chy3xyz/zigmodu) v0.15.22+ (HTTP, security, AI, resilience, Application lifecycle) · [zent](https://github.com/chy3xyz/zent) v0.29.4+ (ORM, schema, migrations) |
+| Backend | [Zig](https://ziglang.org) 0.17 · [zigmodu](https://github.com/chy3xyz/zigmodu) v0.15.37 (HTTP, security, AI, resilience, Application lifecycle) · [zent](https://github.com/chy3xyz/zent) v0.37.0 (ORM, schema, migrations) |
 | Frontend | [SolidJS](https://www.solidjs.com) · TypeScript · [Rsbuild](https://rsbuild.dev) · [Tailwind CSS](https://tailwindcss.com) 4 · [DaisyUI](https://daisyui.com) · vitest |
 | Database | SQLite (default) · PostgreSQL (one env var) |
 
@@ -234,7 +234,7 @@ cd web && pnpm run typecheck && pnpm run test && pnpm run build   # vitest + bui
 | ✅ Done | **Streaming chat** — Agent `chatStream` + `on_delta` (zigmodu v0.15.16); SSE reasoning/delta/done feed with typing effect, JSON fallback |
 | ✅ Done | **Run usage audit** — zigmodu v0.15.17 `Metrics.toStats()`; every AI run persists tokens/steps/tool-call usage, admin runs table shows it |
 | ✅ Done | **Streaming tool-JSON fix** — zigmodu v0.15.18; SkillRegistry tools_json emits valid JSON so models no longer reject tool schemas |
-| ✅ Done | **Deps at latest** — zigmodu v0.15.22 + zent v0.29.4 |
+| ✅ Done | **Deps at latest** — zigmodu v0.15.37 + zent v0.37.0 |
 
 ---
 

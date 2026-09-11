@@ -5,6 +5,68 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Adapt to zigmodu v0.15.37 + zent v0.37.0** (path deps via
+  `zig_ws/zigmodu` and `zig_ws/zent`). The sibling checkouts were bumped
+  past the previous baseline (zigmodu v0.15.22 / zent v0.29.7) and the
+  project rebuilt from a cleared `.zig-cache` + `.zig-global-cache`.
+  `zig build` succeeds, all 58 unit tests pass (`zig build test`),
+  and the binary starts cleanly (DB migration, 17 modules, route
+  registration, HTTP accept loop).
+
+### Verified
+
+- **zent v0.36 breaking points**: `migrateSchema` now runs under an
+  advisory lock by default (`MigrateOptions.lock_timeout_ms` default
+  10s, `0` disables) — zasdoor's `db.zig::StoreEnv.open` keeps the
+  default; the single-process dev path is unaffected. `OutboxMessage`
+  `claimed_at` column is opt-in (we don't use zent outbox — `TaskStore`
+  has its own claim-based dispatcher with its own `requeueStale`,
+  unchanged). `createAllTables` allocator argument — N/A, we use
+  `migrateSchema`. Interceptor chain move semantics — N/A, no
+  interceptors registered. UUID PK DDL fix and `StorageKey` — N/A,
+  all PKs are `i64` and field names match column names. Migration
+  checksum verification — fresh DBs are fine; existing `zasdoor.db`
+  / `zenaipa.db` get an updated checksum on first re-migration.
+- **zent v0.37 pool contract**: `Options.max_wait_ms` only matters
+  when callers opt into a `ConnPool`. zasdoor uses
+  `zent.codegen.client.makeClient(..., driver.asDriver())` with a
+  directly-owned driver (`SQLiteDriver` / `PostgresDriver` allocated
+  in `StoreEnv`), so the pool parking semantics don't change runtime
+  behaviour here. `ConnPool.deinit` caller contract — N/A, no
+  ConnPool.
+- **zigmodu surface area**: `jwtAuthWithSecurity` (the middleware
+  `AppSecurity.jwtMiddleware` returns) still exists and still writes
+  `user_id` / `tenant_id` attrs that `middleware/auth.zig` reads — no
+  `sendErrorResponse` / `bindJson` / `setAttr` callsite changed.
+  `http_middleware.cors`, `tracingMiddleware`, `RateLimiterRegistry`,
+  `PageParams.parse`, `sendPaged`, `RequestUtil.getRealIp`,
+  `Extract.toDtoList`, `HttpMetricsCollector`, `Server.initWithConfig`
+  all still exported. `withName` / `builder(...)` not used here
+  (legacy `Server` + `RouteGroup` setup preserved). The DO/DON'T
+  table in zigmodu AGENTS.md recommends `http.productionProfile()` /
+  `PrometheusMetrics` / Auth Path A
+  (`jwtAuthFromCatalogWithPermissions` + `permissionGateWith(.rbac)`)
+  for new apps; this is a legacy application and the v0.14.x baseline
+  is unchanged on purpose — left for a follow-up.
+
+### Dependencies
+
+- zigmodu v0.15.37 (`HttpMetricsCollector` thread-safe counters,
+  OOM-safe WS accept loop, linux shutdown-listener-before-close fix;
+  `OutboxOps.requeueStale` example, `Preflight`, `productionProfile`,
+  `PrometheusMetrics`, `JwksKeyRing`, `DistributedLock` available but
+  not adopted by this app)
+- zent v0.37.0 (v0.32.3 SQLite single-connection serialization,
+  v0.33.0 `UseInterceptor` Create/BulkInsert coverage, v0.35.0 outbox
+  claim-based dispatch, v0.36.0 migration lock + checksum, outbox
+  `claimed_at`, BulkInsert chunking, `StorageKey`, `queryTargetsByValue`,
+  MySQL TLS, UUID PK DDL fix, v0.37.0 pool `max_wait_ms` blocking waits
+  + nested-preload N+1 fix)
+
 ## [0.3.0] - 2026-02-11
 
 ### Added
