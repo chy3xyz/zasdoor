@@ -411,7 +411,9 @@ pub fn main(init: std.process.Init) !void {
                     try ctx.sendErrorResponse(503, 503, "数据库不可用");
                     return;
                 };
-                defer probe.free(ctx.allocator);
+                // Rows are allocated by the store's allocator, not the per-request
+                // connection arena, so free with the allocator that produced them.
+                defer probe.free(Ready.user_store_ref.allocator);
                 try ctx.json(200, "{\"code\":0,\"msg\":\"ok\",\"data\":{\"status\":\"READY\"}}");
             }
         }.handle,
