@@ -47,6 +47,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `/api/v1/health/ready` freed its readiness probe through the per-request
   connection arena while the rows were allocated by the store allocator; it now
   frees with the allocator that produced them.
+- **Graceful shutdown no longer panics**: `main` joined the server thread twice
+  (`defer server_handle.join()` plus an explicit join), so every SIGTERM/SIGINT
+  logged the shutdown and then hit `reached unreachable code` in
+  `std.Thread.join`. The join now happens exactly once.
 
 ### Changed
 

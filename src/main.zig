@@ -470,7 +470,6 @@ pub fn main(init: std.process.Init) !void {
         }
     };
     const server_handle = try std.Thread.spawn(.{ .stack_size = 4 * 1024 * 1024 }, ServerThread.run, .{&server});
-    defer server_handle.join();
 
     const poll = std.posix.timespec{ .sec = 0, .nsec = 100 * std.time.ns_per_ms };
     while (!ShutdownFlag.requested.load(.acquire)) {
