@@ -16,6 +16,7 @@
         "build.zig.zon",
         "db_link.zig",
         "src",
-        "frontend",
+        "README.md",
+        "LICENSE",
     },
 }

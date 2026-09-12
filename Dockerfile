@@ -8,8 +8,13 @@
 # ── Stage 1: build the Zig backend ─────────────────────────────────────────
 FROM ziglang/zig:0.17.0-dev.1567 AS backend-build
 WORKDIR /build/w4_proj
-RUN git clone --depth 1 https://github.com/chy3xyz/zigmodu.git zig_ws/zigmodu \
- && git clone --depth 1 https://github.com/chy3xyz/zent.git zig_ws/zent
+# Pinned dependency commits (keep in sync with .github/workflows/ci.yml).
+ARG ZIGMODU_SHA=df7cccb
+ARG ZENT_SHA=v0.45.0
+RUN git clone https://github.com/chy3xyz/zigmodu.git zig_ws/zigmodu \
+ && git -C zig_ws/zigmodu checkout --quiet "$ZIGMODU_SHA" \
+ && git clone https://github.com/chy3xyz/zent.git zig_ws/zent \
+ && git -C zig_ws/zent checkout --quiet "$ZENT_SHA"
 COPY . dev_machine/_adm_frame_/zmadmin/
 WORKDIR /build/w4_proj/dev_machine/_adm_frame_/zmadmin
 RUN zig build -Doptimize=ReleaseSafe

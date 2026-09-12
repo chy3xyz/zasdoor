@@ -15,9 +15,15 @@ jobs:
       # recreate that layout inside CI before building.
       - name: Recreate sibling dependency layout
         run: |
+          # Pinned to the exact dependency commits this project is built and
+          # tested against, so CI cannot break from an upstream API change.
+          ZIGMODU_SHA=df7cccb
+          ZENT_SHA=v0.45.0
           mkdir -p /tmp/ci/w4_proj/zig_ws /tmp/ci/w4_proj/dev_machine/_adm_frame_
-          git clone --depth 1 https://github.com/chy3xyz/zigmodu.git /tmp/ci/w4_proj/zig_ws/zigmodu
-          git clone --depth 1 https://github.com/chy3xyz/zent.git /tmp/ci/w4_proj/zig_ws/zent
+          git clone https://github.com/chy3xyz/zigmodu.git /tmp/ci/w4_proj/zig_ws/zigmodu
+          git -C /tmp/ci/w4_proj/zig_ws/zigmodu checkout --quiet "$ZIGMODU_SHA"
+          git clone https://github.com/chy3xyz/zent.git /tmp/ci/w4_proj/zig_ws/zent
+          git -C /tmp/ci/w4_proj/zig_ws/zent checkout --quiet "$ZENT_SHA"
           cp -r "$GITHUB_WORKSPACE" /tmp/ci/w4_proj/dev_machine/_adm_frame_/zmadmin
       - uses: mlugg/setup-zig@v1
         with:
