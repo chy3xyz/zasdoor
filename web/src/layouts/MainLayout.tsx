@@ -246,6 +246,13 @@ function MainLayout(props: { children?: JSX.Element }) {
             >
               MFA 安全
             </A>
+            <A
+              href={ROUTE_PATH.idpSettings}
+              class="block rounded-lg px-3 py-2 text-sm hover:bg-base-300 [&.active]:bg-primary [&.active]:text-primary-content"
+              activeClass="active"
+            >
+              身份提供方
+            </A>
           </Show>
           <A
             href={ROUTE_PATH.files}

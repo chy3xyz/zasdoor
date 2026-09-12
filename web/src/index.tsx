@@ -42,6 +42,7 @@ const Organizations = lazy(() => import('#ui/pages/Organizations'));
 const Projects = lazy(() => import('#ui/pages/Projects'));
 const Agents = lazy(() => import('#ui/pages/Agents'));
 const MfaSettings = lazy(() => import('#ui/pages/MfaSettings'));
+const IdpSettings = lazy(() => import('#ui/pages/IdpSettings'));
 const NotFound = lazy(() => import('#ui/pages/NotFound'));
 
 function BootFallback() {
@@ -250,6 +251,14 @@ if (root) {
             component={() => (
               <AdminGate>
                 <MfaSettings />
+              </AdminGate>
+            )}
+          />
+          <Route
+            path={ROUTE_PATH.idpSettings}
+            component={() => (
+              <AdminGate>
+                <IdpSettings />
               </AdminGate>
             )}
           />

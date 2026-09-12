@@ -1,2 +1,2 @@
 export * from './types';
-export { enrollTotp, generateRecoveryCodes, getMfaPolicy, setMfaPolicy, verifyTotp } from './query';
+export { createIdp, enrollTotp, generateRecoveryCodes, getMfaPolicy, listIdps, setMfaPolicy, verifyTotp } from './query';

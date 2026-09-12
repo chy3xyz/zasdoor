@@ -20,5 +20,6 @@ export const ROUTE_PATH = {
   projects: '/iam/projects',
   agents: '/agents',
   mfaSettings: '/security/mfa',
+  idpSettings: '/security/idp',
   notFound: '/404',
 } as const;

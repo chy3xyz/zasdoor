@@ -2,7 +2,7 @@ import { http } from '#ui/api/client';
 import { unwrapEnvelope } from '#ui/api/envelope';
 
 import { MFA_PATH } from './path';
-import type { MfaPolicy, RecoveryCodesResult, SetPolicyRequest, TotpEnrollResult, VerifyCodeRequest } from './types';
+import type { CreateIdpRequest, IdpItem, MfaPolicy, RecoveryCodesResult, SetPolicyRequest, TotpEnrollResult, VerifyCodeRequest } from './types';
 
 async function postEnvelope<T>(path: string, body: unknown): Promise<T> {
   const { data } = await http.post<{ code: number; msg: string; data: T }>(path, body);
@@ -28,6 +28,14 @@ export async function generateRecoveryCodes(): Promise<RecoveryCodesResult> {
 
 export async function getMfaPolicy(): Promise<MfaPolicy> {
   return getEnvelope<MfaPolicy>(MFA_PATH.policy);
+}
+
+export async function listIdps(): Promise<IdpItem[]> {
+  return getEnvelope<IdpItem[]>(MFA_PATH.idps);
+}
+
+export async function createIdp(body: CreateIdpRequest): Promise<{ id: number }> {
+  return postEnvelope<{ id: number }>(MFA_PATH.idps, body);
 }
 
 export async function setMfaPolicy(body: SetPolicyRequest): Promise<void> {

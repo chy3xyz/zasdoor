@@ -6,4 +6,7 @@ export const MFA_PATH = {
   verifyFactor: `${APP_CONFIG.apiPrefix}/mfa/verify`,
   recovery: `${APP_CONFIG.apiPrefix}/mfa/recovery`,
   policy: `${APP_CONFIG.apiPrefix}/mfa/policy`,
+  idps: `${APP_CONFIG.apiPrefix}/mfa/idps`,
 } as const;
+
+export const idpLink = (id: number | string) => `${MFA_PATH.idps}/${id}/link`;
