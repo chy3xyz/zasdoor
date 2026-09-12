@@ -22,6 +22,10 @@ pub const IdpError = error{
     TokenExchangeFailed,
     UserInfoFailed,
     MissingSubject,
+    /// The provider returned an email that already belongs to a local account
+    /// but did not assert that the email is verified; auto-linking would allow
+    /// account takeover.
+    EmailNotVerified,
     Unexpected,
     OutOfMemory,
 };
@@ -44,6 +48,9 @@ pub const UserInfo = struct {
     subject: []const u8,
     email: []const u8,
     name: []const u8,
+    /// Provider assertion that `email` is verified. Only a verified email may
+    /// be auto-linked to an existing local account.
+    email_verified: bool = false,
 
     pub fn free(self: UserInfo, a: std.mem.Allocator) void {
         a.free(self.subject);
@@ -72,13 +79,16 @@ pub const TokenSet = struct {
     }
 };
 
-/// Pure find-or-create decision: an existing link wins, then an existing
-/// local account with the same email, otherwise a new local account.
-pub const ProvisionAction = enum { reuse_link, link_existing, create_user };
+/// Pure find-or-create decision.
+pub const ProvisionAction = enum { reuse_link, link_existing, create_user, conflict };
 
-pub fn decideProvision(link_user_id: ?i64, existing_user_id: ?i64) ProvisionAction {
+/// An existing identity link always wins. An existing local account is only
+/// auto-linked when the provider asserted the email is verified — otherwise a
+/// provider returning someone else's (unverified) email could take over that
+/// account, so we refuse and require an explicit link while signed in.
+pub fn decideProvision(link_user_id: ?i64, existing_user_id: ?i64, email_verified: bool) ProvisionAction {
     if (link_user_id != null) return .reuse_link;
-    if (existing_user_id != null) return .link_existing;
+    if (existing_user_id != null) return if (email_verified) .link_existing else .conflict;
     return .create_user;
 }
 
@@ -308,13 +318,14 @@ pub const IdpService = struct {
             defer link.free(self.allocator);
             return link.user_id;
         }
-        const existing_id: ?i64 = if (info.email.len > 0) try self.store.findUserIdByEmail(info.email) else null;
-        switch (decideProvision(null, existing_id)) {
+        const existing_id: ?i64 = if (info.email.len > 0) try self.store.findUserIdByEmail(info.email, tenant_id) else null;
+        switch (decideProvision(null, existing_id, info.email_verified)) {
             .link_existing => {
                 const uid = existing_id.?;
                 _ = try self.store.createIdentityLink(tenant_id, provider_id, uid, info.subject, info.email, now);
                 return uid;
             },
+            .conflict => return error.EmailNotVerified,
             .create_user => {
                 var generated: ?[]const u8 = null;
                 defer if (generated) |g| self.allocator.free(g);
@@ -324,7 +335,7 @@ pub const IdpService = struct {
                     break :blk g;
                 };
                 const name: []const u8 = if (info.name.len > 0) info.name else email;
-                const uid = try self.store.createFederatedUser(name, email, tenant_id, now);
+                const uid = try self.store.createFederatedUser(name, email, tenant_id, info.email_verified, now);
                 _ = try self.store.createIdentityLink(tenant_id, provider_id, uid, info.subject, info.email, now);
                 return uid;
             },
@@ -380,12 +391,13 @@ pub fn parseUserInfoJson(allocator: std.mem.Allocator, json: []const u8) IdpErro
     const sub = getStr(m, "sub") orelse getStr(m, "id") orelse getStr(m, "user_id") orelse return error.MissingSubject;
     const email = getStr(m, "email") orelse "";
     const name = getStr(m, "name") orelse getStr(m, "preferred_username") orelse getStr(m, "login") orelse "";
+    const email_verified = getBool(m, "email_verified");
     const sub_dup = try allocator.dupe(u8, sub);
     errdefer allocator.free(sub_dup);
     const email_dup = try allocator.dupe(u8, email);
     errdefer allocator.free(email_dup);
     const name_dup = try allocator.dupe(u8, name);
-    return .{ .subject = sub_dup, .email = email_dup, .name = name_dup };
+    return .{ .subject = sub_dup, .email = email_dup, .name = name_dup, .email_verified = email_verified };
 }
 
 /// Decode an id_token (JWT) payload and extract the same identity fields,
@@ -406,6 +418,16 @@ fn getStr(m: std.json.ObjectMap, key: []const u8) ?[]const u8 {
     return switch (v) {
         .string => |s| s,
         else => null,
+    };
+}
+
+/// Accept a JSON boolean or the string "true" (some providers send the latter).
+fn getBool(m: std.json.ObjectMap, key: []const u8) bool {
+    const v = m.get(key) orelse return false;
+    return switch (v) {
+        .bool => |b| b,
+        .string => |s| std.ascii.eqlIgnoreCase(s, "true"),
+        else => false,
     };
 }
 

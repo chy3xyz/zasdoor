@@ -319,21 +319,27 @@ pub const MfaStore = struct {
     // ---- Federated user provisioning (shared user table) ----
 
     /// Lookup by the already-normalized email used at signup.
-    pub fn findUserIdByEmail(self: *MfaStore, email: []const u8) !?i64 {
+    /// Find a local user by email, scoped to the tenant so a federated login
+    /// can never be linked across tenant boundaries.
+    pub fn findUserIdByEmail(self: *MfaStore, email: []const u8, tenant_id: i64) !?i64 {
         const preds = self.client.user.predicates;
-        var e = (try crud.first(self.client.user, .{preds.emailEQ(.{ .string = email })})) orelse return null;
+        const e_q = preds.emailEQ(.{ .string = email });
+        const t_q = preds.tenant_idEQ(.{ .int = tenant_id });
+        const and_q = zent.sql.And(&e_q, &t_q);
+        var e = (try crud.first(self.client.user, .{and_q})) orelse return null;
         defer zent.codegen.deinitEntity(user_persist.infos, UserTableInfo, &e, self.allocator);
         return e.id;
     }
 
-    /// Create a locally password-less account for a federated identity.
-    pub fn createFederatedUser(self: *MfaStore, name: []const u8, email: []const u8, tenant_id: i64, now: i64) !i64 {
+    /// Create a locally password-less account for a federated identity. The
+    /// `verified` flag mirrors the provider's `email_verified` assertion.
+    pub fn createFederatedUser(self: *MfaStore, name: []const u8, email: []const u8, tenant_id: i64, verified: bool, now: i64) !i64 {
         var b = try self.client.user.Create();
         defer b.deinit();
         _ = try b.setFieldValue("name", name);
         _ = try b.setFieldValue("email", email);
         _ = try b.setFieldValue("password", FEDERATED_PASSWORD_MARKER);
-        _ = try b.setFieldValue("verified", true);
+        _ = try b.setFieldValue("verified", verified);
         _ = try b.setFieldValue("admin", false);
         _ = try b.setFieldValue("tenant_id", tenant_id);
         _ = try b.setFieldValue("token_version", 0);

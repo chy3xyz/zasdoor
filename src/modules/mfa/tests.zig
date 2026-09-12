@@ -106,7 +106,7 @@ test "mfa idp: state accepts fresh, rejects unknown/expired/replayed" {
 
 test "mfa idp: userinfo JSON -> (sub,email) extraction" {
     const allocator = std.testing.allocator;
-    const info = try idp.parseUserInfoJson(allocator, "{\"sub\":\"u-123\",\"email\":\"a@b.c\",\"name\":\"Alice\"}");
+    const info = try idp.parseUserInfoJson(allocator, "{\"sub\":\"u-123\",\"email\":\"a@b.c\",\"name\":\"Alice\",\"email_verified\":true}");
     defer info.free(allocator);
     try std.testing.expectEqualStrings("u-123", info.subject);
     try std.testing.expectEqualStrings("a@b.c", info.email);
@@ -153,12 +153,13 @@ test "mfa idp: find-or-create + identity link (in-memory store)" {
     const id = try svc.create(1, "Google", "oidc", sample_config, 100);
 
     // Pure decision table.
-    try std.testing.expectEqual(idp.ProvisionAction.reuse_link, idp.decideProvision(7, 9));
-    try std.testing.expectEqual(idp.ProvisionAction.link_existing, idp.decideProvision(null, 9));
-    try std.testing.expectEqual(idp.ProvisionAction.create_user, idp.decideProvision(null, null));
+    try std.testing.expectEqual(idp.ProvisionAction.reuse_link, idp.decideProvision(7, 9, false));
+    try std.testing.expectEqual(idp.ProvisionAction.link_existing, idp.decideProvision(null, 9, true));
+    try std.testing.expectEqual(idp.ProvisionAction.conflict, idp.decideProvision(null, 9, false));
+    try std.testing.expectEqual(idp.ProvisionAction.create_user, idp.decideProvision(null, null, false));
 
     // New subject -> a local account is created and linked.
-    const info = idp.UserInfo{ .subject = "sub-1", .email = "new@example.com", .name = "New User" };
+    const info = idp.UserInfo{ .subject = "sub-1", .email = "new@example.com", .name = "New User", .email_verified = true };
     const uid1 = try svc.resolveLocalUser(1, id, info, 200);
     const link = (try store.findIdentityLink(id, "sub-1")).?;
     defer link.free(allocator);
@@ -182,7 +183,13 @@ test "mfa idp: find-or-create + identity link (in-memory store)" {
 
     // Different subject + matching email -> linked to the existing account.
     const existing_uid = try user_store.createUser("Existing", "existing@example.com", "hash", true, false, 1, 210);
-    const info2 = idp.UserInfo{ .subject = "sub-2", .email = "existing@example.com", .name = "Existing" };
+    // Unverified email that matches an existing account must NOT auto-link:
+    // that would let any provider take over the account.
+    const info_bad = idp.UserInfo{ .subject = "sub-bad", .email = "existing@example.com", .name = "Impostor" };
+    try std.testing.expectError(error.EmailNotVerified, svc.resolveLocalUser(1, id, info_bad, 210));
+
+    // Verified email that matches an existing account links to it.
+    const info2 = idp.UserInfo{ .subject = "sub-2", .email = "existing@example.com", .name = "Existing", .email_verified = true };
     const uid2 = try svc.resolveLocalUser(1, id, info2, 211);
     try std.testing.expectEqual(existing_uid, uid2);
     const link2 = (try store.findIdentityLink(id, "sub-2")).?;

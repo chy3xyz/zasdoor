@@ -146,18 +146,19 @@ fn containsIgnoreCase(haystack: []const u8, needle: []const u8) bool {
 /// only needs to stop the top-of-the-list guesses before the length bound and
 /// lockout take over.
 const common_passwords = [_][]const u8{
-    "123456",      "password",     "12345678",   "qwerty",     "123456789",
-    "12345",       "1234",         "111111",     "1234567",    "dragon",
-    "123123",      "baseball",     "abc123",     "football",   "monkey",
-    "letmein",     "696969",       "shadow",     "master",     "666666",
-    "qwertyuiop",  "123321",       "mustang",    "1234567890", "michael",
-    "654321",      "superman",     "1qaz2wsx",   "7777777",    "121212",
-    "000000",      "qazwsx",       "123qwe",     "killer",     "trustno1",
-    "jordan",      "jennifer",     "zxcvbnm",    "asdfgh",     "hunter",
-    "buster",      "soccer",       "harley",     "batman",     "andrew",
-    "tigger",      "sunshine",     "iloveyou",   "welcome",    "admin",
-    "qwerty12345", "1qaz2wsx3edc", "q1w2e3r4t5", "letmein123", "iloveyou123",
-    "password12",  "123456789a",
+    "123456",      "password",     "12345678",    "qwerty",       "123456789",
+    "12345",       "1234",         "111111",      "1234567",      "dragon",
+    "123123",      "baseball",     "abc123",      "football",     "monkey",
+    "letmein",     "696969",       "shadow",      "master",       "666666",
+    "qwertyuiop",  "123321",       "mustang",     "1234567890",   "michael",
+    "654321",      "superman",     "1qaz2wsx",    "7777777",      "121212",
+    "000000",      "qazwsx",       "123qwe",      "killer",       "trustno1",
+    "jordan",      "jennifer",     "zxcvbnm",     "asdfgh",       "hunter",
+    "buster",      "soccer",       "harley",      "batman",       "andrew",
+    "tigger",      "sunshine",     "iloveyou",    "welcome",      "admin",
+    "qwerty12345", "1qaz2wsx3edc", "q1w2e3r4t5",  "letmein123",   "iloveyou123",
+    "password12",  "123456789a",   "password123", "password1234", "p@ssw0rd",
+    "passw0rd",    "admin123",     "root123",     "changeme",     "secret123",
 };
 
 fn isCommonPassword(password: []const u8) bool {

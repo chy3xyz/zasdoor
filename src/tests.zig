@@ -337,7 +337,7 @@ test "HTTP dispatch: public auth flow (register -> me) via Testkit" {
     var g = server.group("/api/v1");
     try auth_api.registerRoutes(&g);
 
-    var resp = try zigmodu.http.Testkit.dispatch(&server, .POST, "/api/v1/auth/register", "{\"name\":\"Tester\",\"email\":\"t@example.com\",\"password\":\"password123\"}");
+    var resp = try zigmodu.http.Testkit.dispatch(&server, .POST, "/api/v1/auth/register", "{\"name\":\"Tester\",\"email\":\"t@example.com\",\"password\":\"Str0ng-Passw0rd!23\"}");
     defer resp.deinit(allocator);
     try std.testing.expectEqual(@as(u16, 201), resp.status_code);
     try std.testing.expect(std.mem.indexOf(u8, resp.body, "\"code\":0") != null);
@@ -377,7 +377,7 @@ test "register binds tenant and JWT aud carries it" {
     var sec = zigmodu.security.AppSecurity.init(allocator, std.testing.io, .{ .jwt_secret = "test-secret" });
     var svc = user.service.UserService.init(&store, &sec, std.testing.io, 3600, 86400);
 
-    var session = try svc.register(allocator, "Alice", "alice@example.com", "password123", false, 7);
+    var session = try svc.register(allocator, "Alice", "alice@example.com", "Str0ng-Passw0rd!23", false, 7);
     defer session.deinit(allocator);
     try std.testing.expectEqual(@as(i64, 7), session.row.tenant_id);
 

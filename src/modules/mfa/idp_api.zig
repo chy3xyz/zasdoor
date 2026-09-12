@@ -156,6 +156,7 @@ pub fn IdpApi(comptime Service: type, comptime UserService: type) type {
                     error.UserInfoFailed, error.MissingSubject => try ctx.sendErrorResponse(502, 502, "获取用户信息失败"),
                     error.NotFound => try ctx.sendErrorResponse(404, 404, "IdP 不存在"),
                     error.InvalidConfig => try ctx.sendErrorResponse(400, 400, "IdP 配置无效"),
+                    error.EmailNotVerified => try ctx.sendErrorResponse(409, 409, "该邮箱已存在本地账号,但提供方未验证该邮箱;请先登录后在个人资料中绑定"),
                     else => {
                         std.log.err("idp callback failed: {s}", .{@errorName(err)});
                         try ctx.sendErrorResponse(500, 500, "服务器内部错误");
