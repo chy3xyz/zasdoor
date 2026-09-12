@@ -64,6 +64,8 @@ const mfa_graph = zent.codegen.graph.buildGraph(&.{
     mfa_model.RecoveryCode,
     mfa_model.IdentityProvider,
     mfa_model.MfaPolicy,
+    mfa_model.IdentityLink,
+    mfa_model.FederatedState,
 });
 
 const web3_graph = zent.codegen.graph.buildGraph(&.{

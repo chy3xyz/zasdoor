@@ -5,12 +5,15 @@ const zent = @import("zent");
 const crud = zent.crud_helpers;
 const model = @import("model.zig");
 const schema = @import("../../schema.zig");
+const user_persist = @import("../user/persistence.zig");
 
 const graph = zent.codegen.graph.buildGraph(&.{
     model.TotpCredential,
     model.RecoveryCode,
     model.IdentityProvider,
     model.MfaPolicy,
+    model.IdentityLink,
+    model.FederatedState,
 });
 pub const infos = graph.types;
 pub const Client = schema.Client;
@@ -18,6 +21,14 @@ pub const TotpInfo = infos[0];
 pub const RecoveryInfo = infos[1];
 pub const IdpInfo = infos[2];
 pub const PolicyInfo = infos[3];
+pub const LinkInfo = infos[4];
+pub const StateInfo = infos[5];
+/// The user table belongs to another module but shares the one typed
+/// client; federated provisioning reads/writes it through the same store.
+const UserTableInfo = user_persist.infos[0];
+/// Marker stored in `User.password` for accounts with no local password.
+/// It is not a valid PBKDF2 string, so `verifyPassword` always fails.
+pub const FEDERATED_PASSWORD_MARKER = "!federated";
 
 pub const MfaStore = struct {
     allocator: std.mem.Allocator,
@@ -166,6 +177,173 @@ pub const MfaStore = struct {
         return out;
     }
 
+    /// Fetch a provider's stored JSON config (owned copy), if it exists.
+    pub fn getIdpConfig(self: *MfaStore, provider_id: i64) !?[]const u8 {
+        var e = (try crud.get(self.client.identity_provider, provider_id)) orelse return null;
+        defer zent.codegen.deinitEntity(infos, IdpInfo, &e, self.allocator);
+        return try self.allocator.dupe(u8, e.config);
+    }
+
+    // ---- Federated identity links ----
+
+    pub fn createIdentityLink(
+        self: *MfaStore,
+        tenant_id: i64,
+        provider_id: i64,
+        user_id: i64,
+        subject: []const u8,
+        email: []const u8,
+        now: i64,
+    ) !i64 {
+        var b = try self.client.identity_link.Create();
+        defer b.deinit();
+        _ = try b.setFieldValue("tenant_id", tenant_id);
+        _ = try b.setFieldValue("provider_id", provider_id);
+        _ = try b.setFieldValue("user_id", user_id);
+        _ = try b.setFieldValue("subject", subject);
+        _ = try b.setFieldValue("email", email);
+        _ = try b.setFieldValue("created_at", now);
+        _ = try b.setFieldValue("updated_at", now);
+        var row = try b.Save();
+        defer zent.codegen.deinitEntity(infos, LinkInfo, &row, self.allocator);
+        return row.id;
+    }
+
+    /// Look up the local user bound to (provider_id, subject).
+    pub fn findIdentityLink(self: *MfaStore, provider_id: i64, subject: []const u8) !?IdentityLinkRow {
+        const preds = self.client.identity_link.predicates;
+        var e = (try crud.first(self.client.identity_link, .{
+            preds.provider_idEQ(.{ .int = provider_id }),
+            preds.subjectEQ(.{ .string = subject }),
+        })) orelse return null;
+        defer zent.codegen.deinitEntity(infos, LinkInfo, &e, self.allocator);
+        const subject_dup = try self.allocator.dupe(u8, e.subject);
+        errdefer self.allocator.free(subject_dup);
+        const email_dup = try self.allocator.dupe(u8, e.email);
+        return .{
+            .id = e.id,
+            .provider_id = e.provider_id,
+            .user_id = e.user_id,
+            .subject = subject_dup,
+            .email = email_dup,
+        };
+    }
+
+    /// All federated identities bound to a local user.
+    pub fn listIdentityLinksByUser(self: *MfaStore, user_id: i64) ![]IdentityLinkRow {
+        const preds = self.client.identity_link.predicates;
+        const rows = try crud.all(self.client.identity_link, .{preds.user_idEQ(.{ .int = user_id })});
+        defer zent.crud_helpers.deinitRows(infos, LinkInfo, rows, self.allocator);
+        var out = try self.allocator.alloc(IdentityLinkRow, rows.items.len);
+        var i: usize = 0;
+        errdefer {
+            for (out[0..i]) |row| row.free(self.allocator);
+            self.allocator.free(out);
+        }
+        for (rows.items) |e| {
+            out[i] = .{
+                .id = e.id,
+                .provider_id = e.provider_id,
+                .user_id = e.user_id,
+                .subject = try self.allocator.dupe(u8, e.subject),
+                .email = try self.allocator.dupe(u8, e.email),
+            };
+            i += 1;
+        }
+        return out;
+    }
+
+    // ---- Federated login state (single-use anti-CSRF) ----
+
+    pub fn createFederatedState(
+        self: *MfaStore,
+        tenant_id: i64,
+        provider_id: i64,
+        state: []const u8,
+        redirect_to: []const u8,
+        expires_at: i64,
+        now: i64,
+    ) !i64 {
+        var b = try self.client.federated_state.Create();
+        defer b.deinit();
+        _ = try b.setFieldValue("tenant_id", tenant_id);
+        _ = try b.setFieldValue("provider_id", provider_id);
+        _ = try b.setFieldValue("state", state);
+        _ = try b.setFieldValue("redirect_to", redirect_to);
+        _ = try b.setFieldValue("expires_at", expires_at);
+        _ = try b.setFieldValue("used", false);
+        _ = try b.setFieldValue("created_at", now);
+        _ = try b.setFieldValue("updated_at", now);
+        var row = try b.Save();
+        defer zent.codegen.deinitEntity(infos, StateInfo, &row, self.allocator);
+        return row.id;
+    }
+
+    pub fn findFederatedState(self: *MfaStore, state: []const u8) !?FederatedStateRow {
+        const preds = self.client.federated_state.predicates;
+        var e = (try crud.first(self.client.federated_state, .{preds.stateEQ(.{ .string = state })})) orelse return null;
+        defer zent.codegen.deinitEntity(infos, StateInfo, &e, self.allocator);
+        const state_dup = try self.allocator.dupe(u8, e.state);
+        errdefer self.allocator.free(state_dup);
+        const redirect_dup = try self.allocator.dupe(u8, e.redirect_to);
+        return .{
+            .id = e.id,
+            .tenant_id = e.tenant_id,
+            .provider_id = e.provider_id,
+            .state = state_dup,
+            .redirect_to = redirect_dup,
+            .expires_at = e.expires_at,
+            .used = e.used,
+        };
+    }
+
+    pub fn markFederatedStateUsed(self: *MfaStore, id: i64, now: i64) !void {
+        const preds = self.client.federated_state.predicates;
+        var u = self.client.federated_state.Update();
+        defer u.deinit();
+        _ = try u.setFieldValue("used", true);
+        _ = try u.setFieldValue("updated_at", now);
+        _ = try u.Where(.{preds.idEQ(.{ .int = id })});
+        _ = try u.Save();
+    }
+
+    /// Housekeeping: drop states that expired before `now`.
+    pub fn deleteExpiredFederatedStates(self: *MfaStore, now: i64) !void {
+        const preds = self.client.federated_state.predicates;
+        var d = self.client.federated_state.Delete();
+        defer d.deinit();
+        _ = try d.Where(.{preds.expires_atLT(.{ .int = now })});
+        _ = try d.Exec();
+    }
+
+    // ---- Federated user provisioning (shared user table) ----
+
+    /// Lookup by the already-normalized email used at signup.
+    pub fn findUserIdByEmail(self: *MfaStore, email: []const u8) !?i64 {
+        const preds = self.client.user.predicates;
+        var e = (try crud.first(self.client.user, .{preds.emailEQ(.{ .string = email })})) orelse return null;
+        defer zent.codegen.deinitEntity(user_persist.infos, UserTableInfo, &e, self.allocator);
+        return e.id;
+    }
+
+    /// Create a locally password-less account for a federated identity.
+    pub fn createFederatedUser(self: *MfaStore, name: []const u8, email: []const u8, tenant_id: i64, now: i64) !i64 {
+        var b = try self.client.user.Create();
+        defer b.deinit();
+        _ = try b.setFieldValue("name", name);
+        _ = try b.setFieldValue("email", email);
+        _ = try b.setFieldValue("password", FEDERATED_PASSWORD_MARKER);
+        _ = try b.setFieldValue("verified", true);
+        _ = try b.setFieldValue("admin", false);
+        _ = try b.setFieldValue("tenant_id", tenant_id);
+        _ = try b.setFieldValue("token_version", 0);
+        _ = try b.setFieldValue("created_at", now);
+        _ = try b.setFieldValue("updated_at", now);
+        var row = try b.Save();
+        defer zent.codegen.deinitEntity(user_persist.infos, UserTableInfo, &row, self.allocator);
+        return row.id;
+    }
+
     // ---- MFA policy ----
 
     pub fn getPolicy(self: *MfaStore, tenant_id: i64) !MfaPolicyRow {
@@ -217,6 +395,34 @@ pub const IdentityProviderRow = struct {
     pub fn free(self: IdentityProviderRow, a: std.mem.Allocator) void {
         a.free(self.name);
         a.free(self.provider_type);
+    }
+};
+
+pub const IdentityLinkRow = struct {
+    id: i64,
+    provider_id: i64,
+    user_id: i64,
+    subject: []const u8,
+    email: []const u8,
+
+    pub fn free(self: IdentityLinkRow, a: std.mem.Allocator) void {
+        a.free(self.subject);
+        a.free(self.email);
+    }
+};
+
+pub const FederatedStateRow = struct {
+    id: i64,
+    tenant_id: i64,
+    provider_id: i64,
+    state: []const u8,
+    redirect_to: []const u8,
+    expires_at: i64,
+    used: bool,
+
+    pub fn free(self: FederatedStateRow, a: std.mem.Allocator) void {
+        a.free(self.state);
+        a.free(self.redirect_to);
     }
 };
 
