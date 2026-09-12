@@ -1,6 +1,6 @@
 .{
     .name = .zasdoor,
-    .version = "0.3.0",
+    .version = "0.4.0",
     .fingerprint = 0x30f9dca48906a2c,
     .minimum_zig_version = "0.17.0",
     .dependencies = .{

@@ -10,7 +10,7 @@ Organizations, projects, applications, roles, OAuth2/OIDC, MFA, SIWE — with a 
 [![zigmodu](https://img.shields.io/badge/zigmodu-v0.15.44-blue)](https://github.com/chy3xyz/zigmodu)
 [![zent](https://img.shields.io/badge/zent-ORM-6b46c1)](https://github.com/chy3xyz/zent)
 [![SolidJS](https://img.shields.io/badge/Frontend-SolidJS-2c4f7c?logo=solid&logoColor=white)](https://www.solidjs.com)
-[![Tests](https://img.shields.io/badge/tests-58%20backend%20%2B%205%20frontend-green)]()
+[![Tests](https://img.shields.io/badge/tests-79%20backend%20%2B%205%20frontend-green)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 </div>
@@ -24,7 +24,7 @@ Zasdoor is a self-hosted identity & access management platform. It gives you the
 | | |
 |---|---|
 | 🏛️ **Identity core** | Organizations / projects / applications hierarchy, per-project roles & assignments, sessions, and a generic `authz/check` authorization endpoint |
-| 🔐 **Standards-based auth** | OAuth2 / OIDC (authorization code + PKCE, client credentials, refresh tokens, discovery/JWKS/userinfo/introspection), JWT + PBKDF2, session revocation |
+| 🔐 **Standards-based auth** | OAuth2 / OIDC with **asymmetric (EdDSA) ID tokens**, a real public **JWKS**, authorization code + PKCE, client credentials, refresh tokens, **user consent**, introspection & revocation |
 | 🛡️ **Strong second factor** | TOTP (HmacSHA1), recovery codes, per-tenant MFA policy; Web3 / SIWE (EIP-4361) wallet sign-in with single-use nonces |
 | 🤖 **Machine identities** | AI agents with capability/scope allow-lists and a per-period **budget ledger** (`budget_remaining` claim) |
 | 📦 **One binary** | Zig backend compiles to a single static binary; the SolidJS SPA is a static bundle. No runtime, no interpreter, no containers required (but Docker is included) |
@@ -45,8 +45,10 @@ Zasdoor is a self-hosted identity & access management platform. It gives you the
 - Email verification with one-click links and in-app banners
 - Admin bootstrap CLI: `zasdoor-admin create-admin --email you@example.com`
 - **Per-client-IP rate limiting** (an attacker can't lock out everyone), anti-enumeration
-- **OAuth2 / OIDC** — `authorization_code` (+ PKCE `plain`/`S256`), `client_credentials`, `refresh_token`; `.well-known/openid-configuration`, JWKS, `userinfo`, token introspection & revocation
+- **OAuth2 / OIDC** — `authorization_code` (+ PKCE `plain`/`S256`), `client_credentials`, `refresh_token`; **EdDSA-signed ID tokens** verifiable against `.well-known/jwks.json`; `.well-known/openid-configuration`, `userinfo`, introspection & revocation; **user-consent gate** (scopes must be granted before a code is issued)
 - **MFA** — TOTP enrollment/verification (HmacSHA1, 6-digit), recovery codes, per-tenant MFA policy
+- **Social / federated login** — OIDC identity providers with single-use anti-CSRF `state`, server-side code exchange, identity links, and guarded account linking (only a provider-asserted **verified** email may link to an existing account)
+- **Password policy & lockout** — shared policy (length, common-password denylist, identity checks) on register/change/reset, plus per-account failed-login lockout
 - **Web3 / SIWE** — EIP-4361 sign-in, single-use nonce, wallet↔user binding, JWT issuance for bound wallets
 - **AI Agents** — machine identities: capability & scope allow-lists, per-period **budget ledger** (`budget_remaining` claim), token verify endpoint
 
@@ -77,7 +79,7 @@ Zasdoor is a self-hosted identity & access management platform. It gives you the
 ### 💎 Engineering quality
 - Schema-as-code migrations (auto at startup), SQLite ↔ PostgreSQL via one env var
 - Type-safe queries end-to-end (no SQL string building)
-- **58 backend tests** (stores, services, HTTP via Testkit, JWT/multi-tenancy, audit, IAM, OAuth PKCE, MFA TOTP, SIWE EIP-4361, agent budget, AI crypto/approval/quota, session revocation) + **5 frontend tests** (vitest)
+- **79 backend tests** (stores, services, HTTP via Testkit incl. IAM/OAuth/MFA/web3/agent routes, JWT/multi-tenancy, OIDC EdDSA+JWKS+consent, federated IdP state/provisioning, password policy & lockout, AI crypto/approval/quota, session revocation) + **5 frontend tests** (vitest)
 - `zig fmt` clean, zero TODOs, graceful shutdown, documented backup strategy
 
 ---
@@ -204,7 +206,7 @@ Envelope: `{ code, msg, data }`, `code === 0` = success.
 ## 🧪 Testing
 
 ```bash
-zig build test                     # 58 backend tests (in-memory SQLite + Testkit HTTP)
+zig build test                     # 79 backend tests (in-memory SQLite + Testkit HTTP)
 cd web && pnpm run typecheck && pnpm run test && pnpm run build   # vitest + build
 ```
 
@@ -215,7 +217,7 @@ cd web && pnpm run typecheck && pnpm run test && pnpm run build   # vitest + bui
 - **Graceful shutdown**: SIGTERM/SIGINT drains in-flight requests, then stops cleanly.
 - **Backups**: [`docs/backup.md`](docs/backup.md) — online SQLite `.backup`, `pg_dump`/restore, uploads snapshots, retention schedule.
 - **Dev guide**: [`docs/development-guide.md`](docs/development-guide.md) — how to add a business module (zent/zigmodu conventions, transactions, security, performance, testing pitfalls).
-- **Module docs**: [`docs/iam.md`](docs/iam.md) · [`docs/oauth.md`](docs/oauth.md) · [`docs/mfa.md`](docs/mfa.md) · [`docs/agent.md`](docs/agent.md) · [`docs/web3.md`](docs/web3.md) · [`docs/eventstore.md`](docs/eventstore.md) · [`docs/authz.md`](docs/authz.md)
+- **Module docs**: [`docs/iam.md`](docs/iam.md) · [`docs/oauth.md`](docs/oauth.md) · [`docs/mfa.md`](docs/mfa.md) · [`docs/auth.md`](docs/auth.md) · [`docs/agent.md`](docs/agent.md) · [`docs/web3.md`](docs/web3.md) · [`docs/eventstore.md`](docs/eventstore.md) · [`docs/authz.md`](docs/authz.md)
 - **Security checklist**: explicit `ZASDOOR_JWT_SECRET` (mandatory on PostgreSQL), `ZASDOOR_AI_KEY_SECRET` for AI, `/metrics` IP allow-list, audit retention.
 
 ---
@@ -225,7 +227,9 @@ cd web && pnpm run typecheck && pnpm run test && pnpm run build   # vitest + bui
 | Status | Item |
 | --- | --- |
 | ✅ Done | **IAM core** — organizations / projects / applications / roles / sessions + `authz/check` |
-| ✅ Done | **OAuth2 / OIDC** — authorization code + PKCE, client credentials, refresh tokens, discovery/JWKS/userinfo/introspection/revocation |
+| ✅ Done | **OAuth2 / OIDC** — authorization code + PKCE, client credentials, refresh tokens, EdDSA signing + real JWKS, consent gate, userinfo/introspection/revocation |
+| ✅ Done | **Social login** — OIDC IdP federation with single-use state, code exchange, identity links, verified-email-only account linking |
+| ✅ Done | **Auth hardening** — password policy (length + denylist + identity checks) and per-account login lockout |
 | ✅ Done | **MFA** — TOTP enrollment & verification, recovery codes, per-tenant policy |
 | ✅ Done | **Web3 / SIWE** — EIP-4361 message parsing, nonce reservation, wallet binding, JWT login |
 | ✅ Done | **AI Agents** — machine identities with capability/scopes + per-period budget ledger |

@@ -5,15 +5,57 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.0] - 2026-09-13
+
+### Added
+
+- **OIDC asymmetric signing + real JWKS**: ID/access tokens are now signed with
+  **EdDSA (Ed25519)**; `/.well-known/jwks.json` serves the matching **public** JWK
+  and discovery advertises the algorithm it actually uses. The signing key is
+  derived deterministically from `ZASDOOR_JWT_SECRET` via HKDF-SHA256, so keys are
+  stable across restarts with no new configuration. ES256 (P-256) primitives are
+  in place for a follow-up.
+- **OAuth user consent**: scopes must be granted before an authorization code is
+  issued; an un-consented request returns `consent_required` with the requested
+  scopes, and `consent_granted=true` records the grant.
+- **Federated (social) login**: OIDC identity providers with a single-use,
+  TTL-bounded anti-CSRF `state`, server-side authorization-code exchange,
+  userinfo/id_token parsing, persisted identity links and just-in-time user
+  provisioning (`POST /mfa/idps/{id}/start`, `GET /mfa/idps/{id}/callback`).
+- **Password policy & account lockout**: a shared policy (min/max length, common-
+  password denylist, identity checks) enforced on register/change/reset, plus
+  per-account failed-login lockout that is checked before the DB lookup.
+- **HTTP integration tests** for the IAM / OAuth / MFA / web3 / agent routes
+  through Zigmodu's Testkit (no socket), plus identity-provider and OAuth unit
+  tests. Backend suite grew from 58 to **79 tests**.
+- `SECURITY.md`, a documentation index, an identity-provider management page, and
+  a tag-triggered release workflow.
+
+### Security
+
+- Federated login no longer auto-links an existing local account when the provider
+  does not assert `email_verified` — that was an account-takeover vector; such a
+  callback now returns `409` and requires an explicit link while signed in.
+- Federated users' `verified` flag now mirrors the provider's `email_verified`
+  claim instead of being hardcoded true.
+- Email lookup during federated provisioning is tenant-scoped, so a login can
+  never link across tenant boundaries.
+- Password denylist extended with `password123` and other common passwords.
+
+### Fixed
+
+- `/api/v1/health/ready` freed its readiness probe through the per-request
+  connection arena while the rows were allocated by the store allocator; it now
+  frees with the allocator that produced them.
 
 ### Changed
 
-- **Adapt to zigmodu v0.15.37 + zent v0.37.0** (path deps via
+- **Adapt to zigmodu v0.15.44 + zent v0.45.0** (path deps via
   `zig_ws/zigmodu` and `zig_ws/zent`). The sibling checkouts were bumped
   past the previous baseline (zigmodu v0.15.22 / zent v0.29.7) and the
   project rebuilt from a cleared `.zig-cache` + `.zig-global-cache`.
-  `zig build` succeeds, all 58 unit tests pass (`zig build test`),
+  `zig build` succeeds, all 79 unit tests pass (`zig build test`),
+  (CI/Docker clone these exact pinned commits — see below),
   and the binary starts cleanly (DB migration, 17 modules, route
   registration, HTTP accept loop).
 

@@ -10,7 +10,7 @@
 [![zigmodu](https://img.shields.io/badge/zigmodu-v0.15.37-blue)](https://github.com/chy3xyz/zigmodu)
 [![zent](https://img.shields.io/badge/zent-ORM-6b46c1)](https://github.com/chy3xyz/zent)
 [![SolidJS](https://img.shields.io/badge/前端-SolidJS-2c4f7c?logo=solid&logoColor=white)](https://www.solidjs.com)
-[![Tests](https://img.shields.io/badge/测试-58%20后端%20%2B%205%20前端-green)]()
+[![Tests](https://img.shields.io/badge/测试-79%20后端%20%2B%205%20前端-green)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 [**English**](README.md) · **简体中文**
@@ -24,7 +24,7 @@
 | | |
 |---|---|
 | 🏛️ **身份内核** | 组织 / 项目 / 应用资源层级、项目级角色与分配、会话管理、通用 `authz/check` 鉴权端点 |
-| 🔐 **标准认证** | OAuth2 / OIDC(授权码 + PKCE、客户端凭证、刷新令牌、discovery/JWKS/userinfo/introspection)、JWT + PBKDF2、会话吊销 |
+| 🔐 **标准认证** | OAuth2 / OIDC,ID Token 用**非对称(EdDSA)签名**、公开 **JWKS**;授权码 + PKCE、客户端凭证、刷新令牌、**用户同意(consent)**、introspection 与吊销 |
 | 🛡️ **强第二因子** | TOTP(HmacSHA1)、恢复码、租户级 MFA 策略;Web3 / SIWE(EIP-4361)钱包登录 + 一次性 nonce |
 | 🤖 **机器身份** | AI Agent:能力/scope 白名单 + 按周期**预算账本**(`budget_remaining` 声明) |
 | 📦 **单二进制** | Zig 后端编译为单个静态二进制;SolidJS 前端为静态包。无运行时、无解释器——但 Docker 也已备好 |
@@ -45,8 +45,10 @@
 - **组织 / 项目 / 应用** —— 资源层级;应用即 OAuth2 客户端,带 `client_id` + `client_secret`
 - **角色与授权** —— 项目级角色绑定用户,另有通用 `POST /iam/authz/check` 鉴权端点
 - **会话管理** —— 列出 / 吊销单个用户或全部会话
-- **OAuth2 / OIDC** —— `authorization_code`(+ PKCE `plain`/`S256`)、`client_credentials`、`refresh_token`;`.well-known/openid-configuration`、JWKS、`userinfo`、令牌 introspection 与吊销
+- **OAuth2 / OIDC** —— `authorization_code`(+ PKCE `plain`/`S256`)、`client_credentials`、`refresh_token`;**EdDSA 签名 ID Token**,可用 `.well-known/jwks.json` 验签;`.well-known/openid-configuration`、`userinfo`、introspection 与吊销;**用户同意门控**(未授权 scope 前不发放授权码)
 - **MFA** —— TOTP 注册/校验(HmacSHA1、6 位)、恢复码、租户级 MFA 策略
+- **社交 / 联合登录** —— OIDC 身份提供方:一次性防 CSRF `state`、服务端 code 兑换、身份绑定;仅当提供方声明邮箱**已验证**时才允许关联既有账号
+- **密码策略与锁定** —— 注册/改密/重置共用一套策略(长度、常见弱口令黑名单、身份信息检查)+ 按账号的登录失败锁定
 - **Web3 / SIWE** —— EIP-4361 签名登录、一次性 nonce、钱包↔用户绑定、绑定钱包签发 JWT
 - **AI Agent** —— 机器身份:能力与 scope 白名单、按周期**预算账本**(`budget_remaining` 声明)、令牌校验端点
 - **事件存储** —— 追加式领域事件持久化(审计与投影的基础)
@@ -78,7 +80,7 @@
 ### 💎 工程品质
 - Schema-as-code 迁移(启动自动);SQLite ↔ PostgreSQL 一个环境变量切换
 - 全链路类型安全查询(零 SQL 字符串拼接)
-- **58 个后端测试**(store/service、Testkit HTTP、JWT/多租户、审计、AI 加密/审批/配额、管理端门禁 401/403/200、会话吊销、IAM、OAuth PKCE、MFA TOTP、SIWE EIP-4361、Agent 预算)+ **5 个前端测试**(vitest)
+- **79 个后端测试**(store/service、Testkit HTTP、JWT/多租户、审计、AI 加密/审批/配额、管理端门禁 401/403/200、会话吊销、IAM、OAuth PKCE、MFA TOTP、SIWE EIP-4361、Agent 预算)+ **5 个前端测试**(vitest)
 - `zig fmt` 全绿、零 TODO、优雅关闭、备份策略文档化
 
 ---
@@ -201,7 +203,7 @@ cd web && pnpm install && pnpm run dev
 ## 🧪 测试
 
 ```bash
-zig build test                     # 58 个后端测试(内存 SQLite + Testkit HTTP)
+zig build test                     # 79 个后端测试(内存 SQLite + Testkit HTTP)
 cd web && pnpm run typecheck && pnpm run test && pnpm run build   # vitest + 构建
 ```
 
@@ -212,7 +214,7 @@ cd web && pnpm run typecheck && pnpm run test && pnpm run build   # vitest + 构
 - **优雅关闭**:SIGTERM/SIGINT 排空在途请求后干净退出。
 - **备份**:[`docs/backup.md`](docs/backup.md) —— SQLite 在线 `.backup`、`pg_dump`/恢复、uploads 快照、保留节奏。
 - **开发指南**:[`docs/development-guide.md`](docs/development-guide.md) —— 新增业务模块的完整步骤(zent/zigmodu 约定、事务、安全、性能、测试陷阱)。
-- **模块文档**:[`docs/iam.md`](docs/iam.md) · [`docs/oauth.md`](docs/oauth.md) · [`docs/mfa.md`](docs/mfa.md) · [`docs/agent.md`](docs/agent.md) · [`docs/web3.md`](docs/web3.md) · [`docs/eventstore.md`](docs/eventstore.md) · [`docs/authz.md`](docs/authz.md)
+- **模块文档**:[`docs/iam.md`](docs/iam.md) · [`docs/oauth.md`](docs/oauth.md) · [`docs/mfa.md`](docs/mfa.md) · [`docs/auth.md`](docs/auth.md) · [`docs/agent.md`](docs/agent.md) · [`docs/web3.md`](docs/web3.md) · [`docs/eventstore.md`](docs/eventstore.md) · [`docs/authz.md`](docs/authz.md)
 - **安全检查清单**:显式 `ZASDOOR_JWT_SECRET`(PostgreSQL 下强制)、AI 用 `ZASDOOR_AI_KEY_SECRET`、`/metrics` IP 白名单、审计保留。
 
 ---

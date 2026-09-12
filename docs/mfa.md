@@ -1,7 +1,7 @@
 # MFA 模块(多因素认证)
 
-> TOTP + 恢复码 + 租户级 MFA 策略。
-> 对应代码:`src/modules/mfa/`(model → persistence → service → api)。
+> TOTP + 恢复码 + 租户级 MFA 策略 + 联合登录(IdP)。
+> 对应代码:`src/modules/mfa/`(model → persistence → service → api;社交登录见 `idp.zig` / `idp_api.zig`)。
 
 ## 1. 能力
 
@@ -33,3 +33,30 @@
 - secret 只在 enroll 响应中出现一次;后续仅存 TOTP 共享密钥的校验配置,不落明文。
 - 恢复码以单向哈希存储,列表展示脱敏,使用一次即失效。
 - 验证带时间窗口容差(±1 步),防时钟漂移;连续失败可叠加限速(复用登录限流设施)。
+## 5. 联合登录 / 社交登录(IdP)
+
+后端同时提供 OAuth2/OIDC 身份提供方(IdP)联合登录,见 `idp.zig` / `idp_api.zig`。
+
+| Method | Path | 访问 | 说明 |
+| --- | --- | --- | --- |
+| GET/POST | `/api/v1/mfa/idps` | 管理员 | 列出 / 新建提供方(name、type、config JSON) |
+| POST | `/api/v1/mfa/idps/{id}/link` | 管理员 | 用 config + state 生成授权链接(不落库) |
+| POST | `/api/v1/mfa/idps/{id}/start` | 公开 | 生成一次性 `state`(TTL 600s)并返回 `{ authorize_url, state }` |
+| GET | `/api/v1/mfa/idps/{id}/callback?code=&state=` | 公开 | 消费 state → 兑换 code → 取 userinfo/id_token → 绑定或创建本地用户 → 返回 JWT |
+
+流程:
+
+1. 前端调 `start` 拿到 `authorize_url` + `state`,跳转到提供方。
+2. 提供方回调 `callback?code=&state=`;服务端先校验 state(**未知 / 过期 / 重放**都拒绝并消费),再在服务端用 `client_id`/`client_secret` 兑换令牌(form 编码 POST)。
+3. 用 access token 拉 `userinfo`(无该端点时解析 `id_token`)取出 `sub`、`email`、`name`、`email_verified`。
+4. 按 `(provider, sub)` 复用已有绑定;否则决定是否创建本地账号。
+
+### 账号关联安全规则(重要)
+
+- 已有绑定 → 直接复用。
+- 存在同邮箱本地账号:仅当提供方声明 `email_verified = true` 时**才允许自动关联**;否则返回 `409`,要求用户先登录后在个人资料中显式绑定 —— 防止任意提供方用他人(未验证)邮箱接管账号。
+- 新建的联邦账号 `verified` 直接取提供方的 `email_verified`,不再无条件置真。
+- 邮箱查找**按租户隔离**,杜绝跨租户关联。
+- 联邦账号使用不可登录的密码占位标记,只能走 IdP 登录。
+
+回调成功以 JSON 信封返回 `{ code, msg, data: { token, user } }`(而非重定向),前端读取并保存 token。
