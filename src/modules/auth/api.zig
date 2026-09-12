@@ -76,6 +76,18 @@ fn toDto(row: user_service.UserRow) UserDto {
     };
 }
 
+/// Map a shared password-policy violation to a user-facing 400 message.
+/// Returns null for non-policy errors.
+fn passwordPolicyMessage(err: anyerror) ?[]const u8 {
+    return switch (err) {
+        error.PasswordTooShort => "密码长度至少 10 位",
+        error.PasswordTooLong => "密码长度不能超过 128 位",
+        error.PasswordTooCommon => "该密码过于常见，请更换更复杂的密码",
+        error.PasswordContainsIdentity => "密码不能包含你的姓名或邮箱",
+        else => null,
+    };
+}
+
 pub fn AuthApi(comptime Service: type) type {
     return struct {
         const Self = @This();
@@ -155,8 +167,12 @@ pub fn AuthApi(comptime Service: type) type {
                     try ctx.sendErrorResponse(400, 400, "邮箱格式不正确");
                     return;
                 },
+                error.PasswordTooShort, error.PasswordTooLong, error.PasswordTooCommon, error.PasswordContainsIdentity => {
+                    try ctx.sendErrorResponse(400, 400, passwordPolicyMessage(err) orelse "密码不符合安全策略");
+                    return;
+                },
                 error.InvalidPassword => {
-                    try ctx.sendErrorResponse(400, 400, "密码至少 8 位");
+                    try ctx.sendErrorResponse(400, 400, "密码不符合安全策略");
                     return;
                 },
                 error.EmailTaken => {
@@ -200,6 +216,15 @@ pub fn AuthApi(comptime Service: type) type {
                     const det2 = try std.fmt.bufPrint(&d2, "登录失败: {s}", .{req.email});
                     self.audit.log(0, "", "auth.login.fail", "user", 0, det2, zigmodu.http.RequestUtil.getRealIp(ctx), false, 0);
                     try ctx.sendErrorResponse(401, 401, "邮箱或密码错误");
+                    return;
+                },
+                error.AccountLocked => {
+                    // Same status/message for known and unknown emails so the
+                    // lockout never reveals whether an account exists.
+                    var d5: [160]u8 = undefined;
+                    const det5 = try std.fmt.bufPrint(&d5, "登录锁定: {s}", .{req.email});
+                    self.audit.log(0, "", "auth.login.locked", "user", 0, det5, zigmodu.http.RequestUtil.getRealIp(ctx), false, 0);
+                    try ctx.sendErrorResponse(429, 429, "尝试次数过多，请稍后再试");
                     return;
                 },
             };
@@ -286,8 +311,12 @@ pub fn AuthApi(comptime Service: type) type {
             defer ctx.allocator.free(req.new_password);
 
             self.svc.resetPassword(req.user_id, req.token, req.new_password) catch |err| switch (err) {
+                error.PasswordTooShort, error.PasswordTooLong, error.PasswordTooCommon, error.PasswordContainsIdentity => {
+                    try ctx.sendErrorResponse(400, 400, passwordPolicyMessage(err) orelse "密码不符合安全策略");
+                    return;
+                },
                 error.InvalidPassword => {
-                    try ctx.sendErrorResponse(400, 400, "密码至少 8 位");
+                    try ctx.sendErrorResponse(400, 400, "密码不符合安全策略");
                     return;
                 },
                 error.InvalidToken => {
@@ -418,8 +447,12 @@ pub fn AuthApi(comptime Service: type) type {
                     try ctx.sendErrorResponse(400, 400, "当前密码不正确");
                     return;
                 },
+                error.PasswordTooShort, error.PasswordTooLong, error.PasswordTooCommon, error.PasswordContainsIdentity => {
+                    try ctx.sendErrorResponse(400, 400, passwordPolicyMessage(err) orelse "密码不符合安全策略");
+                    return;
+                },
                 error.InvalidPassword => {
-                    try ctx.sendErrorResponse(400, 400, "新密码至少 8 位");
+                    try ctx.sendErrorResponse(400, 400, "密码不符合安全策略");
                     return;
                 },
                 error.TokenInvalidationFailed => {

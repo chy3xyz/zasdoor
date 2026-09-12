@@ -337,7 +337,11 @@ pub fn UserApi(comptime Service: type) type {
             switch (err) {
                 error.InvalidName => try ctx.sendErrorResponse(400, 400, "姓名不能为空"),
                 error.InvalidEmail => try ctx.sendErrorResponse(400, 400, "邮箱格式不正确"),
-                error.InvalidPassword => try ctx.sendErrorResponse(400, 400, "密码至少 8 位"),
+                error.PasswordTooShort => try ctx.sendErrorResponse(400, 400, "密码长度至少 10 位"),
+                error.PasswordTooLong => try ctx.sendErrorResponse(400, 400, "密码长度不能超过 128 位"),
+                error.PasswordTooCommon => try ctx.sendErrorResponse(400, 400, "该密码过于常见，请更换更复杂的密码"),
+                error.PasswordContainsIdentity => try ctx.sendErrorResponse(400, 400, "密码不能包含姓名或邮箱"),
+                error.InvalidPassword => try ctx.sendErrorResponse(400, 400, "密码不符合安全策略"),
                 error.EmailTaken => try ctx.sendErrorResponse(409, 409, "该邮箱已被注册"),
                 else => {
                     std.log.err("internal error: {s}", .{@errorName(err)});

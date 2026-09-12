@@ -10,17 +10,32 @@ pub const UserRow = persist.UserRow;
 pub const CreateError = error{
     InvalidName,
     InvalidEmail,
+    /// Retained for backward compatibility; new code returns the specific
+    /// policy errors below.
     InvalidPassword,
+    PasswordTooShort,
+    PasswordTooLong,
+    PasswordTooCommon,
+    PasswordContainsIdentity,
     EmailTaken,
     Unexpected,
 };
 
-pub const LoginError = error{InvalidCredentials};
+pub const LoginError = error{
+    InvalidCredentials,
+    /// Too many consecutive failures: the account (or the attempted email)
+    /// is temporarily locked out.
+    AccountLocked,
+};
 
 pub const ResetTokenError = error{
     InvalidToken,
     TokenExpired,
     InvalidPassword,
+    PasswordTooShort,
+    PasswordTooLong,
+    PasswordTooCommon,
+    PasswordContainsIdentity,
 };
 
 pub const VerificationError = error{
@@ -31,7 +46,22 @@ pub const VerificationError = error{
 pub const ChangePasswordError = error{
     InvalidCredentials,
     InvalidPassword,
+    PasswordTooShort,
+    PasswordTooLong,
+    PasswordTooCommon,
+    PasswordContainsIdentity,
     TokenInvalidationFailed,
+};
+
+/// Outcome of writing a password: policy violations plus storage failures.
+pub const SetPasswordError = error{
+    InvalidPassword,
+    PasswordTooShort,
+    PasswordTooLong,
+    PasswordTooCommon,
+    PasswordContainsIdentity,
+    UserNotFound,
+    Unexpected,
 };
 
 /// Raw reset token plus the owning user id (for the reset link).
@@ -57,12 +87,203 @@ pub const Session = struct {
     }
 };
 
+// ── Password policy ──────────────────────────────────────────────
+
+/// Distinct reasons a chosen password fails the shared policy. All entry
+/// points (register / change-password / reset-password) map these to the same
+/// user-facing 400 messages so the rules never drift apart.
+pub const PasswordPolicyError = error{
+    PasswordTooShort,
+    PasswordTooLong,
+    PasswordTooCommon,
+    PasswordContainsIdentity,
+};
+
+/// Tunable password policy. Defaults are defined here (env-var wiring is a
+/// follow-up that would touch config.zig).
+///
+/// The single shared validate entry point is called from register and
+/// setPassword; the latter is the choke point for change-password,
+/// reset-password and the zasdoor-admin bootstrap path.
+pub const PasswordPolicy = struct {
+    /// Minimum length in bytes (default 10).
+    min_length: usize = 10,
+    /// Maximum length in bytes (default 128) to bound hashing cost.
+    max_length: usize = 128,
+    /// Identity fragments shorter than this are ignored so one-letter email
+    /// local-parts (e.g. "t@example.com") do not reject every password.
+    min_identity_length: usize = 3,
+
+    pub fn validate(self: PasswordPolicy, password: []const u8, email: []const u8, name: []const u8) PasswordPolicyError!void {
+        if (password.len < self.min_length) return error.PasswordTooShort;
+        if (password.len > self.max_length) return error.PasswordTooLong;
+        if (isCommonPassword(password)) return error.PasswordTooCommon;
+        if (self.containsIdentity(password, email, name)) return error.PasswordContainsIdentity;
+    }
+
+    fn containsIdentity(self: PasswordPolicy, password: []const u8, email: []const u8, name: []const u8) bool {
+        const at = std.mem.indexOfScalar(u8, email, '@') orelse email.len;
+        const local = email[0..at];
+        if (local.len >= self.min_identity_length and containsIgnoreCase(password, local)) return true;
+        const trimmed = std.mem.trim(u8, name, " \t");
+        if (trimmed.len >= self.min_identity_length and containsIgnoreCase(password, trimmed)) return true;
+        return false;
+    }
+};
+
+/// Case-insensitive substring test (std.ascii only provides eqlIgnoreCase).
+fn containsIgnoreCase(haystack: []const u8, needle: []const u8) bool {
+    if (needle.len == 0 or needle.len > haystack.len) return false;
+    var i: usize = 0;
+    while (i + needle.len <= haystack.len) : (i += 1) {
+        if (std.ascii.eqlIgnoreCase(haystack[i .. i + needle.len], needle)) return true;
+    }
+    return false;
+}
+
+/// Built-in denylist of very common passwords (exact, case-insensitive
+/// match). Intentionally small and compiled in; a credential-stuffing defense
+/// only needs to stop the top-of-the-list guesses before the length bound and
+/// lockout take over.
+const common_passwords = [_][]const u8{
+    "123456",      "password",     "12345678",   "qwerty",     "123456789",
+    "12345",       "1234",         "111111",     "1234567",    "dragon",
+    "123123",      "baseball",     "abc123",     "football",   "monkey",
+    "letmein",     "696969",       "shadow",     "master",     "666666",
+    "qwertyuiop",  "123321",       "mustang",    "1234567890", "michael",
+    "654321",      "superman",     "1qaz2wsx",   "7777777",    "121212",
+    "000000",      "qazwsx",       "123qwe",     "killer",     "trustno1",
+    "jordan",      "jennifer",     "zxcvbnm",    "asdfgh",     "hunter",
+    "buster",      "soccer",       "harley",     "batman",     "andrew",
+    "tigger",      "sunshine",     "iloveyou",   "welcome",    "admin",
+    "qwerty12345", "1qaz2wsx3edc", "q1w2e3r4t5", "letmein123", "iloveyou123",
+    "password12",  "123456789a",
+};
+
+fn isCommonPassword(password: []const u8) bool {
+    for (common_passwords) |weak| {
+        if (std.ascii.eqlIgnoreCase(password, weak)) return true;
+    }
+    return false;
+}
+
+// ── Account lockout ──────────────────────────────────────────────
+
+/// Tunables for the in-process login lockout: lock after max_failures
+/// attempts within window_seconds, for lockout_seconds.
+pub const LockoutConfig = struct {
+    max_failures: u32 = 5,
+    window_seconds: i64 = 15 * 60,
+    lockout_seconds: i64 = 15 * 60,
+};
+
+/// One account's failed-login state.
+const LockoutEntry = struct {
+    failures: u32,
+    window_start: i64,
+    locked_until: i64,
+};
+
+/// Per-process, in-memory failed-login tracker keyed by normalized email.
+///
+/// NOTE: this lockout is per-process (single-instance). A multi-instance
+/// deployment would need shared storage (Redis/DB) so counters and cooldowns
+/// stay consistent across nodes; that is deliberately out of scope here.
+pub const LoginLockout = struct {
+    config: LockoutConfig = .{},
+    mutex: std.Io.Mutex = std.Io.Mutex.init,
+    entries: std.StringHashMapUnmanaged(LockoutEntry) = .empty,
+    allocator: ?std.mem.Allocator = null,
+
+    /// True when the key is inside its cooldown at now. Expired entries are
+    /// dropped so the failure window restarts cleanly.
+    pub fn isLocked(self: *LoginLockout, io: std.Io, key: []const u8, now: i64) bool {
+        self.mutex.lockUncancelable(io);
+        defer self.mutex.unlock(io);
+        const entry = self.entries.getPtr(key) orelse return false;
+        if (entry.locked_until == 0) return false;
+        if (now >= entry.locked_until) {
+            self.removeEntryLocked(key);
+            return false;
+        }
+        return true;
+    }
+
+    /// Record one failed attempt, locking the key once it crosses the
+    /// threshold within the rolling window.
+    pub fn recordFailure(self: *LoginLockout, io: std.Io, key: []const u8, now: i64) void {
+        self.mutex.lockUncancelable(io);
+        defer self.mutex.unlock(io);
+        const allocator = self.allocator orelse return;
+
+        if (self.entries.getPtr(key)) |entry| {
+            if (entry.locked_until > now) return; // already locked
+            if (now - entry.window_start > self.config.window_seconds) {
+                entry.failures = 1;
+                entry.window_start = now;
+                entry.locked_until = 0;
+                return;
+            }
+            entry.failures += 1;
+            if (entry.failures >= self.config.max_failures) {
+                entry.locked_until = now + self.config.lockout_seconds;
+            }
+            return;
+        }
+
+        const key_copy = allocator.dupe(u8, key) catch return;
+        self.entries.put(allocator, key_copy, .{
+            .failures = 1,
+            .window_start = now,
+            .locked_until = if (self.config.max_failures <= 1) now + self.config.lockout_seconds else 0,
+        }) catch {
+            allocator.free(key_copy);
+        };
+    }
+
+    /// Clear failure state after a successful login.
+    pub fn clear(self: *LoginLockout, io: std.Io, key: []const u8) void {
+        self.mutex.lockUncancelable(io);
+        defer self.mutex.unlock(io);
+        self.removeEntryLocked(key);
+    }
+
+    /// Caller must hold the mutex.
+    fn removeEntryLocked(self: *LoginLockout, key: []const u8) void {
+        const allocator = self.allocator orelse return;
+        if (self.entries.fetchRemove(key)) |kv| allocator.free(kv.key);
+    }
+
+    /// Free every tracked key (tests / process teardown).
+    pub fn reset(self: *LoginLockout, io: std.Io) void {
+        self.mutex.lockUncancelable(io);
+        defer self.mutex.unlock(io);
+        const allocator = self.allocator orelse return;
+        var it = self.entries.iterator();
+        while (it.next()) |kv| allocator.free(kv.key_ptr.*);
+        self.entries.deinit(allocator);
+        self.entries = .empty;
+    }
+};
+
+/// Process-wide lockout store. The page allocator is used so the map lives as
+/// long as the process (it is intentionally never torn down in production);
+/// tests reset it explicitly with resetLoginLockout.
+pub var login_lockout: LoginLockout = .{ .allocator = std.heap.page_allocator };
+
+/// Clear the process-wide lockout store (used by tests).
+pub fn resetLoginLockout(io: std.Io) void {
+    login_lockout.reset(io);
+}
+
 pub const UserService = struct {
     store: *persist.UserStore,
     sec: *zigmodu.security.AppSecurity,
     io: std.Io,
     password_token_expiration_seconds: i64,
     verification_token_expiration_seconds: i64,
+    /// Password policy enforced on register and every password write.
+    policy: PasswordPolicy = .{},
 
     pub fn init(
         store: *persist.UserStore,
@@ -89,8 +310,9 @@ pub const UserService = struct {
         return std.mem.indexOfScalar(u8, email, '@') != null;
     }
 
-    /// Register a new user. Password must be at least 8 chars. On success a
-    /// session JWT is issued (roles derived from `admin`).
+    /// Register a new user. The password must satisfy the shared
+    /// PasswordPolicy. On success a session JWT is issued (roles derived from
+    /// the admin flag).
     pub fn register(
         self: *UserService,
         allocator: std.mem.Allocator,
@@ -103,7 +325,7 @@ pub const UserService = struct {
         const trimmed_name = std.mem.trim(u8, name, " \t");
         if (trimmed_name.len == 0) return error.InvalidName;
         if (!validateEmail(email)) return error.InvalidEmail;
-        if (password.len < 8) return error.InvalidPassword;
+        try self.policy.validate(password, email, trimmed_name);
 
         const norm_email = normalizeEmail(allocator, email) catch return error.InvalidEmail;
         defer allocator.free(norm_email);
@@ -130,20 +352,48 @@ pub const UserService = struct {
         return self.issueSession(allocator, norm_email, admin, tenant_id) catch return error.Unexpected;
     }
 
-    /// Authenticate email+password. Returns null on wrong credentials.
+    /// Authenticate email+password. Returns null on wrong credentials and
+    /// error.AccountLocked while the per-process lockout is active.
     pub fn login(self: *UserService, allocator: std.mem.Allocator, email: []const u8, password: []const u8) LoginError!?Session {
+        return self.loginAt(allocator, email, password, zigmodu.time.wallClockSeconds(self.io));
+    }
+
+    /// login with an injected clock: keeps the lockout window/cooldown logic
+    /// deterministically testable without sleeping.
+    pub fn loginAt(self: *UserService, allocator: std.mem.Allocator, email: []const u8, password: []const u8, now: i64) LoginError!?Session {
         const norm_email = normalizeEmail(allocator, email) catch return error.InvalidCredentials;
         defer allocator.free(norm_email);
 
-        const row_opt = self.store.getUserByEmail(norm_email) catch return error.InvalidCredentials;
-        const row = row_opt orelse return null;
+        // Check the lockout before touching the DB and regardless of whether
+        // the account exists, so unknown and known emails behave identically
+        // (the lockout must not become a user-enumeration oracle).
+        if (login_lockout.isLocked(self.io, norm_email, now)) return error.AccountLocked;
+
+        const row_opt = self.store.getUserByEmail(norm_email) catch {
+            login_lockout.recordFailure(self.io, norm_email, now);
+            return error.InvalidCredentials;
+        };
+        const row = row_opt orelse {
+            login_lockout.recordFailure(self.io, norm_email, now);
+            return null;
+        };
         defer row.free(self.store.allocator);
 
-        const hash_opt = self.store.getPasswordHashById(row.id) catch return error.InvalidCredentials;
-        const hash = hash_opt orelse return null;
+        const hash_opt = self.store.getPasswordHashById(row.id) catch {
+            login_lockout.recordFailure(self.io, norm_email, now);
+            return error.InvalidCredentials;
+        };
+        const hash = hash_opt orelse {
+            login_lockout.recordFailure(self.io, norm_email, now);
+            return null;
+        };
         defer allocator.free(hash);
 
-        if (!self.sec.module.verifyPassword(password, hash)) return null;
+        if (!self.sec.module.verifyPassword(password, hash)) {
+            login_lockout.recordFailure(self.io, norm_email, now);
+            return null;
+        }
+        login_lockout.clear(self.io, norm_email);
         return self.issueSession(allocator, row.email, row.admin, row.tenant_id) catch return error.InvalidCredentials;
     }
 
@@ -210,12 +460,18 @@ pub const UserService = struct {
         try self.store.setAdmin(id, admin, now);
     }
 
-    pub fn setPassword(self: *UserService, id: i64, password: []const u8) !void {
-        if (password.len < 8) return error.InvalidPassword;
-        const hash = try self.sec.module.hashPassword(password);
+    /// Single write path for passwords (change, reset and the admin CLI
+    /// bootstrap). Enforces the shared PasswordPolicy against the stored
+    /// name/email before hashing.
+    pub fn setPassword(self: *UserService, id: i64, password: []const u8) SetPasswordError!void {
+        const row_opt = self.store.getUserById(id) catch return error.Unexpected;
+        const row = row_opt orelse return error.UserNotFound;
+        defer row.free(self.store.allocator);
+        try self.policy.validate(password, row.email, row.name);
+        const hash = self.sec.module.hashPassword(password) catch return error.Unexpected;
         defer self.sec.module.allocator.free(hash);
         const now = zigmodu.time.wallClockSeconds(self.io);
-        try self.store.setPasswordHash(id, hash, now);
+        self.store.setPasswordHash(id, hash, now) catch return error.Unexpected;
     }
 
     pub fn deleteUser(self: *UserService, id: i64) !void {
@@ -261,11 +517,19 @@ pub const UserService = struct {
         if (!self.sec.module.verifyPassword(raw_token, tok.token)) return error.InvalidToken;
     }
 
-    /// Reset a user's password after a valid token; clears all their tokens.
+    /// Reset a password after a valid token; clears all their tokens.
     pub fn resetPassword(self: *UserService, user_id: i64, raw_token: []const u8, new_password: []const u8) ResetTokenError!void {
-        if (new_password.len < 8) return error.InvalidPassword;
+        // Token is validated first so an invalid link never leaks policy
+        // details; the shared policy still runs through setPassword.
         try self.validatePasswordResetToken(user_id, raw_token);
-        self.setPassword(user_id, new_password) catch return error.InvalidPassword;
+        self.setPassword(user_id, new_password) catch |err| switch (err) {
+            error.InvalidPassword => return error.InvalidPassword,
+            error.PasswordTooShort => return error.PasswordTooShort,
+            error.PasswordTooLong => return error.PasswordTooLong,
+            error.PasswordTooCommon => return error.PasswordTooCommon,
+            error.PasswordContainsIdentity => return error.PasswordContainsIdentity,
+            error.UserNotFound, error.Unexpected => return error.InvalidToken,
+        };
         self.store.deleteTokensForUser(user_id) catch return error.InvalidToken;
     }
 
@@ -307,15 +571,22 @@ pub const UserService = struct {
         self.store.deleteEmailVerificationsForUser(user_id) catch {};
     }
 
-    /// Self-service password change: verify the current password, then set
-    /// the new one.
+    /// Self-service password change: verify the current password, then apply
+    /// the shared PasswordPolicy to the new one.
     pub fn changePassword(self: *UserService, id: i64, old_password: []const u8, new_password: []const u8) ChangePasswordError!void {
         if (new_password.len < 8) return error.InvalidPassword;
         const hash_opt = self.store.getPasswordHashById(id) catch return error.InvalidCredentials;
         const hash = hash_opt orelse return error.InvalidCredentials;
         defer self.sec.module.allocator.free(hash);
         if (!self.sec.module.verifyPassword(old_password, hash)) return error.InvalidCredentials;
-        self.setPassword(id, new_password) catch return error.InvalidPassword;
+        self.setPassword(id, new_password) catch |err| switch (err) {
+            error.InvalidPassword => return error.InvalidPassword,
+            error.PasswordTooShort => return error.PasswordTooShort,
+            error.PasswordTooLong => return error.PasswordTooLong,
+            error.PasswordTooCommon => return error.PasswordTooCommon,
+            error.PasswordContainsIdentity => return error.PasswordContainsIdentity,
+            error.UserNotFound, error.Unexpected => return error.InvalidPassword,
+        };
         const now_s = zigmodu.time.wallClockSeconds(self.io);
         // 改密后必须 bump 凭证版本使旧 JWT 失效;失败不能静默吞掉。
         self.store.bumpTokenVersion(id, now_s) catch return error.TokenInvalidationFailed;
