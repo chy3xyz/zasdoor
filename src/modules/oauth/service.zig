@@ -5,6 +5,7 @@
 const std = @import("std");
 const zigmodu = @import("zigmodu");
 const jwt = @import("jwt.zig");
+const keys = @import("keys.zig");
 const iam = @import("../iam/service.zig");
 const user_svc = @import("../user/service.zig");
 
@@ -25,6 +26,7 @@ pub const OAuthService = struct {
     users: *user_svc.UserService,
     sec: *zigmodu.security.AppSecurity,
     issuer: []const u8,
+    signer: keys.Signer,
     code_ttl_seconds: i64,
     refresh_ttl_days: i64,
 
@@ -43,6 +45,7 @@ pub const OAuthService = struct {
             .users = users,
             .sec = sec,
             .issuer = issuer,
+            .signer = keys.derive(sec.module.jwt_secret),
             .code_ttl_seconds = 600,
             .refresh_ttl_days = 30,
         };
@@ -83,7 +86,7 @@ pub const OAuthService = struct {
             try buf.appendSlice(self.allocator, if (user.verified) "true" else "false");
         }
         try buf.appendSlice(self.allocator, "}");
-        return jwt.sign(self.allocator, self.sec.module.jwt_secret, buf.items);
+        return self.signer.sign(self.allocator, buf.items);
     }
 
     /// Produce an OAuth access token (JWT) carrying sub/aud/scope.
@@ -111,7 +114,7 @@ pub const OAuthService = struct {
         try buf.appendSlice(self.allocator, ",\"iat\":");
         try appendNum(&buf, self.allocator, self.now());
         try buf.appendSlice(self.allocator, "}");
-        return jwt.sign(self.allocator, self.sec.module.jwt_secret, buf.items);
+        return self.signer.sign(self.allocator, buf.items);
     }
 
     pub const AuthorizeResult = struct {
@@ -120,7 +123,22 @@ pub const OAuthService = struct {
         state: ?[]const u8,
     };
 
+    /// Scopes that still require an explicit user grant before a code is issued.
+    pub const ConsentRequired = struct {
+        scopes: []const u8,
+    };
+
+    /// Result of a consent-aware authorize request.
+    pub const AuthorizeOutcome = union(enum) {
+        issued: AuthorizeResult,
+        consent_required: ConsentRequired,
+    };
+
     /// Validate an authorize request and mint an authorization code.
+    ///
+    /// Legacy entry point: callers are assumed to have obtained user approval
+    /// out-of-band, so the stored-consent gate is not applied. New
+    /// integrations should call `authorizeWithConsent`.
     pub fn authorize(
         self: *OAuthService,
         client_id: []const u8,
@@ -133,11 +151,87 @@ pub const OAuthService = struct {
         code_challenge_method: ?[]const u8,
         user_id: i64,
     ) OAuthError!AuthorizeResult {
+        var app = try self.loadAuthorizeApp(client_id, redirect_uri, response_type, code_challenge);
+        defer app.free(self.iam_svc.allocator);
+        return self.issueCodeForApp(app, user_id, redirect_uri, scope, state, nonce, code_challenge, code_challenge_method);
+    }
+
+    /// Consent-aware authorize entry point.
+    ///
+    /// * If the stored consent for (application, user) already covers every
+    ///   requested scope, a code is issued as usual.
+    /// * Otherwise, unless `consent_granted` is true, the caller receives
+    ///   `.consent_required` carrying the requested scope string and no code
+    ///   is minted (no silent issuance).
+    /// * When `consent_granted` is true the consent is upserted first, then
+    ///   the code is issued.
+    pub fn authorizeWithConsent(
+        self: *OAuthService,
+        client_id: []const u8,
+        redirect_uri: []const u8,
+        response_type: []const u8,
+        scope: []const u8,
+        state: ?[]const u8,
+        nonce: ?[]const u8,
+        code_challenge: ?[]const u8,
+        code_challenge_method: ?[]const u8,
+        user_id: i64,
+        consent_granted: bool,
+    ) OAuthError!AuthorizeOutcome {
+        var app = try self.loadAuthorizeApp(client_id, redirect_uri, response_type, code_challenge);
+        defer app.free(self.iam_svc.allocator);
+
+        if (self.isConsentCovered(app.id, user_id, scope)) {
+            const res = try self.issueCodeForApp(app, user_id, redirect_uri, scope, state, nonce, code_challenge, code_challenge_method);
+            return .{ .issued = res };
+        }
+        if (!consent_granted) {
+            const scopes = self.allocator.dupe(u8, scope) catch return error.ServerError;
+            return .{ .consent_required = .{ .scopes = scopes } };
+        }
+        _ = self.iam_svc.store.upsertConsent(app.tenant_id, app.id, user_id, scope, self.now()) catch return error.ServerError;
+        const res = try self.issueCodeForApp(app, user_id, redirect_uri, scope, state, nonce, code_challenge, code_challenge_method);
+        return .{ .issued = res };
+    }
+
+    /// Record a consent grant for (tenant, application, user) covering scope.
+    pub fn grantConsent(
+        self: *OAuthService,
+        tenant_id: i64,
+        application_id: i64,
+        user_id: i64,
+        scope: []const u8,
+    ) OAuthError!void {
+        _ = self.iam_svc.store.upsertConsent(tenant_id, application_id, user_id, scope, self.now()) catch return error.ServerError;
+    }
+
+    /// Record a consent grant addressed by OAuth client_id.
+    pub fn grantConsentForClient(
+        self: *OAuthService,
+        client_id: []const u8,
+        user_id: i64,
+        scope: []const u8,
+    ) OAuthError!void {
+        const app_opt = self.iam_svc.getApplicationByClientId(client_id) catch return error.InvalidClient;
+        const app = app_opt orelse return error.InvalidClient;
+        defer app.free(self.iam_svc.allocator);
+        return self.grantConsent(app.tenant_id, app.id, user_id, scope);
+    }
+
+    /// Common client / redirect / PKCE validation. The returned application row
+    /// is owned by the caller and must be freed with the IAM allocator.
+    fn loadAuthorizeApp(
+        self: *OAuthService,
+        client_id: []const u8,
+        redirect_uri: []const u8,
+        response_type: []const u8,
+        code_challenge: ?[]const u8,
+    ) OAuthError!iam.ApplicationRow {
         if (!std.mem.eql(u8, response_type, "code")) return error.InvalidRequest;
 
         const app_opt = self.iam_svc.getApplicationByClientId(client_id) catch return error.InvalidClient;
         const app = app_opt orelse return error.InvalidClient;
-        defer app.free(self.iam_svc.allocator);
+        errdefer app.free(self.iam_svc.allocator);
         if (!app.active) return error.UnauthorizedClient;
 
         if (!redirectUriAllowed(app.redirect_uris, redirect_uri)) return error.InvalidRequest;
@@ -145,7 +239,20 @@ pub const OAuthService = struct {
         if (app.pkce_required and (code_challenge == null or code_challenge.?.len == 0)) {
             return error.InvalidRequest;
         }
+        return app;
+    }
 
+    fn issueCodeForApp(
+        self: *OAuthService,
+        app: iam.ApplicationRow,
+        user_id: i64,
+        redirect_uri: []const u8,
+        scope: []const u8,
+        state: ?[]const u8,
+        nonce: ?[]const u8,
+        code_challenge: ?[]const u8,
+        code_challenge_method: ?[]const u8,
+    ) OAuthError!AuthorizeResult {
         const raw_code = jwt.randomToken(self.allocator, self.io, 32) catch return error.ServerError;
         defer self.allocator.free(raw_code);
         const code_hash = hashToken(self.allocator, raw_code) catch return error.ServerError;
@@ -166,9 +273,32 @@ pub const OAuthService = struct {
         ) catch return error.ServerError;
 
         const code = self.allocator.dupe(u8, raw_code) catch return error.ServerError;
+        errdefer self.allocator.free(code);
         const uri = self.allocator.dupe(u8, redirect_uri) catch return error.ServerError;
+        errdefer self.allocator.free(uri);
         const state_dup = if (state) |s| (self.allocator.dupe(u8, s) catch return error.ServerError) else null;
         return .{ .code = code, .redirect_uri = uri, .state = state_dup };
+    }
+
+    /// True when a stored consent row covers every requested scope.
+    fn isConsentCovered(self: *OAuthService, application_id: i64, user_id: i64, requested_scope: []const u8) bool {
+        const row_opt = self.iam_svc.store.getConsent(application_id, user_id) catch return false;
+        const row = row_opt orelse return false;
+        defer row.free(self.iam_svc.allocator);
+        return scopesCovered(row.scope, requested_scope);
+    }
+
+    /// Verify an OAuth-issued JWT. Asymmetric tokens are verified against the
+    /// derived public key; legacy HS256 tokens fall back to the shared secret.
+    pub fn verifyToken(self: *OAuthService, allocator: std.mem.Allocator, token_str: []const u8) ![]const u8 {
+        if (jwt.peekHeaderAlg(allocator, token_str)) |alg| {
+            switch (alg) {
+                .EdDSA => return self.signer.verify(allocator, token_str),
+                .ES256 => return error.InvalidToken,
+                .HS256 => {},
+            }
+        }
+        return jwt.verify(allocator, self.sec.module.jwt_secret, token_str);
     }
 
     pub const TokenIssue = struct {
@@ -337,7 +467,7 @@ pub const OAuthService = struct {
     };
 
     pub fn introspect(self: *OAuthService, token_str: []const u8) IntrospectionResult {
-        const payload = jwt.verify(self.allocator, self.sec.module.jwt_secret, token_str) catch {
+        const payload = self.verifyToken(self.allocator, token_str) catch {
             return .{ .active = false, .sub = null, .scope = null, .client_id = null, .exp = null };
         };
         defer self.allocator.free(payload);
@@ -402,6 +532,26 @@ fn jsonAppendStr(buf: *std.ArrayList(u8), a: std.mem.Allocator, key: []const u8,
 fn redirectUriAllowed(registered: []const u8, candidate: []const u8) bool {
     if (registered.len == 0) return false;
     return std.mem.indexOf(u8, registered, candidate) != null;
+}
+
+/// True when every space/tab separated scope in `requested` appears as a
+/// whole token in `granted`. Substring matches (e.g. "open" vs "openid")
+/// are deliberately rejected.
+pub fn scopesCovered(granted: []const u8, requested: []const u8) bool {
+    var it = std.mem.tokenizeAny(u8, requested, " \t");
+    while (it.next()) |token| {
+        if (token.len == 0) continue;
+        if (!scopeGranted(granted, token)) return false;
+    }
+    return true;
+}
+
+fn scopeGranted(granted: []const u8, scope: []const u8) bool {
+    var it = std.mem.tokenizeAny(u8, granted, " \t");
+    while (it.next()) |token| {
+        if (std.mem.eql(u8, token, scope)) return true;
+    }
+    return false;
 }
 
 fn verifyPkce(challenge: []const u8, method: []const u8, verifier: ?[]const u8) bool {
