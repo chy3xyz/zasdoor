@@ -1,0 +1,71 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build release artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Recreate the sibling dependency layout the build expects, pinned to the
+      # exact commits this project is built and tested against.
+      - name: Recreate sibling dependency layout
+        run: |
+          ZIGMODU_SHA=df7cccb
+          ZENT_SHA=v0.45.0
+          mkdir -p /tmp/rel/w4_proj/zig_ws /tmp/rel/w4_proj/dev_machine/_adm_frame_
+          git clone https://github.com/chy3xyz/zigmodu.git /tmp/rel/w4_proj/zig_ws/zigmodu
+          git -C /tmp/rel/w4_proj/zig_ws/zigmodu checkout --quiet "$ZIGMODU_SHA"
+          git clone https://github.com/chy3xyz/zent.git /tmp/rel/w4_proj/zig_ws/zent
+          git -C /tmp/rel/w4_proj/zig_ws/zent checkout --quiet "$ZENT_SHA"
+          cp -r "$GITHUB_WORKSPACE" /tmp/rel/w4_proj/dev_machine/_adm_frame_/zmadmin
+
+      - uses: mlugg/setup-zig@v1
+        with:
+          version: 0.17.0-dev.1567+f0354179a
+
+      - name: Build backend (ReleaseSafe)
+        working-directory: /tmp/rel/w4_proj/dev_machine/_adm_frame_/zmadmin
+        run: |
+          zig build -Doptimize=ReleaseSafe --summary all
+          zig build --summary all
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: Build frontend
+        working-directory: web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run typecheck
+          pnpm run build
+
+      - name: Package artifacts
+        run: |
+          set -euo pipefail
+          BIN=/tmp/rel/w4_proj/dev_machine/_adm_frame_/zmadmin/zig-out/bin
+          mkdir -p dist
+          cp "$BIN/zasdoor" "$BIN/zasdoor-admin" dist/
+          tar -czf dist/zasdoor-web-dist.tar.gz -C web/dist .
+          ls -l dist
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            dist/zasdoor
+            dist/zasdoor-admin
+            dist/zasdoor-web-dist.tar.gz
