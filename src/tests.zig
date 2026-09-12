@@ -1572,5 +1572,6 @@ test "web3: siweLogin binds wallet then issues JWT (full flow)" {
 test {
     _ = @import("modules/oauth/tests.zig");
     _ = @import("modules/mfa/tests.zig");
+    _ = @import("modules/auth/tests.zig");
     _ = @import("tests_integration.zig");
 }
