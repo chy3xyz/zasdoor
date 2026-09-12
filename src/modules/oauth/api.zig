@@ -122,21 +122,16 @@ pub fn OAuthApi(comptime Service: type, comptime UserService: type) type {
         // ── Discovery ─────────────────────────────────────────
 
         fn discovery(self: *Self, ctx: *http.Context) !void {
-            const iss = self.svc.issuer;
-            const json = try std.fmt.allocPrint(
-                ctx.allocator,
-                "{{\"issuer\":\"{s}\",\"authorization_endpoint\":\"{s}/oauth/authorize\",\"token_endpoint\":\"{s}/oauth/token\",\"introspection_endpoint\":\"{s}/oauth/introspect\",\"revocation_endpoint\":\"{s}/oauth/revoke\",\"userinfo_endpoint\":\"{s}/oauth/userinfo\",\"jwks_uri\":\"{s}/.well-known/jwks.json\",\"response_types_supported\":[\"code\"],\"grant_types_supported\":[\"authorization_code\",\"client_credentials\",\"refresh_token\"],\"subject_types_supported\":[\"public\"],\"id_token_signing_alg_values_supported\":[\"HS256\"],\"scopes_supported\":[\"openid\",\"profile\",\"email\",\"offline_access\"],\"token_endpoint_auth_methods_supported\":[\"client_secret_basic\",\"client_secret_post\"],\"code_challenge_methods_supported\":[\"plain\",\"S256\"]}}",
-                .{ iss, iss, iss, iss, iss, iss, iss },
-            );
+            const json = try discoveryJson(ctx.allocator, self.svc.issuer, self.svc.signer.alg.name());
             defer ctx.allocator.free(json);
             try ctx.json(200, json);
         }
 
         fn jwks(self: *Self, ctx: *http.Context) !void {
-            // HS256 is a symmetric algorithm; there is no public key to expose.
-            // We publish an empty key set (standard for symmetric signing).
-            _ = self;
-            try ctx.json(200, "{\"keys\":[]}");
+            // Publish the real asymmetric public key (never private material).
+            const json = try self.svc.signer.jwksJson(ctx.allocator);
+            defer ctx.allocator.free(json);
+            try ctx.json(200, json);
         }
 
         // ── Authorize ─────────────────────────────────────────
@@ -157,6 +152,8 @@ pub fn OAuthApi(comptime Service: type, comptime UserService: type) type {
             const code_challenge = ctx.queryParam("code_challenge");
             const code_challenge_method = ctx.queryParam("code_challenge_method");
 
+            const consent_granted = truthyParam(ctx.formValue("consent_granted") orelse ctx.queryParam("consent_granted"));
+
             // Resolve the currently-authenticated user, if any. For a first
             // implementation, a Bearer token identifies the user (resource-owner
             // style); otherwise this is treated as an unauthenticated request.
@@ -165,7 +162,7 @@ pub fn OAuthApi(comptime Service: type, comptime UserService: type) type {
                 return;
             };
 
-            const result = self.svc.authorize(
+            const outcome = self.svc.authorizeWithConsent(
                 client_id,
                 redirect_uri,
                 response_type,
@@ -175,24 +172,37 @@ pub fn OAuthApi(comptime Service: type, comptime UserService: type) type {
                 code_challenge,
                 code_challenge_method,
                 user_id,
+                consent_granted,
             ) catch |err| {
                 try self.oauthErrorFrom(ctx, err);
                 return;
             };
-            defer ctx.allocator.free(result.code);
-            defer ctx.allocator.free(result.redirect_uri);
-            defer if (result.state) |st| ctx.allocator.free(st);
 
-            // Build the redirect URL: redirect_uri?code=...&state=...
-            var url: []const u8 = undefined;
-            if (result.state) |st| {
-                url = try std.fmt.allocPrint(ctx.allocator, "{s}?code={s}&state={s}", .{ result.redirect_uri, result.code, st });
-            } else {
-                url = try std.fmt.allocPrint(ctx.allocator, "{s}?code={s}", .{ result.redirect_uri, result.code });
+            switch (outcome) {
+                .consent_required => |cr| {
+                    // Envelope consent challenge: retry with consent_granted=true.
+                    defer ctx.allocator.free(cr.scopes);
+                    const json = try consentRequiredJson(ctx.allocator, cr.scopes);
+                    defer ctx.allocator.free(json);
+                    try ctx.json(200, json);
+                },
+                .issued => |result| {
+                    defer ctx.allocator.free(result.code);
+                    defer ctx.allocator.free(result.redirect_uri);
+                    defer if (result.state) |st| ctx.allocator.free(st);
+
+                    // Build the redirect URL: redirect_uri?code=...&state=...
+                    var url: []const u8 = undefined;
+                    if (result.state) |st| {
+                        url = try std.fmt.allocPrint(ctx.allocator, "{s}?code={s}&state={s}", .{ result.redirect_uri, result.code, st });
+                    } else {
+                        url = try std.fmt.allocPrint(ctx.allocator, "{s}?code={s}", .{ result.redirect_uri, result.code });
+                    }
+                    defer ctx.allocator.free(url);
+                    try ctx.setHeader("Location", url);
+                    try ctx.text(302, "");
+                },
             }
-            defer ctx.allocator.free(url);
-            try ctx.setHeader("Location", url);
-            try ctx.text(302, "");
         }
 
         fn authenticatedUserId(self: *Self, ctx: *http.Context) ?i64 {
@@ -321,7 +331,7 @@ pub fn OAuthApi(comptime Service: type, comptime UserService: type) type {
                 try ctx.text(401, "");
                 return;
             };
-            const payload = jwt.verify(ctx.allocator, self.svc.sec.module.jwt_secret, tok) catch {
+            const payload = self.svc.verifyToken(ctx.allocator, tok) catch {
                 try ctx.setHeader("WWW-Authenticate", "Bearer");
                 try ctx.text(401, "");
                 return;
@@ -393,4 +403,38 @@ pub fn OAuthApi(comptime Service: type, comptime UserService: type) type {
             }
         }
     };
+}
+/// Render the OIDC discovery document. `signing_alg` must match the key
+/// published at /.well-known/jwks.json.
+pub fn discoveryJson(allocator: std.mem.Allocator, issuer: []const u8, signing_alg: []const u8) ![]const u8 {
+    return std.fmt.allocPrint(
+        allocator,
+        "{{\"issuer\":\"{s}\",\"authorization_endpoint\":\"{s}/oauth/authorize\",\"token_endpoint\":\"{s}/oauth/token\",\"introspection_endpoint\":\"{s}/oauth/introspect\",\"revocation_endpoint\":\"{s}/oauth/revoke\",\"userinfo_endpoint\":\"{s}/oauth/userinfo\",\"jwks_uri\":\"{s}/.well-known/jwks.json\",\"response_types_supported\":[\"code\"],\"grant_types_supported\":[\"authorization_code\",\"client_credentials\",\"refresh_token\"],\"subject_types_supported\":[\"public\"],\"id_token_signing_alg_values_supported\":[\"{s}\"],\"scopes_supported\":[\"openid\",\"profile\",\"email\",\"offline_access\"],\"token_endpoint_auth_methods_supported\":[\"client_secret_basic\",\"client_secret_post\"],\"code_challenge_methods_supported\":[\"plain\",\"S256\"]}}",
+        .{ issuer, issuer, issuer, issuer, issuer, issuer, issuer, signing_alg },
+    );
+}
+
+/// Truthy query/form flag ("true", "1", "yes").
+fn truthyParam(v: ?[]const u8) bool {
+    const s = v orelse return false;
+    return std.mem.eql(u8, s, "true") or std.mem.eql(u8, s, "1") or std.mem.eql(u8, s, "yes");
+}
+
+/// Envelope-shaped consent challenge:
+/// {"code":0,"msg":"consent_required","data":{"consent_required":true,"scopes":[...]}}.
+fn consentRequiredJson(a: std.mem.Allocator, scopes: []const u8) ![]const u8 {
+    var buf = std.ArrayList(u8).empty;
+    errdefer buf.deinit(a);
+    try buf.appendSlice(a, "{\"code\":0,\"msg\":\"consent_required\",\"data\":{\"consent_required\":true,\"scopes\":[");
+    var it = std.mem.tokenizeAny(u8, scopes, " \t");
+    var first = true;
+    while (it.next()) |s| {
+        if (!first) try buf.appendSlice(a, ",");
+        first = false;
+        try buf.appendSlice(a, "\"");
+        try buf.appendSlice(a, s);
+        try buf.appendSlice(a, "\"");
+    }
+    try buf.appendSlice(a, "]}}");
+    return buf.toOwnedSlice(a);
 }
