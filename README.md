@@ -242,6 +242,10 @@ cd web && pnpm run typecheck && pnpm run test && pnpm run build   # vitest + bui
 
 PRs welcome! Keep `zig fmt` clean and make `zig build test` pass. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
+Found a vulnerability? Please report it privately — see [SECURITY.md](SECURITY.md).
+
+Documentation index: [docs/](docs/README.md).
+
 Also available in [简体中文](README.zh-CN.md).
 
 ## 📄 License
