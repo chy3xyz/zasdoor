@@ -1568,3 +1568,9 @@ test "web3: siweLogin binds wallet then issues JWT (full flow)" {
     // Nonce is single-use: a second login attempt fails on the nonce.
     try std.testing.expectError(error.NonceUnavailable, w3.siweLogin(1, message, sig, "example.com"));
 }
+// ── Module-level and cross-module test suites ──────────────────────────────
+test {
+    _ = @import("modules/oauth/tests.zig");
+    _ = @import("modules/mfa/tests.zig");
+    _ = @import("tests_integration.zig");
+}
