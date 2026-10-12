@@ -33,7 +33,7 @@ pub fn AuthzApi(comptime Service: type, comptime UserService: type) type {
 
         fn check(ctx: *http.Context) !void {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
-            const req = ctx.bindJson(CheckReq) catch {
+            const req = ctx.bindJsonLoose(CheckReq) catch {
                 try ctx.sendErrorResponse(400, 400, "请求体格式错误");
                 return;
             };

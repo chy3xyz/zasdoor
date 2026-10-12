@@ -51,8 +51,8 @@ test "password policy enforced on register, change and reset" {
     try std.testing.expectError(error.PasswordTooCommon, svc.register(allocator, "Alice", "alice@example.com", "qwertyuiop", false, 1));
     try std.testing.expectError(error.PasswordContainsIdentity, svc.register(allocator, "Alice", "alice@example.com", "alice-password-99", false, 1));
 
-    var session = try svc.register(allocator, "Alice", "alice@example.com", "Tr0ub4dor&3-correct", false, 1);
-    defer session.deinit(allocator);
+    const session = try svc.register(allocator, "Alice", "alice@example.com", "Tr0ub4dor&3-correct", false, 1);
+    defer svc.freeSession(session);
     const uid = session.row.id;
     const good = "Tr0ub4dor&3-correct";
 
@@ -110,8 +110,8 @@ test "login lockout: failed attempts lock, correct password waits for cooldown" 
     service.resetLoginLockout(std.testing.io);
     defer service.resetLoginLockout(std.testing.io);
 
-    var session = try svc.register(allocator, "Carol", "carol@example.com", "Tr0ub4dor&3-correct", false, 1);
-    session.deinit(allocator);
+    const session = try svc.register(allocator, "Carol", "carol@example.com", "Tr0ub4dor&3-correct", false, 1);
+    svc.freeSession(session);
 
     const t0: i64 = 2_000_000;
     var i: u32 = 0;
@@ -122,8 +122,8 @@ test "login lockout: failed attempts lock, correct password waits for cooldown" 
     try std.testing.expectError(error.AccountLocked, svc.loginAt(allocator, "carol@example.com", "Tr0ub4dor&3-correct", t0));
 
     // After the cooldown the correct password works again.
-    var after = (try svc.loginAt(allocator, "carol@example.com", "Tr0ub4dor&3-correct", t0 + 900)).?;
-    after.deinit(allocator);
+    const after = (try svc.loginAt(allocator, "carol@example.com", "Tr0ub4dor&3-correct", t0 + 900)).?;
+    svc.freeSession(after);
 
     // Unknown emails lock identically: no user-enumeration oracle.
     var j: u32 = 0;

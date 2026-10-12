@@ -20,28 +20,27 @@ const mfa_model = @import("modules/mfa/model.zig");
 const web3_model = @import("modules/web3/model.zig");
 const agent_model = @import("modules/agent/model.zig");
 
-// zent's `buildGraph` comptime edge-resolution has a per-call branch quota;
-// keeping the graph small avoids it, so the app schema and the standalone
-// mail-template table are built as two graphs and their types merged.
+// One graph for every table. zent raised `buildGraph`'s comptime branch quota
+// with v0.29.4 (1M branches; ~400 tables measured per call — zent
+// docs/UPGRADING.md §7a), so the older "split the graph to stay under the
+// quota" guidance is stale. A single graph also permits cross-table `WithEdge`
+// within one client. See docs/development-guide.md §2.2.
 const graph = zent.codegen.graph.buildGraph(&.{
     tenant_model.Tenant,
     user_model.User,
     user_model.PasswordToken,
     user_model.EmailVerification,
+    user_model.LoginAttempt,
     task_model.Task,
     file_model.File,
     notify_model.Notification,
     audit_model.AuditLog,
-});
-const template_graph = zent.codegen.graph.buildGraph(&.{mail_template_model.EmailTemplate});
-const ai_graph = zent.codegen.graph.buildGraph(&.{
+    mail_template_model.EmailTemplate,
     ai_model.AiProvider,
     ai_model.AiSession,
     ai_model.AiMessage,
     ai_model.AiApproval,
     ai_model.AiRun,
-});
-const iam_graph = zent.codegen.graph.buildGraph(&.{
     iam_model.Organization,
     iam_model.Project,
     iam_model.Application,
@@ -51,31 +50,21 @@ const iam_graph = zent.codegen.graph.buildGraph(&.{
     iam_model.AuthorizationCode,
     iam_model.RefreshToken,
     iam_model.Consent,
-});
-
-const eventstore_graph = zent.codegen.graph.buildGraph(&.{
+    iam_model.DeviceCode,
     eventstore_model.Event,
     eventstore_model.EventPosition,
     eventstore_model.ProjectionState,
-});
-
-const mfa_graph = zent.codegen.graph.buildGraph(&.{
     mfa_model.TotpCredential,
     mfa_model.RecoveryCode,
     mfa_model.IdentityProvider,
     mfa_model.MfaPolicy,
     mfa_model.IdentityLink,
     mfa_model.FederatedState,
-});
-
-const web3_graph = zent.codegen.graph.buildGraph(&.{
     web3_model.Wallet,
     web3_model.SiweNonce,
-});
-const agent_graph = zent.codegen.graph.buildGraph(&.{
     agent_model.Agent,
     agent_model.AgentUsage,
 });
 
-pub const infos = graph.types ++ template_graph.types ++ ai_graph.types ++ iam_graph.types ++ eventstore_graph.types ++ mfa_graph.types ++ web3_graph.types ++ agent_graph.types;
+pub const infos = graph.types;
 pub const Client = zent.codegen.client.Client(infos);

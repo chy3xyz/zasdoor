@@ -1,0 +1,16 @@
+# Trim the build context: dependency caches / artifacts / local data never
+# enter the Docker build.
+.zig-cache/
+.zig-cache-global/
+.zig-global-cache/
+zig-out/
+zig-pkg/
+web/node_modules/
+web/dist/
+uploads/
+*.db
+*.db-shm
+*.db-wal
+.DS_Store
+_ref/
+.gitleaksignore

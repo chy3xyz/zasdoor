@@ -7,16 +7,21 @@
 
 | 流程 | 说明 |
 | --- | --- |
-| `authorization_code` | 授权码 + 回调,支持 **PKCE**(`plain` / `S256`,应用可强制 `pkce_required`) |
+| `authorization_code` | 授权码 + 回调,支持 **PKCE**(`plain` / `S256`;`pkce_required` 新建应用默认 **true**) |
 | `client_credentials` | 客户端凭证(机器对机器),以 `client_id`/`client_secret` 换 token |
-| `refresh_token` | 刷新令牌续期 |
+| `refresh_token` | 刷新令牌续期;**单次使用 + 轮换**:旧令牌用后即标记 `rotated_at`,重放已轮换的令牌会被判定为重放并**吊销整个 family** |
+| `urn:ietf:params:oauth:grant-type:device_code` | **设备授权(RFC 8628)**:无浏览器设备用 `user_code` 在验证页确认后换取令牌 |
+| `urn:ietf:params:oauth:grant-type:token-exchange` | **令牌交换(RFC 8693)**:用 `subject_token`(+`actor_token`)换取新 access token;支持 `audience`,scope 只能缩小;委托带 `act` claim,响应含 `issued_token_type` |
 
 - 签名算法:**EdDSA(Ed25519)**,非对称 —— ID Token 可由第三方客户端拿公开 JWKS 验签。
   - 签名密钥从平台 `ZASDOOR_JWT_SECRET` 经 **HKDF-SHA256** 确定性派生(`src/modules/oauth/keys.zig`),因此重启后密钥不变,无需新增配置。
+  - **轮换/密钥环**:`ZASDOOR_OIDC_KEY_SECRETS`(逗号分隔的历史密钥)会进入密钥环——当前主密钥负责签名,环内所有密钥都会出现在 JWKS 并被接受验签,轮换期间旧 ID Token 仍可验证。
   - `kid` = SHA-256(公钥)的前 8 字节(hex);JWK 只含公开字段(私钥永不输出)。
   - 仍接受旧的 **HS256** 令牌(用于 introspection 兼容)。ES256(P-256)实现已就位(jwt.zig / keys.zig),接入为后续工作。
-- Scope:`openid`、`profile`、`email`、`offline_access`。
-- ID Token 由授权码兑换时签发,`sub` 为用户 ID,含 `iss`(issuer)、`aud`(client_id)、`exp`。
+- Scope:`openid`、`profile`、`email`、`address`、`phone`、`offline_access`。
+  `phone`/`address` 的声明值来自用户资料(`phone`/`address` 字段,经 `PUT /auth/profile` 设置),
+  为空时不输出对应 claim。
+- ID Token 由授权码兑换时签发,`sub` 为用户 ID,含 `iss`(issuer)、`aud`(client_id)、`exp`、`nonce`(透传)与 **`at_hash`**(与 access token 绑定)。
 - **用户同意(consent)**:请求的 scope 未获授权前不发放授权码。
 
 ## 2. 端点(注册在 server 根路径,协议面公开)
@@ -30,6 +35,9 @@
 | POST | `/oauth/introspect` | 令牌 introspection(active / client / scope / exp) |
 | POST | `/oauth/revoke` | 令牌吊销 |
 | GET | `/oauth/userinfo` | 用户信息(要求 access token) |
+| GET/POST | `/oauth/end-session` | RP-initiated logout:吊销该用户会话(token-version bump),校验注册过的 `post_logout_redirect_uri` 后 302 |
+| POST | `/oauth/device_authorization` | 公开。发起设备授权,返回 `device_code` / `user_code` / `verification_uri` / `interval` |
+| POST | `/oauth/device` | 已登录。用 `user_code` 批准/拒绝设备请求(`approve` / `deny`) |
 
 ## 3. 典型授权码 + PKCE 流程
 

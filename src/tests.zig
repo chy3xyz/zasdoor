@@ -26,6 +26,11 @@ const agent = @import("modules/agent/root.zig");
 const cache_svc = @import("services/cache.zig");
 const mail = @import("services/mail.zig");
 
+// Standalone unit-test module (no DB): mount it so its test blocks run.
+comptime {
+    _ = @import("http/url_guard.zig");
+}
+
 /// In-memory SQLite store with every schema group migrated.
 fn openMemory(allocator: std.mem.Allocator) !db_mod.StoreEnv(schema.infos, .{
     tenant.persistence.infos,
@@ -219,15 +224,18 @@ test "changePassword verifies the current password" {
     var store = user.persistence.UserStore.init(allocator, env.client);
     var sec = zigmodu.security.AppSecurity.init(allocator, std.testing.io, .{ .jwt_secret = "test-secret" });
     var svc = user.service.UserService.init(&store, &sec, std.testing.io, 3600, 86400);
-    const id = try store.createUser("Alice", "alice@example.com", "hash", false, false, 1, 100);
 
-    try std.testing.expectError(error.InvalidCredentials, svc.changePassword(id, "wrong", "newpassword123"));
-    try std.testing.expectError(error.InvalidPassword, svc.changePassword(id, "hash", "short"));
+    const stored_hash = try sec.module.hashPassword("correct-password-99");
+    defer sec.module.allocator.free(stored_hash);
+    const id = try store.createUser("Alice", "alice@example.com", stored_hash, false, false, 1, 100);
+
+    try std.testing.expectError(error.InvalidCredentials, svc.changePassword(id, "wrong-password-99", "newpassword123"));
+    try std.testing.expectError(error.InvalidPassword, svc.changePassword(id, "correct-password-99", "short"));
 }
 
 test "cache service set/get/remove" {
     const allocator = std.testing.allocator;
-    var cache = cache_svc.CacheService.init(allocator, 16, 60);
+    var cache = cache_svc.CacheService.init(allocator, std.testing.io, 16, 60);
     defer cache.deinit();
     try cache.set("user:1", "{\"name\":\"Alice\"}");
     try std.testing.expectEqualStrings("{\"name\":\"Alice\"}", cache.get("user:1").?);
@@ -254,7 +262,7 @@ test "task queue: enqueue -> claim -> done" {
     defer claimed.free(allocator);
     try std.testing.expectEqual(id, claimed.id);
     try std.testing.expectEqualStrings("claimed", claimed.status);
-    try task_store.markDone(id, 1001);
+    _ = try task_store.markDone(id, 1001);
     const row = (try task_store.getTaskById(id)).?;
     defer row.free(allocator);
     try std.testing.expectEqualStrings("done", row.status);
@@ -266,17 +274,69 @@ test "task queue: retry backoff and failure budget" {
     defer env.deinit();
     var task_store = task.persistence.TaskStore.init(allocator, env.client);
 
-    const id = try task_store.createTask("mail.send", "{}", "pending", 1, 1, 2, "", 0, 100);
-    try task_store.markFailedOrRetry(id, 1, 2, "boom", 200, 60);
+    // State-machine precondition: markFailedOrRetry only touches claimed rows
+    // (conditional UPDATE guard), so go through a real claim first.
+    const id = try task_store.createTask("mail.send", "{}", "pending", 1, 0, 2, "", 0, 100);
+    var claimed = (try task_store.claimNext(150)).?;
+    defer claimed.free(allocator);
+    try std.testing.expectEqual(@as(i64, 1), claimed.attempts);
+
+    // claimed -> pending with 60s backoff.
+    _ = try task_store.markFailedOrRetry(id, claimed.attempts, claimed.max_attempts, "boom", 200, 60);
     const after = (try task_store.getTaskById(id)).?;
     defer after.free(allocator);
     try std.testing.expectEqualStrings("pending", after.status);
     try std.testing.expectEqual(@as(i64, 260), after.available_at);
 
-    try task_store.markFailedOrRetry(id, 2, 2, "boom", 300, 60);
+    // Claim again; budget (attempts=2/max=2) exhausted -> failed.
+    var reclaimed = (try task_store.claimNext(300)).?;
+    defer reclaimed.free(allocator);
+    try std.testing.expectEqual(@as(i64, 2), reclaimed.attempts);
+    _ = try task_store.markFailedOrRetry(id, reclaimed.attempts, reclaimed.max_attempts, "boom", 300, 60);
     const failed = (try task_store.getTaskById(id)).?;
     defer failed.free(allocator);
     try std.testing.expectEqualStrings("failed", failed.status);
+}
+
+test "task queue: requeueStale batch-requeues live claims, fails over-budget" {
+    const allocator = std.testing.allocator;
+    var env = try openMemory(allocator);
+    defer env.deinit();
+    var task_store = task.persistence.TaskStore.init(allocator, env.client);
+
+    // Three stale claims (started_at=0 < now-stale_after): two within budget
+    // (one batch UPDATE ... WHERE id IN (...)), one over budget (failed).
+    const a = try task_store.createTask("mail.send", "{}", "claimed", 1, 0, 2, "", 0, 100);
+    const d = try task_store.createTask("mail.send", "{}", "claimed", 1, 1, 2, "", 0, 100);
+    const b = try task_store.createTask("mail.send", "{}", "claimed", 1, 2, 2, "", 0, 100);
+
+    const count = try task_store.requeueStale(1000, 100);
+    try std.testing.expectEqual(@as(usize, 3), count);
+
+    const ra = (try task_store.getTaskById(a)).?;
+    defer ra.free(allocator);
+    try std.testing.expectEqualStrings("pending", ra.status);
+    try std.testing.expectEqual(@as(i64, 1000), ra.available_at);
+    try std.testing.expectEqual(@as(i64, 0), ra.started_at);
+    const rd = (try task_store.getTaskById(d)).?;
+    defer rd.free(allocator);
+    try std.testing.expectEqualStrings("pending", rd.status);
+    const rb = (try task_store.getTaskById(b)).?;
+    defer rb.free(allocator);
+    try std.testing.expectEqualStrings("failed", rb.status);
+    try std.testing.expectEqual(@as(i64, 1000), rb.finished_at);
+
+    // Per-status Count round-trip; the AggregateBy TEXT-key pitfall is
+    // documented in task/persistence.zig.
+    const c = try task_store.countByStatus();
+    try std.testing.expectEqual(@as(i64, 2), c.pending);
+    try std.testing.expectEqual(@as(i64, 0), c.claimed);
+    try std.testing.expectEqual(@as(i64, 1), c.failed);
+    try std.testing.expectEqual(@as(i64, 0), c.done);
+    try std.testing.expectEqual(@as(i64, 0), c.canceled);
+    _ = try task_store.createTask("mail.send", "{}", "claimed", 1, 0, 2, "", 0, 100);
+    const c2 = try task_store.countByStatus();
+    try std.testing.expectEqual(@as(i64, 1), c2.claimed);
 }
 
 test "notification store: create, unread count, mark read" {
@@ -310,6 +370,44 @@ test "file store metadata CRUD" {
     try std.testing.expectEqualStrings("key1", row.storage_key);
     try file_store.delete(id);
     try std.testing.expect((try file_store.getById(id)) == null);
+}
+
+test "file service: UploadGuard sniffs bytes — renamed active content rejected" {
+    const allocator = std.testing.allocator;
+    var env = try openMemory(allocator);
+    defer env.deinit();
+    var file_store = file.persistence.FileStore.init(allocator, env.client);
+    // Random scratch dir under .zig-cache/tmp, removed by cleanup.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}", .{&tmp.sub_path});
+    defer allocator.free(dir);
+    var file_svc = file.service.FileService.init(allocator, std.testing.io, &file_store, dir, 1024);
+
+    // Rename bypass closed: HTML bytes named .txt passed the old
+    // extension-only check.
+    try std.testing.expectError(error.FileTypeNotAllowed, file_svc.save(1, 1, "evil.txt", "text/plain", "<html><script>alert(1)</script></html>"));
+    // SVG is a script container; refused by byte sniffing.
+    try std.testing.expectError(error.FileTypeNotAllowed, file_svc.save(1, 1, "pic.svg", "image/svg+xml", "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>"));
+    // Extension outside the allowlist.
+    try std.testing.expectError(error.FileTypeNotAllowed, file_svc.save(1, 1, "shell.php", "application/x-php", "<?php echo 1;"));
+    // Size cap.
+    const big: [2048]u8 = @splat('x');
+    try std.testing.expectError(error.FileTooLarge, file_svc.save(1, 1, "big.txt", "text/plain", &big));
+
+    // A legitimate file still lands: PNG bytes under a .png name.
+    const png = "\x89PNG\r\n\x1a\n" ++ "rest-of-png-bytes";
+    var ok = try file_svc.save(1, 1, "avatar.png", "image/png", png);
+    defer ok.free(allocator);
+    try std.testing.expectEqualStrings("avatar.png", ok.name);
+    // Plain text (no active tags) is unaffected.
+    var md = try file_svc.save(1, 1, "notes.md", "text/markdown", "# title\nplain text");
+    md.free(allocator);
+
+    // Cleanup: delete removes the disk file + metadata, then the scratch dir.
+    var listed = try file_svc.list(1, 100, null, null, null, false);
+    defer listed.free(allocator);
+    for (listed.items) |r| try file_svc.delete(r.id);
 }
 
 test "HTTP dispatch: public auth flow (register -> me) via Testkit" {
@@ -377,8 +475,8 @@ test "register binds tenant and JWT aud carries it" {
     var sec = zigmodu.security.AppSecurity.init(allocator, std.testing.io, .{ .jwt_secret = "test-secret" });
     var svc = user.service.UserService.init(&store, &sec, std.testing.io, 3600, 86400);
 
-    var session = try svc.register(allocator, "Alice", "alice@example.com", "Str0ng-Passw0rd!23", false, 7);
-    defer session.deinit(allocator);
+    const session = try svc.register(allocator, "Alice", "alice@example.com", "Str0ng-Passw0rd!23", false, 7);
+    defer svc.freeSession(session);
     try std.testing.expectEqual(@as(i64, 7), session.row.tenant_id);
 
     const payload = try sec.module.verifyToken(session.token);
@@ -677,11 +775,18 @@ test "ai: run quota counts within rolling window + health workflow" {
     _ = try ai_store.createRun(0, 7, 1, "chat", "hi", "test-model", 12, 34, 3, 2, 1, "ok", "", 200);
     _ = try ai_store.createRun(0, 8, 1, "chat", "hi", "test-model", 0, 0, 0, 0, 0, "ok", "", 300);
     try std.testing.expectEqual(@as(i64, 2), try ai_store.runCountForUser(7, 50));
-    // zent v0.29.4:Sum 返回 f64;quotaForUser 用 @intFromFloat 显式转换并聚合校验。
+    // zent v0.34 SumOrZero:a populated window aggregates as before; an empty
+    // window (a user with no runs) folds SQL NULL to 0 instead of `Sum`'s
+    // error.TypeMismatch.
     {
         const agg = try ai_store.quotaForUser(7, 50);
         try std.testing.expectEqual(@as(i64, 12), agg.tokens_in);
         try std.testing.expectEqual(@as(i64, 34), agg.tokens_out);
+    }
+    {
+        const empty = try ai_store.quotaForUser(999, 50);
+        try std.testing.expectEqual(@as(i64, 0), empty.tokens_in);
+        try std.testing.expectEqual(@as(i64, 0), empty.tokens_out);
     }
     {
         // listRuns 按 created_at 降序:最新一条(200)带用量快照。
@@ -958,7 +1063,7 @@ test "oauth: authorization code + PKCE full flow" {
     defer if (authz.state) |st| allocator.free(st);
 
     // Exchange the code with the PKCE verifier.
-    const issue = try oauth_svc.token("authorization_code", creds.client_id, creds.client_secret, authz.code, "https://app.example/cb", verifier, null, null);
+    const issue = try oauth_svc.token("authorization_code", creds.client_id, creds.client_secret, authz.code, "https://app.example/cb", verifier, null, null, null);
     defer allocator.free(issue.access_token);
     defer allocator.free(issue.scope);
     defer if (issue.id_token) |it| allocator.free(it);
@@ -967,6 +1072,11 @@ test "oauth: authorization code + PKCE full flow" {
     try std.testing.expect(issue.access_token.len > 0);
     try std.testing.expect(issue.id_token != null);
     try std.testing.expect(issue.refresh_token != null);
+
+    // The ID token carries at_hash bound to the access token.
+    const idp = try oauth_svc.ring.verify(allocator, issue.id_token.?);
+    defer allocator.free(idp);
+    try std.testing.expect(std.mem.indexOf(u8, idp, "\"at_hash\":\"") != null);
 
     // Access token introspects as active.
     const insp = oauth_svc.introspect(issue.access_token);
@@ -994,7 +1104,7 @@ test "oauth: client credentials grant + refresh token rotation" {
     var oauth_svc = oauth.service.OAuthService.init(allocator, std.testing.io, &iam_svc, &user_svc, &sec, "http://localhost:8080");
 
     // Client credentials: no user involved.
-    const cc = try oauth_svc.token("client_credentials", creds.client_id, creds.client_secret, null, null, null, "openid", null);
+    const cc = try oauth_svc.token("client_credentials", creds.client_id, creds.client_secret, null, null, null, "openid", null, null);
     defer allocator.free(cc.access_token);
     defer allocator.free(cc.scope);
     try std.testing.expect(cc.id_token == null);
@@ -1006,7 +1116,200 @@ test "oauth: client credentials grant + refresh token rotation" {
     try std.testing.expect(insp_cc.sub != null and std.mem.startsWith(u8, insp_cc.sub.?, "app_"));
 
     // Wrong client secret is rejected.
-    try std.testing.expectError(error.InvalidClient, oauth_svc.token("client_credentials", creds.client_id, "nope", null, null, null, "openid", null));
+    try std.testing.expectError(error.InvalidClient, oauth_svc.token("client_credentials", creds.client_id, "nope", null, null, null, "openid", null, null));
+}
+
+test "oauth: refresh rotation is single-use and reuse revokes the family" {
+    const allocator = std.testing.allocator;
+    var env = try openMemory(allocator);
+    defer env.deinit();
+    var iam_store = iam.persistence.IamStore.init(allocator, env.client);
+    var user_store = user.persistence.UserStore.init(allocator, env.client);
+    var sec = zigmodu.security.AppSecurity.init(allocator, std.testing.io, .{ .jwt_secret = "rotation-secret" });
+    var iam_svc = iam.service.IamService.init(allocator, std.testing.io, &iam_store, &sec);
+    var user_svc = user.service.UserService.init(&user_store, &sec, std.testing.io, 3600, 86400);
+    _ = try user_store.createUser("Alice", "alice@example.com", "hash", false, true, 1, 100);
+
+    const pid = try iam_svc.createProject(1, 0, "P", "");
+    var creds = try iam_svc.createApplication(1, pid, "Rot", "web", "[\"https://app.example/cb\"]", "[]", "[]", "[\"authorization_code\",\"refresh_token\"]", "[\"code\"]", "openid profile email offline_access", 3600, 0, false);
+    defer creds.deinit(allocator);
+    var oauth_svc = oauth.service.OAuthService.init(allocator, std.testing.io, &iam_svc, &user_svc, &sec, "http://localhost:8080");
+
+    const verifier = "rotation-verifier-string-1234567890";
+    var digest: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(verifier, &digest, .{});
+    const enc = std.base64.url_safe_no_pad.Encoder;
+    const n = enc.calcSize(32);
+    var challenge_buf: [64]u8 = undefined;
+    _ = enc.encode(challenge_buf[0..n], &digest);
+
+    const authz = try oauth_svc.authorize(creds.client_id, "https://app.example/cb", "code", "openid profile email offline_access", null, null, challenge_buf[0..n], "S256", 1);
+    defer allocator.free(authz.code);
+    defer allocator.free(authz.redirect_uri);
+    if (authz.state) |st| allocator.free(st);
+
+    const first = try oauth_svc.token("authorization_code", creds.client_id, creds.client_secret, authz.code, "https://app.example/cb", verifier, null, null, null);
+    defer allocator.free(first.access_token);
+    defer allocator.free(first.scope);
+    defer if (first.id_token) |it| allocator.free(it);
+    const rt1 = first.refresh_token orelse return error.TestUnexpectedResult;
+
+    // Rotate: rt1 -> rt2; rt1 becomes single-use.
+    const second = try oauth_svc.token("refresh_token", creds.client_id, creds.client_secret, null, null, null, null, rt1, null);
+    defer allocator.free(second.access_token);
+    defer allocator.free(second.scope);
+    defer if (second.id_token) |it| allocator.free(it);
+    const rt2 = second.refresh_token orelse return error.TestUnexpectedResult;
+    try std.testing.expect(!std.mem.eql(u8, rt1, rt2));
+
+    // The refresh token is bound to the client that requested it.
+    try std.testing.expectError(error.InvalidGrant, oauth_svc.token("refresh_token", "someone-else", creds.client_secret, null, null, null, null, rt2, null));
+
+    // Replaying the rotated token is reuse: invalid grant + family revoked.
+    try std.testing.expectError(error.InvalidGrant, oauth_svc.token("refresh_token", creds.client_id, creds.client_secret, null, null, null, null, rt1, null));
+    try std.testing.expectError(error.InvalidGrant, oauth_svc.token("refresh_token", creds.client_id, creds.client_secret, null, null, null, null, rt2, null));
+
+    allocator.free(rt1);
+    allocator.free(rt2);
+}
+
+test "login lockout is shared across service instances (DB-backed)" {
+    const allocator = std.testing.allocator;
+    var env = try openMemory(allocator);
+    defer env.deinit();
+    var store = user.persistence.UserStore.init(allocator, env.client);
+    var sec = zigmodu.security.AppSecurity.init(allocator, std.testing.io, .{ .jwt_secret = "lockout-secret" });
+    var svc_a = user.service.UserService.init(&store, &sec, std.testing.io, 3600, 86400);
+    var svc_b = user.service.UserService.init(&store, &sec, std.testing.io, 3600, 86400);
+
+    const s = try svc_a.register(allocator, "Dave", "dave@example.com", "Tr0ub4dor&3-correct", false, 1);
+    svc_a.freeSession(s);
+
+    const t0: i64 = 3_000_000;
+    var i: u32 = 0;
+    while (i < 5) : (i += 1) {
+        try std.testing.expect((try svc_a.loginAt(allocator, "dave@example.com", "wrong-password-99", t0)) == null);
+    }
+    // The second instance shares the same store, so it observes the lock even
+    // though it has no local state.
+    try std.testing.expectError(error.AccountLocked, svc_b.loginAt(allocator, "dave@example.com", "Tr0ub4dor&3-correct", t0));
+    // Stale rows are swept by the scheduled job.
+    _ = try store.purgeStaleLoginAttempts(t0 + 2 * 24 * 3600, 24 * 3600);
+}
+
+test "user contact: phone/address round-trip and OIDC claims" {
+    const allocator = std.testing.allocator;
+    var env = try openMemory(allocator);
+    defer env.deinit();
+    var store = user.persistence.UserStore.init(allocator, env.client);
+    var iam_store = iam.persistence.IamStore.init(allocator, env.client);
+    var sec = zigmodu.security.AppSecurity.init(allocator, std.testing.io, .{ .jwt_secret = "contact-secret" });
+    var svc = user.service.UserService.init(&store, &sec, std.testing.io, 3600, 86400);
+    var iam_svc = iam.service.IamService.init(allocator, std.testing.io, &iam_store, &sec);
+    var oauth_svc = oauth.service.OAuthService.init(allocator, std.testing.io, &iam_svc, &svc, &sec, "http://localhost:8080");
+
+    const uid = try store.createUser("Erin", "erin@example.com", "hash", false, false, 1, 100);
+    try svc.updateContact(uid, "+1-555-0100", "1 Main St, Springfield");
+    const row = (try store.getUserById(uid)).?;
+    defer row.free(allocator);
+    try std.testing.expectEqualStrings("+1-555-0100", row.phone);
+    try std.testing.expectEqualStrings("1 Main St, Springfield", row.address);
+
+    const idt = try oauth_svc.issueIdToken(row, "client-x", "openid phone address", null, null);
+    defer allocator.free(idt);
+    const payload = try oauth_svc.ring.verify(allocator, idt);
+    defer allocator.free(payload);
+    try std.testing.expect(std.mem.indexOf(u8, payload, "\"phone_number\":\"+1-555-0100\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, payload, "\"address\":{\"formatted\":\"1 Main St, Springfield\"}") != null);
+
+    // Unsafe bytes would break claim encoding and are rejected.
+    try std.testing.expectError(error.InvalidPhone, svc.updateContact(uid, "5\"5", ""));
+}
+
+test "oauth: device authorization grant (RFC 8628)" {
+    const allocator = std.testing.allocator;
+    var env = try openMemory(allocator);
+    defer env.deinit();
+    var iam_store = iam.persistence.IamStore.init(allocator, env.client);
+    var user_store = user.persistence.UserStore.init(allocator, env.client);
+    var sec = zigmodu.security.AppSecurity.init(allocator, std.testing.io, .{ .jwt_secret = "device-secret" });
+    var iam_svc = iam.service.IamService.init(allocator, std.testing.io, &iam_store, &sec);
+    var user_svc = user.service.UserService.init(&user_store, &sec, std.testing.io, 3600, 86400);
+    const uid = try user_store.createUser("Frank", "frank@example.com", "hash", false, false, 1, 100);
+
+    const pid = try iam_svc.createProject(1, 0, "P", "");
+    var creds = try iam_svc.createApplication(1, pid, "TV", "native", "[]", "[]", "[]", "[\"urn:ietf:params:oauth:grant-type:device_code\"]", "[\"code\"]", "openid profile offline_access", 3600, 0, false);
+    defer creds.deinit(allocator);
+    var oauth_svc = oauth.service.OAuthService.init(allocator, std.testing.io, &iam_svc, &user_svc, &sec, "http://localhost:8080");
+
+    const da = try oauth_svc.deviceAuthorization(creds.client_id, "openid profile offline_access");
+    defer oauth_svc.freeDeviceAuthorization(da);
+    try std.testing.expectEqual(@as(usize, 9), da.user_code.len); // XXXX-XXXX
+    try std.testing.expect(da.device_code.len > 0);
+    try std.testing.expect(std.mem.startsWith(u8, da.verification_uri_complete, da.verification_uri));
+
+    const grant = "urn:ietf:params:oauth:grant-type:device_code";
+    // Pending until approved; a second immediate poll is too fast.
+    try std.testing.expectError(error.AuthorizationPending, oauth_svc.token(grant, creds.client_id, "", null, null, null, null, null, da.device_code));
+    try std.testing.expectError(error.SlowDown, oauth_svc.token(grant, creds.client_id, "", null, null, null, null, null, da.device_code));
+    try std.testing.expectError(error.InvalidGrant, oauth_svc.deviceResolve("XXXX-XXXX", uid, true));
+
+    try oauth_svc.deviceResolve(da.user_code, uid, true);
+    const issue = try oauth_svc.token(grant, creds.client_id, "", null, null, null, null, null, da.device_code);
+    defer allocator.free(issue.access_token);
+    defer allocator.free(issue.scope);
+    defer if (issue.id_token) |it| allocator.free(it);
+    defer if (issue.refresh_token) |rt| allocator.free(rt);
+    try std.testing.expect(issue.access_token.len > 0);
+    try std.testing.expect(issue.refresh_token != null);
+    // Single use.
+    try std.testing.expectError(error.InvalidGrant, oauth_svc.token(grant, creds.client_id, "", null, null, null, null, null, da.device_code));
+
+    // Denied path.
+    const da2 = try oauth_svc.deviceAuthorization(creds.client_id, "openid");
+    defer oauth_svc.freeDeviceAuthorization(da2);
+    try oauth_svc.deviceResolve(da2.user_code, uid, false);
+    try std.testing.expectError(error.AccessDenied, oauth_svc.token(grant, creds.client_id, "", null, null, null, null, null, da2.device_code));
+}
+
+test "oauth: token exchange (RFC 8693) delegation, audience and downscoping" {
+    const allocator = std.testing.allocator;
+    var env = try openMemory(allocator);
+    defer env.deinit();
+    var iam_store = iam.persistence.IamStore.init(allocator, env.client);
+    var user_store = user.persistence.UserStore.init(allocator, env.client);
+    var sec = zigmodu.security.AppSecurity.init(allocator, std.testing.io, .{ .jwt_secret = "exchange-secret" });
+    var iam_svc = iam.service.IamService.init(allocator, std.testing.io, &iam_store, &sec);
+    var user_svc = user.service.UserService.init(&user_store, &sec, std.testing.io, 3600, 86400);
+    var oauth_svc = oauth.service.OAuthService.init(allocator, std.testing.io, &iam_svc, &user_svc, &sec, "http://localhost:8080");
+
+    const pid = try iam_svc.createProject(1, 0, "P", "");
+    var creds = try iam_svc.createApplication(1, pid, "Gateway", "web", "[]", "[]", "[]", "[\"urn:ietf:params:oauth:grant-type:token-exchange\"]", "[\"code\"]", "openid profile email", 3600, 0, false);
+    defer creds.deinit(allocator);
+
+    const subject = try oauth_svc.issueAccessToken("1", creds.client_id, "openid profile email", 3600);
+    defer allocator.free(subject);
+    const actor = try oauth_svc.issueAccessToken("agent_7", creds.client_id, "openid", 3600);
+    defer allocator.free(actor);
+
+    const ttype = "urn:ietf:params:oauth:token-type:access_token";
+    const ex = try oauth_svc.tokenExchange(creds.client_id, creds.client_secret, subject, ttype, actor, ttype, ttype, "https://api.internal", "openid profile");
+    defer allocator.free(ex.access_token);
+    defer allocator.free(ex.scope);
+    try std.testing.expectEqualStrings(ttype, ex.issued_token_type.?);
+    try std.testing.expectEqualStrings("openid profile", ex.scope);
+    const payload = try oauth_svc.ring.verify(allocator, ex.access_token);
+    defer allocator.free(payload);
+    try std.testing.expect(std.mem.indexOf(u8, payload, "\"sub\":\"1\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, payload, "\"aud\":\"https://api.internal\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, payload, "\"act\":{\"sub\":\"agent_7\"}") != null);
+
+    // Scope escalation is refused.
+    try std.testing.expectError(error.InvalidScope, oauth_svc.tokenExchange(creds.client_id, creds.client_secret, subject, ttype, null, null, null, null, "openid profile email admin"));
+    // Bad subject token is refused.
+    try std.testing.expectError(error.InvalidGrant, oauth_svc.tokenExchange(creds.client_id, creds.client_secret, "not-a-jwt", ttype, null, null, null, null, null));
+    // Unsupported subject_token_type is refused.
+    try std.testing.expectError(error.InvalidRequest, oauth_svc.tokenExchange(creds.client_id, creds.client_secret, subject, "urn:ietf:params:oauth:token-type:saml2", null, null, null, null, null));
 }
 
 test "oauth: jwt sign/verify round-trip" {

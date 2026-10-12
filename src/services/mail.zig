@@ -177,7 +177,14 @@ const SmtpConnection = struct {
             else blk: {
                 const stream = self.stream orelse unreachable;
                 var iovec: [1][]u8 = .{&one};
-                break :blk try stream.read(self.io, &iovec);
+                // std.Io.net.Stream.read still destructures the net_read result
+                // as a tuple in Zig 0.17.0, but the operation now yields a
+                // Stream.ReadResult struct, so the low-level helper does not
+                // compile when instantiated. readWithControl is the same
+                // single-syscall path and returns the struct.
+                var control: [0]u8 = .{};
+                const res = try stream.readWithControl(self.io, &iovec, &control);
+                break :blk res.data_len;
             };
             if (n == 0) return error.ConnectionClosed;
             self.read_buf[i] = one[0];

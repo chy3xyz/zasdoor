@@ -68,7 +68,7 @@ pub const Application = Schema("Application", .{
         field.Text("scopes").Default(""), // space-separated
         field.Int("access_token_ttl").Default(3600),
         field.Int("refresh_token_ttl").Default(0), // 0 = no refresh
-        field.Bool("pkce_required").Default(false),
+        field.Bool("pkce_required").Default(true),
         field.Bool("active").Default(true),
     },
     .mixins = &.{zent.core.mixin.TimeMixin},
@@ -146,6 +146,11 @@ pub const RefreshToken = Schema("RefreshToken", .{
         field.String("scope").Default(""),
         field.Int("expires_at"),
         field.Int("revoked_at").Default(0),
+        // Rotation family: every token descended from one grant shares it, so a
+        // reused (already-rotated) token can revoke the whole chain.
+        field.String("family_id").Default(""),
+        // Non-zero once this token has been rotated away (single use).
+        field.Int("rotated_at").Default(0),
     },
     .mixins = &.{zent.core.mixin.TimeMixin},
 });
@@ -158,6 +163,24 @@ pub const Consent = Schema("Consent", .{
         field.Int("user_id"),
         field.String("scope").Default(""),
         field.Int("granted_at").Default(0),
+    },
+    .mixins = &.{zent.core.mixin.TimeMixin},
+});
+
+/// RFC 8628 device-authorization grant. `device_code_hash` is the high-entropy
+/// value the client polls with; `user_code` is the short code the human types on
+/// the verification page. status: pending -> approved | denied -> used.
+pub const DeviceCode = Schema("DeviceCode", .{
+    .fields = &.{
+        field.Int("tenant_id").Default(1),
+        field.Int("application_id"),
+        field.String("device_code_hash").Sensitive(),
+        field.String("user_code").Unique(),
+        field.String("scope").Default(""),
+        field.Int("user_id").Default(0), // set on approval
+        field.String("status").Default("pending"),
+        field.Int("expires_at"),
+        field.Int("last_polled_at").Default(0),
     },
     .mixins = &.{zent.core.mixin.TimeMixin},
 });

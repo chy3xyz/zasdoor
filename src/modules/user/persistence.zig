@@ -9,13 +9,14 @@ const crud = zent.crud_helpers;
 const model = @import("model.zig");
 const schema = @import("../../schema.zig");
 
-const graph = zent.codegen.graph.buildGraph(&.{ model.User, model.PasswordToken, model.EmailVerification });
+const graph = zent.codegen.graph.buildGraph(&.{ model.User, model.PasswordToken, model.EmailVerification, model.LoginAttempt });
 pub const infos = graph.types;
 /// Shared, application-wide typed client (all schemas registered in schema.zig).
 pub const Client = schema.Client;
 pub const UserInfo = infos[0];
 pub const PasswordTokenInfo = infos[1];
 pub const EmailVerificationInfo = infos[2];
+pub const LoginAttemptInfo = infos[3];
 
 pub const UserRow = struct {
     id: i64,
@@ -25,12 +26,16 @@ pub const UserRow = struct {
     admin: bool,
     tenant_id: i64,
     token_version: i64,
+    phone: []const u8,
+    address: []const u8,
     created_at: i64,
     updated_at: i64,
 
     pub fn free(self: UserRow, allocator: std.mem.Allocator) void {
         allocator.free(self.name);
         allocator.free(self.email);
+        allocator.free(self.phone);
+        allocator.free(self.address);
     }
 };
 
@@ -43,6 +48,14 @@ pub const PasswordTokenRow = struct {
     pub fn free(self: PasswordTokenRow, allocator: std.mem.Allocator) void {
         allocator.free(self.token);
     }
+};
+
+/// Persisted failed-login lockout row (see model.LoginAttempt).
+pub const LoginAttemptRow = struct {
+    lock_key: []const u8,
+    failures: i64,
+    window_start: i64,
+    locked_until: i64,
 };
 
 pub const UserListResult = struct {
@@ -68,6 +81,10 @@ pub const UserStore = struct {
         errdefer self.allocator.free(name);
         const email = try self.allocator.dupe(u8, e.email);
         errdefer self.allocator.free(email);
+        const phone = try self.allocator.dupe(u8, e.phone);
+        errdefer self.allocator.free(phone);
+        const address = try self.allocator.dupe(u8, e.address);
+        errdefer self.allocator.free(address);
         return .{
             .id = e.id,
             .name = name,
@@ -76,6 +93,8 @@ pub const UserStore = struct {
             .admin = e.admin,
             .tenant_id = e.tenant_id,
             .token_version = e.token_version,
+            .phone = phone,
+            .address = address,
             .created_at = e.created_at orelse 0,
             .updated_at = e.updated_at orelse 0,
         };
@@ -119,6 +138,18 @@ pub const UserStore = struct {
         var entity = (try crud.first(self.client.user, .{preds.emailEQ(.{ .string = email })})) orelse return null;
         defer zent.codegen.deinitEntity(infos, UserInfo, &entity, self.allocator);
         return try self.dupUser(entity);
+    }
+
+    /// Set the optional contact fields (OIDC phone / address scopes).
+    pub fn updateContact(self: *UserStore, id: i64, phone: []const u8, address: []const u8, now: i64) !void {
+        const preds = self.client.user.predicates;
+        var u = self.client.user.Update();
+        defer u.deinit();
+        _ = try u.setFieldValue("phone", phone);
+        _ = try u.setFieldValue("address", address);
+        _ = try u.setFieldValue("updated_at", now);
+        _ = try u.Where(.{preds.idEQ(.{ .int = id })});
+        _ = try u.Save();
     }
 
     /// Fetch the stored password hash for a user (sensitive field is not in UserRow).
@@ -334,6 +365,32 @@ pub const UserStore = struct {
         _ = try d.Exec();
     }
 
+    /// Password change made atomic: hash update + clearing all of the user's
+    /// password tokens commit in one transaction, removing the window where
+    /// "password changed, tokens not cleared" lets an old reset link replay.
+    /// Zero rows match for a missing user -> rollback + UserNotFound.
+    pub fn resetPasswordAtomic(self: *UserStore, id: i64, password_hash: []const u8, now: i64) !void {
+        var tx = try zent.codegen.beginTx(schema.infos, self.client);
+        defer tx.deinit();
+        {
+            const upreds = tx.client.user.predicates;
+            var upd = tx.client.user.Update();
+            defer upd.deinit();
+            _ = try upd.set("password", .{ .string = password_hash });
+            _ = try upd.setFieldValue("updated_at", now);
+            _ = try upd.Where(.{upreds.idEQ(.{ .int = id })});
+            if ((try upd.Save()) == 0) return error.UserNotFound; // defer -> ROLLBACK
+        }
+        {
+            const tpreds = tx.client.password_token.predicates;
+            var d = tx.client.password_token.Delete();
+            defer d.deinit();
+            _ = try d.Where(.{tpreds.user_idEQ(.{ .int = id })});
+            _ = try d.Exec();
+        }
+        try tx.commit();
+    }
+
     /// Global sweep (cron): remove every expired password-reset token.
     pub fn purgeExpiredPasswordTokens(self: *UserStore, now: i64, max_age: i64) !usize {
         const preds = self.client.password_token.predicates;
@@ -341,8 +398,7 @@ pub const UserStore = struct {
         var d = self.client.password_token.Delete();
         defer d.deinit();
         _ = try d.Where(.{preds.created_atLT(.{ .int = cutoff })});
-        _ = try d.Exec();
-        return 0;
+        return try d.Exec();
     }
 
     /// Global sweep (cron): remove every expired email-verification token.
@@ -352,9 +408,95 @@ pub const UserStore = struct {
         var d = self.client.email_verification.Delete();
         defer d.deinit();
         _ = try d.Where(.{preds.created_atLT(.{ .int = cutoff })});
-        _ = try d.Exec();
-        return 0;
+        return try d.Exec();
     }
+    // ── Failed-login lockout (shared across instances) ───────
+
+    pub fn getLoginAttempt(self: *UserStore, key: []const u8) !?LoginAttemptRow {
+        const preds = self.client.login_attempt.predicates;
+        var e = (try crud.first(self.client.login_attempt, .{preds.lock_keyEQ(.{ .string = key })})) orelse return null;
+        defer zent.codegen.deinitEntity(infos, LoginAttemptInfo, &e, self.allocator);
+        return .{
+            .lock_key = try self.allocator.dupe(u8, e.lock_key),
+            .failures = e.failures,
+            .window_start = e.window_start,
+            .locked_until = e.locked_until,
+        };
+    }
+
+    /// Record one failed attempt atomically (read-modify-write in a
+    /// transaction) and lock the key once it crosses the threshold within the
+    /// rolling window. Shared storage makes the counter global, not per node.
+    pub fn recordLoginFailure(
+        self: *UserStore,
+        key: []const u8,
+        now: i64,
+        window_seconds: i64,
+        max_failures: u32,
+        lockout_seconds: i64,
+    ) !void {
+        var tx = try zent.codegen.beginTx(schema.infos, self.client);
+        defer tx.deinit();
+        const preds = tx.client.login_attempt.predicates;
+        const key_q = preds.lock_keyEQ(.{ .string = key });
+        var existing = try crud.first(tx.client.login_attempt, .{key_q});
+        if (existing) |*e| {
+            defer zent.codegen.deinitEntity(infos, LoginAttemptInfo, e, self.allocator);
+            var failures: i64 = e.failures;
+            var window_start: i64 = e.window_start;
+            var locked_until: i64 = e.locked_until;
+            if (locked_until > now) {
+                try tx.commit();
+                return; // already locked; keep the cooldown
+            }
+            if (now - window_start > window_seconds) {
+                failures = 1;
+                window_start = now;
+                locked_until = 0;
+            } else {
+                failures += 1;
+                if (failures >= @as(i64, max_failures)) locked_until = now + lockout_seconds;
+            }
+            var u = tx.client.login_attempt.Update();
+            defer u.deinit();
+            _ = try u.setFieldValue("failures", failures);
+            _ = try u.setFieldValue("window_start", window_start);
+            _ = try u.setFieldValue("locked_until", locked_until);
+            _ = try u.setFieldValue("updated_at", now);
+            _ = try u.Where(.{key_q});
+            _ = try u.Save();
+        } else {
+            var b = try tx.client.login_attempt.Create();
+            defer b.deinit();
+            _ = try b.setFieldValue("lock_key", key);
+            _ = try b.setFieldValue("failures", 1);
+            _ = try b.setFieldValue("window_start", now);
+            _ = try b.setFieldValue("locked_until", if (max_failures <= 1) now + lockout_seconds else 0);
+            _ = try b.setFieldValue("created_at", now);
+            _ = try b.setFieldValue("updated_at", now);
+            var row = try b.Save();
+            defer zent.codegen.deinitEntity(infos, LoginAttemptInfo, &row, self.allocator);
+        }
+        try tx.commit();
+    }
+
+    pub fn clearLoginFailure(self: *UserStore, key: []const u8) !void {
+        const preds = self.client.login_attempt.predicates;
+        var d = self.client.login_attempt.Delete();
+        defer d.deinit();
+        _ = try d.Where(.{preds.lock_keyEQ(.{ .string = key })});
+        _ = try d.Exec();
+    }
+
+    /// Global sweep (cron): drop lockout rows untouched for the given age.
+    pub fn purgeStaleLoginAttempts(self: *UserStore, now: i64, max_age: i64) !usize {
+        const preds = self.client.login_attempt.predicates;
+        var d = self.client.login_attempt.Delete();
+        defer d.deinit();
+        _ = try d.Where(.{preds.updated_atLT(.{ .int = now - max_age })});
+        return try d.Exec();
+    }
+
     /// Total user count (dashboard stats).
     pub fn countAll(self: *UserStore) !i64 {
         return @intCast(try crud.count(self.client.user, .{}));

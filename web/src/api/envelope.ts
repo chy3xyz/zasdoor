@@ -24,3 +24,11 @@ export function unwrapEnvelope<T>(envelope: ApiEnvelope<T>): T {
   }
   return envelope.data;
 }
+
+/** Backend sendPaged (ruoyi-style) pagination payload; domain list types reuse it. */
+export interface PageResult<T> {
+  list: T[];
+  total: number;
+  page: number;
+  pageSize?: number;
+}

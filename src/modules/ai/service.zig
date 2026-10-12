@@ -10,6 +10,7 @@ const zigmodu = @import("zigmodu");
 const persist = @import("persistence.zig");
 
 const ai = zigmodu.ai;
+const url_guard = @import("../../http/url_guard.zig");
 const user_persist = @import("../user/persistence.zig");
 const task_persist = @import("../task/persistence.zig");
 const audit_persist = @import("../audit/persistence.zig");
@@ -489,6 +490,13 @@ pub const AiService = struct {
             allocator.free(resolved.key);
         }
 
+        // Pre-outbound re-check beyond the write path: a row written before the
+        // guard existed (or via direct DB access) must not reach the network.
+        if (!url_guard.isAcceptableOutboundUrl(resolved.row.endpoint)) {
+            std.log.err("[ai] refusing outbound: provider #{d} endpoint fails the SSRF baseline", .{resolved.row.id});
+            return error.EndpointNotAllowed;
+        }
+
         var provider = ai.AiProvider{
             .allocator = allocator,
             .http = &self.http,
@@ -556,7 +564,9 @@ pub const AiService = struct {
                 const f_prov = provider.metrics.toStats();
                 const fd = usageDelta(agent_stats_before, f_stats);
                 self.addAgentMetrics(fd);
-                _ = self.store.createRun(session_id, user_id, tenant_id, "chat", prompt, "", @intCast(f_prov.total_prompt_tokens), @intCast(f_prov.total_completion_tokens), @intCast(fd.steps), @intCast(fd.tool_calls), @intCast(fd.tool_errors), "error", @errorName(e), now) catch {};
+                _ = self.store.createRun(session_id, user_id, tenant_id, "chat", prompt, "", @intCast(f_prov.total_prompt_tokens), @intCast(f_prov.total_completion_tokens), @intCast(fd.steps), @intCast(fd.tool_calls), @intCast(fd.tool_errors), "error", @errorName(e), now) catch |rerr| {
+                    std.log.err("[ai] failed run persist error: {s}", .{@errorName(rerr)});
+                };
                 return e;
             },
             .success => result = run_ctx.result orelse return error.AiRunFailed,
@@ -602,6 +612,11 @@ pub const AiService = struct {
         defer row.free(allocator);
         if (!row.enabled) return error.ProviderDisabled;
         if (row.api_keys_encrypted.len == 0) return error.EmptyApiKeys;
+        // Pre-outbound re-check (see chat).
+        if (!url_guard.isAcceptableOutboundUrl(row.endpoint)) {
+            std.log.err("[ai] refusing connectivity check: provider #{d} endpoint fails the SSRF baseline", .{row.id});
+            return error.EndpointNotAllowed;
+        }
 
         const keys_json = try self.decryptKeys(allocator, row.api_keys_encrypted);
         defer allocator.free(keys_json);

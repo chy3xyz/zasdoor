@@ -26,6 +26,9 @@ pub const LoginError = error{
     /// Too many consecutive failures: the account (or the attempted email)
     /// is temporarily locked out.
     AccountLocked,
+    /// Server-side failure (e.g. a stored password hash that cannot be
+    /// decoded); the API maps it to 500 instead of "wrong password".
+    Unexpected,
 };
 
 pub const ResetTokenError = error{
@@ -36,11 +39,13 @@ pub const ResetTokenError = error{
     PasswordTooLong,
     PasswordTooCommon,
     PasswordContainsIdentity,
+    Unexpected,
 };
 
 pub const VerificationError = error{
     InvalidToken,
     TokenExpired,
+    Unexpected,
 };
 
 pub const ChangePasswordError = error{
@@ -51,6 +56,7 @@ pub const ChangePasswordError = error{
     PasswordTooCommon,
     PasswordContainsIdentity,
     TokenInvalidationFailed,
+    Unexpected,
 };
 
 /// Outcome of writing a password: policy violations plus storage failures.
@@ -77,14 +83,13 @@ pub const VerificationInfo = struct {
 };
 
 /// A signed-in identity: user row plus a fresh JWT.
+///
+/// Always release through `UserService.freeSession`: the row is produced by the
+/// store allocator and the token by the security-module allocator, so each must
+/// go back to its producer (a request-arena free is a silent no-op / leak).
 pub const Session = struct {
     row: UserRow,
     token: []const u8,
-
-    pub fn deinit(self: Session, allocator: std.mem.Allocator) void {
-        allocator.free(self.token);
-        self.row.free(allocator);
-    }
 };
 
 // ── Password policy ──────────────────────────────────────────────
@@ -285,6 +290,8 @@ pub const UserService = struct {
     verification_token_expiration_seconds: i64,
     /// Password policy enforced on register and every password write.
     policy: PasswordPolicy = .{},
+    /// Failed-login lockout thresholds (persisted per email; shared storage).
+    lockout_config: LockoutConfig = .{},
 
     pub fn init(
         store: *persist.UserStore,
@@ -331,7 +338,10 @@ pub const UserService = struct {
         const norm_email = normalizeEmail(allocator, email) catch return error.InvalidEmail;
         defer allocator.free(norm_email);
 
-        if (self.store.getUserByEmail(norm_email) catch return error.EmailTaken) |existing| {
+        // A DB error must not be folded into 409 "email taken" (a store fault
+        // would look like a conflict).
+        const existing_opt = self.store.getUserByEmail(norm_email) catch return error.Unexpected;
+        if (existing_opt) |existing| {
             existing.free(self.store.allocator);
             return error.EmailTaken;
         }
@@ -343,7 +353,8 @@ pub const UserService = struct {
         // A prior `getUserByEmail` guard makes a create failure most likely
         // a unique-constraint race; re-check before blaming the DB.
         _ = self.store.createUser(trimmed_name, norm_email, hash, false, admin, tenant_id, now) catch {
-            if (self.store.getUserByEmail(norm_email) catch null) |existing| {
+            const raced_opt = self.store.getUserByEmail(norm_email) catch return error.Unexpected;
+            if (raced_opt) |existing| {
                 existing.free(self.store.allocator);
                 return error.EmailTaken;
             }
@@ -368,33 +379,45 @@ pub const UserService = struct {
         // Check the lockout before touching the DB and regardless of whether
         // the account exists, so unknown and known emails behave identically
         // (the lockout must not become a user-enumeration oracle).
-        if (login_lockout.isLocked(self.io, norm_email, now)) return error.AccountLocked;
+        if (self.lockoutLocked(norm_email, now)) return error.AccountLocked;
 
         const row_opt = self.store.getUserByEmail(norm_email) catch {
-            login_lockout.recordFailure(self.io, norm_email, now);
+            self.lockoutRecord(norm_email, now);
             return error.InvalidCredentials;
         };
         const row = row_opt orelse {
-            login_lockout.recordFailure(self.io, norm_email, now);
+            self.lockoutRecord(norm_email, now);
             return null;
         };
         defer row.free(self.store.allocator);
 
         const hash_opt = self.store.getPasswordHashById(row.id) catch {
-            login_lockout.recordFailure(self.io, norm_email, now);
+            self.lockoutRecord(norm_email, now);
             return error.InvalidCredentials;
         };
         const hash = hash_opt orelse {
-            login_lockout.recordFailure(self.io, norm_email, now);
+            self.lockoutRecord(norm_email, now);
             return null;
         };
-        defer allocator.free(hash);
+        // The hash is duped by the store's allocator, not the request arena.
+        defer self.store.allocator.free(hash);
 
-        if (!self.sec.module.verifyPassword(password, hash)) {
-            login_lockout.recordFailure(self.io, norm_email, now);
+        // zigmodu v0.33.4+ returns `PasswordError!bool`: a stored hash we
+        // cannot decode (or an allocation failure while decoding it) is a
+        // server-side fault, not a wrong password. Surface it as 500 so the
+        // failed-login counter is not fed a lie.
+        const password_ok = self.sec.module.verifyPassword(password, hash) catch |err| switch (err) {
+            error.MalformedStoredHash => {
+                std.log.err("[user] unusable stored password hash for user id {d}", .{row.id});
+                return error.Unexpected;
+            },
+            error.OutOfMemory => return error.Unexpected,
+        };
+        if (!password_ok) {
+            self.lockoutRecord(norm_email, now);
             return null;
         }
-        login_lockout.clear(self.io, norm_email);
+        self.lockoutClear(norm_email);
         return self.issueSession(allocator, row.email, row.admin, row.tenant_id) catch return error.InvalidCredentials;
     }
 
@@ -411,6 +434,57 @@ pub const UserService = struct {
         const roles = if (admin) &[_][]const u8{"admin"} else &[_][]const u8{"user"};
         const token = try self.sec.module.generateTokenWithTenantAndVersion(id_str, roles, tenant_str, row.token_version);
         return .{ .row = row, .token = token };
+    }
+
+    /// True when the key is inside its cooldown. Persisted state is shared
+    /// across instances; a store error fails open (availability) with a log.
+    fn lockoutLocked(self: *UserService, key: []const u8, now: i64) bool {
+        const row = self.store.getLoginAttempt(key) catch |err| {
+            std.log.err("[user] lockout read failed, failing open: {s}", .{@errorName(err)});
+            return false;
+        };
+        const r = row orelse return false;
+        defer self.store.allocator.free(r.lock_key);
+        if (r.locked_until == 0 or now >= r.locked_until) return false;
+        return true;
+    }
+
+    fn lockoutRecord(self: *UserService, key: []const u8, now: i64) void {
+        self.store.recordLoginFailure(key, now, self.lockout_config.window_seconds, self.lockout_config.max_failures, self.lockout_config.lockout_seconds) catch |err| {
+            std.log.err("[user] lockout record failed, failing open: {s}", .{@errorName(err)});
+        };
+    }
+
+    fn lockoutClear(self: *UserService, key: []const u8) void {
+        self.store.clearLoginFailure(key) catch |err| {
+            std.log.warn("[user] lockout clear failed: {s}", .{@errorName(err)});
+        };
+    }
+
+    /// Contact fields for the OIDC phone / address scopes. Values are kept
+    /// JSON-safe (no quote/backslash/control bytes) so they can be embedded in
+    /// ID-token claims without escaping surprises.
+    pub const ContactError = error{ InvalidPhone, InvalidAddress, UserNotFound, Unexpected };
+
+    pub fn updateContact(self: *UserService, id: i64, phone: []const u8, address: []const u8) ContactError!void {
+        if (phone.len > 32) return error.InvalidPhone;
+        for (phone) |c| {
+            if (c == '"' or c == '\\' or c < 0x20) return error.InvalidPhone;
+        }
+        if (address.len > 256) return error.InvalidAddress;
+        for (address) |c| {
+            if (c == '"' or c == '\\' or c < 0x20) return error.InvalidAddress;
+        }
+        const row_opt = self.store.getUserById(id) catch return error.Unexpected;
+        const row = row_opt orelse return error.UserNotFound;
+        row.free(self.store.allocator);
+        self.store.updateContact(id, phone, address, zigmodu.time.wallClockSeconds(self.io)) catch return error.Unexpected;
+    }
+
+    /// Free a session, returning each allocation to its producer (see Session).
+    pub fn freeSession(self: *UserService, s: Session) void {
+        self.sec.module.allocator.free(s.token);
+        s.row.free(self.store.allocator);
     }
 
     pub fn getUserById(self: *UserService, id: i64) !?UserRow {
@@ -493,11 +567,13 @@ pub const UserService = struct {
         const raw = try randomToken(allocator, self.io, 32);
         errdefer allocator.free(raw);
         const hash = try self.sec.module.hashPassword(raw);
-        defer allocator.free(hash);
+        defer self.sec.module.allocator.free(hash);
         const now = zigmodu.time.wallClockSeconds(self.io);
         // Housekeeping: drop this user's stale tokens before inserting a new
         // one so the table does not grow without bound.
-        self.store.deleteExpiredPasswordTokens(row.id, now, self.password_token_expiration_seconds) catch {};
+        self.store.deleteExpiredPasswordTokens(row.id, now, self.password_token_expiration_seconds) catch |err| {
+            std.log.warn("[user] expired password-token cleanup failed (user {d}): {s}", .{ row.id, @errorName(err) });
+        };
         _ = try self.store.createPasswordToken(row.id, hash, now);
         return .{ .user_id = row.id, .raw = raw };
     }
@@ -512,26 +588,46 @@ pub const UserService = struct {
         const now = zigmodu.time.wallClockSeconds(self.io);
         if (now - tok.created_at > self.password_token_expiration_seconds) {
             // The token is dead — purge it (and any older siblings) now.
-            self.store.deleteTokensForUser(user_id) catch {};
+            self.store.deleteTokensForUser(user_id) catch |err| {
+                std.log.warn("[user] expired token delete failed (user {d}); tokens.cleanup will sweep: {s}", .{ user_id, @errorName(err) });
+            };
             return error.TokenExpired;
         }
-        if (!self.sec.module.verifyPassword(raw_token, tok.token)) return error.InvalidToken;
+        const token_ok = self.sec.module.verifyPassword(raw_token, tok.token) catch |err| switch (err) {
+            error.MalformedStoredHash => {
+                std.log.err("[user] unusable stored password-reset token hash for user id {d}", .{user_id});
+                return error.Unexpected;
+            },
+            error.OutOfMemory => return error.Unexpected,
+        };
+        if (!token_ok) return error.InvalidToken;
     }
 
     /// Reset a password after a valid token; clears all their tokens.
     pub fn resetPassword(self: *UserService, user_id: i64, raw_token: []const u8, new_password: []const u8) ResetTokenError!void {
-        // Token is validated first so an invalid link never leaks policy
-        // details; the shared policy still runs through setPassword.
+        // Token first so an invalid link never leaks policy details; the shared
+        // policy then runs against the stored identity before hashing.
         try self.validatePasswordResetToken(user_id, raw_token);
-        self.setPassword(user_id, new_password) catch |err| switch (err) {
-            error.InvalidPassword => return error.InvalidPassword,
+
+        const row_opt = self.store.getUserById(user_id) catch return error.Unexpected;
+        const row = row_opt orelse return error.InvalidToken;
+        defer row.free(self.store.allocator);
+        self.policy.validate(new_password, row.email, row.name) catch |err| switch (err) {
             error.PasswordTooShort => return error.PasswordTooShort,
             error.PasswordTooLong => return error.PasswordTooLong,
             error.PasswordTooCommon => return error.PasswordTooCommon,
             error.PasswordContainsIdentity => return error.PasswordContainsIdentity,
-            error.UserNotFound, error.Unexpected => return error.InvalidToken,
         };
-        self.store.deleteTokensForUser(user_id) catch return error.InvalidToken;
+
+        const hash = self.sec.module.hashPassword(new_password) catch return error.Unexpected;
+        defer self.sec.module.allocator.free(hash);
+        const now = zigmodu.time.wallClockSeconds(self.io);
+        // Hash update + token clear commit in one transaction: no window where
+        // the old reset link still replays against the new password.
+        self.store.resetPasswordAtomic(user_id, hash, now) catch |err| switch (err) {
+            error.UserNotFound => return error.InvalidToken,
+            else => return error.Unexpected, // DB fault surfaces as 500, not "invalid link"
+        };
     }
 
     // ── Email verification ────────────────────────────────────────
@@ -547,10 +643,12 @@ pub const UserService = struct {
         const raw = try randomToken(allocator, self.io, 32);
         errdefer allocator.free(raw);
         const hash = try self.sec.module.hashPassword(raw);
-        defer allocator.free(hash);
+        defer self.sec.module.allocator.free(hash);
         const now = zigmodu.time.wallClockSeconds(self.io);
         // Housekeeping: drop this user's stale tokens before inserting a new one.
-        self.store.deleteExpiredEmailVerifications(user_id, now, self.verification_token_expiration_seconds) catch {};
+        self.store.deleteExpiredEmailVerifications(user_id, now, self.verification_token_expiration_seconds) catch |err| {
+            std.log.warn("[user] expired verification cleanup failed (user {d}): {s}", .{ user_id, @errorName(err) });
+        };
         _ = try self.store.createEmailVerification(user_id, hash, now);
         return .{ .user_id = user_id, .raw = raw };
     }
@@ -563,13 +661,26 @@ pub const UserService = struct {
 
         const now = zigmodu.time.wallClockSeconds(self.io);
         if (now - tok.created_at > self.verification_token_expiration_seconds) {
-            self.store.deleteEmailVerificationsForUser(user_id) catch {};
+            self.store.deleteEmailVerificationsForUser(user_id) catch |err| {
+                std.log.warn("[user] expired verification delete failed (user {d}); tokens.cleanup will sweep: {s}", .{ user_id, @errorName(err) });
+            };
             return error.TokenExpired;
         }
-        if (!self.sec.module.verifyPassword(raw_token, tok.token)) return error.InvalidToken;
+        const token_ok = self.sec.module.verifyPassword(raw_token, tok.token) catch |err| switch (err) {
+            error.MalformedStoredHash => {
+                std.log.err("[user] unusable stored email-verification token hash for user id {d}", .{user_id});
+                return error.Unexpected;
+            },
+            error.OutOfMemory => return error.Unexpected,
+        };
+        if (!token_ok) return error.InvalidToken;
 
         self.setVerified(user_id, true) catch return error.InvalidToken;
-        self.store.deleteEmailVerificationsForUser(user_id) catch {};
+        // Best-effort: the user is already verified; a leftover consumed row is
+        // swept by tokens.cleanup once it ages out.
+        self.store.deleteEmailVerificationsForUser(user_id) catch |err| {
+            std.log.warn("[user] consumed verification cleanup failed (user {d}): {s}", .{ user_id, @errorName(err) });
+        };
     }
 
     /// Self-service password change: verify the current password, then apply
@@ -579,7 +690,14 @@ pub const UserService = struct {
         const hash_opt = self.store.getPasswordHashById(id) catch return error.InvalidCredentials;
         const hash = hash_opt orelse return error.InvalidCredentials;
         defer self.sec.module.allocator.free(hash);
-        if (!self.sec.module.verifyPassword(old_password, hash)) return error.InvalidCredentials;
+        const password_ok = self.sec.module.verifyPassword(old_password, hash) catch |err| switch (err) {
+            error.MalformedStoredHash => {
+                std.log.err("[user] unusable stored password hash for user id {d}", .{id});
+                return error.Unexpected;
+            },
+            error.OutOfMemory => return error.Unexpected,
+        };
+        if (!password_ok) return error.InvalidCredentials;
         self.setPassword(id, new_password) catch |err| switch (err) {
             error.InvalidPassword => return error.InvalidPassword,
             error.PasswordTooShort => return error.PasswordTooShort,

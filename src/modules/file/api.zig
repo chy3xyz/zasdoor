@@ -78,13 +78,25 @@ pub fn FileApi(comptime Service: type, comptime UserService: type) type {
                 try ctx.sendErrorResponse(400, 400, "缺少文件内容");
                 return;
             };
-            const filename = ctx.header("X-File-Name") orelse "upload.bin";
+            // Store and display the sanitized name (path separators, control
+            // chars and quotes stripped); the raw X-File-Name is never persisted
+            // (path traversal / header injection).
+            var name_buf: [256]u8 = undefined;
+            const raw_name = ctx.header("X-File-Name") orelse "upload.bin";
+            const cleaned = sanitizeFilename(&name_buf, raw_name);
+            const filename = if (cleaned.len == 0) "upload.bin" else cleaned;
             const mime = ctx.header("Content-Type") orelse "application/octet-stream";
 
             const tenant_id = mw.authTenantId(ctx) orelse self.default_tenant_id;
             const row = self.svc.save(actor.id, tenant_id, filename, mime, body) catch |err| switch (err) {
                 error.FileTooLarge => {
                     try ctx.sendErrorResponse(413, 413, "文件超过大小限制");
+                    return;
+                },
+                error.FileTypeNotAllowed => {
+                    // UploadGuard: active content (SVG/HTML, even renamed) or
+                    // an extension outside the allowlist.
+                    try ctx.sendErrorResponse(400, 400, "文件类型不允许");
                     return;
                 },
                 else => {

@@ -1,6 +1,7 @@
 //! File service — local-disk storage with DB metadata.
 
 const std = @import("std");
+const zigmodu = @import("zigmodu");
 const persist = @import("persistence.zig");
 
 pub const FileRow = persist.FileRow;
@@ -36,11 +37,29 @@ pub const FileService = struct {
     }
 
     /// Persist raw bytes to disk and record metadata. `filename` is the
-    /// user-facing name; the on-disk name is a generated storage key.
+    /// user-facing name; the on-disk name is a generated storage key. Content
+    /// is validated by zigmodu `UploadGuard.check`: bytes are sniffed, so
+    /// active content (SVG/HTML) renamed to `.txt` is refused — an extension
+    /// allowlist alone cannot stop a rename bypass.
     pub fn save(self: *FileService, uploader_id: i64, tenant_id: i64, filename: []const u8, mime: []const u8, data: []const u8) !FileRow {
-        if (data.len > self.max_bytes) return error.FileTooLarge;
-        const ext = extensionOf(filename);
-        if (!extensionAllowed(ext)) return error.FileTypeNotAllowed;
+        _ = zigmodu.http.UploadGuard.check(filename, data, .{
+            .extensions = &allowed_extensions,
+            .max_bytes = self.max_bytes,
+            // General-purpose store: docx/xlsx/pptx sniff as zip and tar/mov
+            // carry no magic number, so a strict extension<->content match
+            // would reject legitimate files. The core defense is refusing
+            // active content.
+            .require_extension_match = false,
+        }) catch |err| switch (err) {
+            error.FileTooLarge => return error.FileTooLarge,
+            // Active content / disallowed extension are caller errors, mapped
+            // to 400 by the API layer.
+            error.ActiveContentNotAllowed,
+            error.ExtensionNotAllowed,
+            error.ContentNotAllowed,
+            error.ExtensionContentMismatch,
+            => return error.FileTypeNotAllowed,
+        };
         try self.ensureDir();
 
         const key = try self.storageKey(filename);
@@ -95,7 +114,11 @@ pub const FileService = struct {
         try self.store.delete(id);
         const path = try self.pathFor(row.storage_key);
         defer self.allocator.free(path);
-        std.Io.Dir.cwd().deleteFile(self.io, path) catch {};
+        // Metadata is already gone; the disk file is best-effort. A failure
+        // only leaves an orphan for operators to clean up.
+        std.Io.Dir.cwd().deleteFile(self.io, path) catch |err| {
+            std.log.warn("[file] orphan disk file delete failed ({s}): {s}", .{ path, @errorName(err) });
+        };
     }
 
     fn storageKey(self: *FileService, filename: []const u8) ![]const u8 {
@@ -110,28 +133,32 @@ pub const FileService = struct {
 };
 
 fn wallNow(io: std.Io) i64 {
-    const zigmodu = @import("zigmodu");
     return zigmodu.time.wallClockSeconds(io);
 }
 
 /// 允许上传的扩展名白名单(排除 html/svg/脚本等可执行内容)。
+/// 内容层校验由 `FileService.save` 内的 `UploadGuard.check` 完成。
 const allowed_extensions = [_][]const u8{
     "txt", "md",   "csv", "json", "log",  "pdf", "doc",  "docx", "xls", "xlsx",
     "ppt", "pptx", "png", "jpg",  "jpeg", "gif", "webp", "zip",  "gz",  "tar",
     "7z",  "mp4",  "mov", "mp3",  "wav",  "bin",
 };
 
-fn extensionAllowed(ext: []const u8) bool {
-    for (allowed_extensions) |e| {
-        if (std.ascii.eqlIgnoreCase(e, ext)) return true;
-    }
-    return false;
-}
-
 fn extensionOf(filename: []const u8) []const u8 {
     if (std.mem.lastIndexOfScalar(u8, filename, '.')) |i| {
         const ext = filename[i + 1 ..];
-        if (ext.len > 0 and ext.len <= 16) return ext;
+        // Alphanumeric extensions only: a tail like "png/../../etc" must not
+        // end up in the storage key (pathFor concatenates upload_dir).
+        if (ext.len > 0 and ext.len <= 16) {
+            var ok = true;
+            for (ext) |c| {
+                if (!std.ascii.isAlphanumeric(c)) {
+                    ok = false;
+                    break;
+                }
+            }
+            if (ok) return ext;
+        }
     }
     return "bin";
 }

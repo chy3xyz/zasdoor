@@ -180,7 +180,10 @@ pub const TaskStore = struct {
         return try self.getTaskById(entity.id);
     }
 
-    pub fn markDone(self: *TaskStore, id: i64, now: i64) !void {
+    /// Status-guarded finalize: only a row still `claimed` may move to done.
+    /// Zero rows means the task was already requeued/failed (a stalled worker's
+    /// late completion must not overwrite the new owner's result).
+    pub fn markDone(self: *TaskStore, id: i64, now: i64) !bool {
         const preds = self.client.task.predicates;
         var upd = self.client.task.Update();
         defer upd.deinit();
@@ -188,12 +191,14 @@ pub const TaskStore = struct {
         _ = try upd.setFieldValue("finished_at", now);
         _ = try upd.setFieldValue("updated_at", now);
         _ = try upd.Where(.{preds.idEQ(.{ .int = id })});
-        _ = try upd.Save();
+        _ = try upd.Where(.{preds.statusEQ(.{ .string = "claimed" })});
+        return (try upd.Save()) > 0;
     }
 
-    /// Mark failed permanently, or schedule a retry (attempts stay as-is;
-    /// the next claim increments them again).
-    pub fn markFailedOrRetry(self: *TaskStore, id: i64, attempts: i64, max_attempts: i64, last_error: []const u8, now: i64, retry_interval: i64) !void {
+    /// Mark failed permanently, or schedule a retry (attempts stay as-is; the
+    /// next claim increments them again). Only a still-`claimed` row may
+    /// transition; returns false when the status moved on under us.
+    pub fn markFailedOrRetry(self: *TaskStore, id: i64, attempts: i64, max_attempts: i64, last_error: []const u8, now: i64, retry_interval: i64) !bool {
         const preds = self.client.task.predicates;
         var upd = self.client.task.Update();
         defer upd.deinit();
@@ -209,7 +214,8 @@ pub const TaskStore = struct {
         }
         _ = try upd.setFieldValue("updated_at", now);
         _ = try upd.Where(.{preds.idEQ(.{ .int = id })});
-        _ = try upd.Save();
+        _ = try upd.Where(.{preds.statusEQ(.{ .string = "claimed" })});
+        return (try upd.Save()) > 0;
     }
 
     /// Re-queue tasks whose worker died mid-run (`claimed` but started too
@@ -226,23 +232,32 @@ pub const TaskStore = struct {
             found.deinit();
         }
 
-        var count: usize = 0;
+        // Re-queue every within-budget claim with a single
+        // UPDATE ... WHERE id IN (...) (zent.sql.In); over-budget rows still
+        // go through markFailedOrRetry one by one.
+        var retry_ids: std.ArrayListUnmanaged(i64) = .empty;
+        defer retry_ids.deinit(self.allocator);
         for (found.items) |e| {
             if (e.attempts >= e.max_attempts) {
-                try self.markFailedOrRetry(e.id, e.attempts, e.max_attempts, "stale (worker died)", now, 0);
+                _ = try self.markFailedOrRetry(e.id, e.attempts, e.max_attempts, "stale (worker died)", now, 0);
             } else {
-                var upd = self.client.task.Update();
-                defer upd.deinit();
-                _ = try upd.set("status", .{ .string = "pending" });
-                _ = try upd.setFieldValue("available_at", now);
-                _ = try upd.setFieldValue("started_at", 0);
-                _ = try upd.setFieldValue("updated_at", now);
-                _ = try upd.Where(.{preds.idEQ(.{ .int = e.id })});
-                _ = try upd.Save();
+                try retry_ids.append(self.allocator, e.id);
             }
-            count += 1;
         }
-        return count;
+        if (retry_ids.items.len > 0) {
+            const vals = try self.allocator.alloc(zent.sql.Value, retry_ids.items.len);
+            defer self.allocator.free(vals);
+            for (retry_ids.items, 0..) |id, i| vals[i] = .{ .int = id };
+            var upd = self.client.task.Update();
+            defer upd.deinit();
+            _ = try upd.set("status", .{ .string = "pending" });
+            _ = try upd.setFieldValue("available_at", now);
+            _ = try upd.setFieldValue("started_at", 0);
+            _ = try upd.setFieldValue("updated_at", now);
+            _ = try upd.Where(.{zent.sql.In("id", vals)});
+            _ = try upd.Save();
+        }
+        return found.items.len;
     }
 
     pub fn retryTask(self: *TaskStore, id: i64, now: i64) !bool {
@@ -258,8 +273,7 @@ pub const TaskStore = struct {
         _ = try upd.setFieldValue("updated_at", now);
         _ = try upd.Where(.{preds.idEQ(.{ .int = id })});
         _ = try upd.Where(.{preds.statusNE(.{ .string = "pending" })});
-        _ = try upd.Save();
-        return true;
+        return (try upd.Save()) > 0;
     }
 
     pub fn cancelTask(self: *TaskStore, id: i64, now: i64) !bool {
@@ -271,8 +285,7 @@ pub const TaskStore = struct {
         _ = try upd.setFieldValue("updated_at", now);
         _ = try upd.Where(.{preds.idEQ(.{ .int = id })});
         _ = try upd.Where(.{preds.statusEQ(.{ .string = "pending" })});
-        _ = try upd.Save();
-        return true;
+        return (try upd.Save()) > 0;
     }
 
     pub fn deleteTask(self: *TaskStore, id: i64) !void {
@@ -293,11 +306,15 @@ pub const TaskStore = struct {
         var d = self.client.task.Delete();
         defer d.deinit();
         _ = try d.Where(.{or_pred});
-        _ = try d.Exec();
-        return 0;
+        return try d.Exec();
     }
 
     pub fn countByStatus(self: *TaskStore) !StatusCounts {
+        // A single `AggregateBy("COUNT(*)", "status")` GROUP BY was tried and
+        // reverted: SQLite's readAggValue probes getInt first and column_int64
+        // coerces the TEXT status keys to 0, collapsing every count to zero
+        // (PostgreSQL is unaffected). Per-status Count walks the
+        // (status, available_at) index five times — fine for dashboard rates.
         var counts: StatusCounts = .{};
         const preds = self.client.task.predicates;
         inline for (.{

@@ -100,7 +100,7 @@ pub fn SystemApi(comptime CacheT: type, comptime TaskSvcT: type) type {
                 .msg = "",
                 .data = .{
                     .app = "zasdoor",
-                    .version = "0.2.0",
+                    .version = @import("build_info").version,
                     .uptime_seconds = now - self.started_at,
                     .db = self.db_kind,
                     .mail = .{ .smtp = self.smtp_enabled, .console = self.mail_console },

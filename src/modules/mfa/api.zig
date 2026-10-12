@@ -57,7 +57,7 @@ pub fn MfaApi(comptime Service: type, comptime UserService: type) type {
         fn verifyTotp(ctx: *http.Context) !void {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
             const uid = (try requireUser(ctx, self)) orelse return;
-            const req = ctx.bindJson(VerifyCodeReq) catch {
+            const req = ctx.bindJsonLoose(VerifyCodeReq) catch {
                 try ctx.sendErrorResponse(400, 400, "请求体格式错误");
                 return;
             };
@@ -84,7 +84,7 @@ pub fn MfaApi(comptime Service: type, comptime UserService: type) type {
         fn verifyFactor(ctx: *http.Context) !void {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
             _ = (try requireUser(ctx, self)) orelse return;
-            const req = ctx.bindJson(VerifyFactorReq) catch {
+            const req = ctx.bindJsonLoose(VerifyFactorReq) catch {
                 try ctx.sendErrorResponse(400, 400, "请求体格式错误");
                 return;
             };
@@ -134,7 +134,7 @@ pub fn MfaApi(comptime Service: type, comptime UserService: type) type {
 
         fn setPolicy(ctx: *http.Context) !void {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
-            const req = ctx.bindJson(SetPolicyReq) catch {
+            const req = ctx.bindJsonLoose(SetPolicyReq) catch {
                 try ctx.sendErrorResponse(400, 400, "请求体格式错误");
                 return;
             };

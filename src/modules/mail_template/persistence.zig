@@ -67,19 +67,12 @@ pub const TemplateStore = struct {
         return try self.dup(entity);
     }
 
-    /// Insert or update the template identified by `code` (upsert by query).
+    /// Business-key upsert (zent v0.30): one `SaveOrUpdateOnWith` statement
+    /// on the unique `code` replaces the old exists-then-insert/update pair,
+    /// so concurrent writers cannot race. Explicit SET expressions keep the
+    /// row id and `created_at` on the update path (SQLite emits
+    /// ON CONFLICT DO UPDATE, not INSERT OR REPLACE).
     pub fn upsert(self: *TemplateStore, code: []const u8, subject: []const u8, body: []const u8, now: i64) !void {
-        const preds = self.client.email_template.predicates;
-        if (try crud.exists(self.client.email_template, .{preds.codeEQ(.{ .string = code })})) {
-            var upd = self.client.email_template.Update();
-            defer upd.deinit();
-            _ = try upd.setFieldValue("subject", subject);
-            _ = try upd.setFieldValue("body", body);
-            _ = try upd.setFieldValue("updated_at", now);
-            _ = try upd.Where(.{preds.codeEQ(.{ .string = code })});
-            _ = try upd.Save();
-            return;
-        }
         var b = try self.client.email_template.Create();
         defer b.deinit();
         _ = try b.setFieldValue("code", code);
@@ -87,7 +80,12 @@ pub const TemplateStore = struct {
         _ = try b.setFieldValue("body", body);
         _ = try b.setFieldValue("created_at", now);
         _ = try b.setFieldValue("updated_at", now);
-        var row = try b.Save();
+        var row = try b.SaveOrUpdateOnWith(&.{"code"}, &.{
+            .{ .column = "subject", .expr = "{x:subject}" },
+            .{ .column = "body", .expr = "{x:body}" },
+            .{ .column = "created_at", .expr = "{t:created_at}" },
+            .{ .column = "updated_at", .expr = "{x:updated_at}" },
+        });
         defer zent.codegen.deinitEntity(infos, EmailTemplateInfo, &row, self.allocator);
     }
 

@@ -1,5 +1,6 @@
 import axios, { type InternalAxiosRequestConfig } from 'axios';
 
+import { ApiError } from '#ui/api/envelope';
 import { APP_CONFIG } from '#ui/config';
 
 let authToken: string | null = null;
@@ -52,6 +53,13 @@ http.interceptors.response.use(
     if (status === 401 && !isAuthRequest) {
       setAuthToken(null);
       unauthorizedHandler?.();
+    }
+    // A non-2xx response body can still be an envelope: unwrap it into an
+    // ApiError so the UI shows the server's msg instead of axios's generic
+    // "Request failed with status code 400".
+    const data = error.response?.data;
+    if (data && typeof data.code === 'number' && typeof data.msg === 'string' && data.msg) {
+      return Promise.reject(new ApiError(data.code, data.msg));
     }
     return Promise.reject(error);
   },

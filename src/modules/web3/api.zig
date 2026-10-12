@@ -32,7 +32,7 @@ pub fn Web3Api(comptime Service: type, comptime UserService: type) type {
 
         fn siweNonce(ctx: *http.Context) !void {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
-            const req = ctx.bindJson(SiweNonceReq) catch {
+            const req = ctx.bindJsonLoose(SiweNonceReq) catch {
                 try ctx.sendErrorResponse(400, 400, "请求体格式错误");
                 return;
             };
@@ -59,7 +59,7 @@ pub fn Web3Api(comptime Service: type, comptime UserService: type) type {
 
         fn siweVerify(ctx: *http.Context) !void {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
-            const req = ctx.bindJson(SiweVerifyReq) catch {
+            const req = ctx.bindJsonLoose(SiweVerifyReq) catch {
                 try ctx.sendErrorResponse(400, 400, "请求体格式错误");
                 return;
             };
@@ -126,7 +126,7 @@ pub fn Web3Api(comptime Service: type, comptime UserService: type) type {
                 try ctx.sendErrorResponse(401, 401, "未登录或登录已过期");
                 return;
             };
-            const req = ctx.bindJson(BindReq) catch {
+            const req = ctx.bindJsonLoose(BindReq) catch {
                 try ctx.sendErrorResponse(400, 400, "请求体格式错误");
                 return;
             };

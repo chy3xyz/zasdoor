@@ -120,7 +120,7 @@ pub fn IamApi(comptime Service: type, comptime UserService: type) type {
         fn createOrganization(ctx: *http.Context) !void {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
             const admin_id = (try requireAdmin(ctx, self)) orelse return;
-            const req = ctx.bindJson(CreateOrgReq) catch {
+            const req = ctx.bindJsonLoose(CreateOrgReq) catch {
                 try ctx.sendErrorResponse(400, 400, "请求体格式错误");
                 return;
             };
@@ -199,7 +199,7 @@ pub fn IamApi(comptime Service: type, comptime UserService: type) type {
         fn createProject(ctx: *http.Context) !void {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
             const admin_id = (try requireAdmin(ctx, self)) orelse return;
-            const req = ctx.bindJson(CreateProjectReq) catch {
+            const req = ctx.bindJsonLoose(CreateProjectReq) catch {
                 try ctx.sendErrorResponse(400, 400, "请求体格式错误");
                 return;
             };
@@ -282,7 +282,7 @@ pub fn IamApi(comptime Service: type, comptime UserService: type) type {
                 try ctx.sendErrorResponse(400, 400, "无效的项目 ID");
                 return;
             };
-            const req = ctx.bindJson(CreateApplicationReq) catch {
+            const req = ctx.bindJsonLoose(CreateApplicationReq) catch {
                 try ctx.sendErrorResponse(400, 400, "请求体格式错误");
                 return;
             };
@@ -309,7 +309,7 @@ pub fn IamApi(comptime Service: type, comptime UserService: type) type {
                 req.scopes orelse "openid profile email",
                 req.access_token_ttl orelse 3600,
                 req.refresh_token_ttl orelse 0,
-                req.pkce_required orelse false,
+                req.pkce_required orelse true,
             ) catch |err| switch (err) {
                 error.InvalidName => {
                     try ctx.sendErrorResponse(400, 400, "应用名称不能为空");
@@ -387,7 +387,7 @@ pub fn IamApi(comptime Service: type, comptime UserService: type) type {
                 try ctx.sendErrorResponse(400, 400, "无效的项目 ID");
                 return;
             };
-            const req = ctx.bindJson(CreateRoleReq) catch {
+            const req = ctx.bindJsonLoose(CreateRoleReq) catch {
                 try ctx.sendErrorResponse(400, 400, "请求体格式错误");
                 return;
             };
@@ -436,7 +436,7 @@ pub fn IamApi(comptime Service: type, comptime UserService: type) type {
                 try ctx.sendErrorResponse(400, 400, "无效的角色 ID");
                 return;
             };
-            const req = ctx.bindJson(AssignRoleReq) catch {
+            const req = ctx.bindJsonLoose(AssignRoleReq) catch {
                 try ctx.sendErrorResponse(400, 400, "请求体格式错误");
                 return;
             };

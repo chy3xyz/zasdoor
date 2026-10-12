@@ -36,7 +36,7 @@ pub fn IdpApi(comptime Service: type, comptime UserService: type) type {
 
         fn create(ctx: *http.Context) !void {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
-            const req = ctx.bindJson(CreateIdpReq) catch {
+            const req = ctx.bindJsonLoose(CreateIdpReq) catch {
                 try ctx.sendErrorResponse(400, 400, "请求体格式错误");
                 return;
             };
@@ -75,7 +75,7 @@ pub fn IdpApi(comptime Service: type, comptime UserService: type) type {
 
         fn loginLink(ctx: *http.Context) !void {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
-            const req = ctx.bindJson(LinkReq) catch {
+            const req = ctx.bindJsonLoose(LinkReq) catch {
                 try ctx.sendErrorResponse(400, 400, "请求体格式错误");
                 return;
             };
@@ -101,7 +101,7 @@ pub fn IdpApi(comptime Service: type, comptime UserService: type) type {
                 try ctx.sendErrorResponse(400, 400, "IdP 不存在");
                 return;
             };
-            const req_opt: ?StartReq = ctx.bindJson(StartReq) catch null;
+            const req_opt: ?StartReq = ctx.bindJsonLoose(StartReq) catch null;
             var redirect_to: []const u8 = "";
             var redir_owned: ?[]const u8 = null;
             if (req_opt) |req| {

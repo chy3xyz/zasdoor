@@ -172,7 +172,7 @@ pub fn UserApi(comptime Service: type) type {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
             const admin_id = (try requireAdmin(ctx, self)) orelse return;
 
-            const req = ctx.bindJson(CreateUserReq) catch {
+            const req = ctx.bindJsonLoose(CreateUserReq) catch {
                 try ctx.sendErrorResponse(400, 400, "请求体格式错误");
                 return;
             };
@@ -182,11 +182,11 @@ pub fn UserApi(comptime Service: type) type {
 
             const is_admin = req.admin orelse false;
             const tenant_id = req.tenant_id orelse self.default_tenant_id;
-            var session = self.svc.register(ctx.allocator, req.name, req.email, req.password, is_admin, tenant_id) catch |err| {
+            const session = self.svc.register(ctx.allocator, req.name, req.email, req.password, is_admin, tenant_id) catch |err| {
                 try sendCreateError(ctx, err);
                 return;
             };
-            defer session.deinit(self.svc.store.allocator);
+            defer self.svc.freeSession(session);
 
             var detail_buf: [160]u8 = undefined;
             const detail = try std.fmt.bufPrint(&detail_buf, "创建用户 {s} ({s})", .{ req.name, req.email });
@@ -210,7 +210,7 @@ pub fn UserApi(comptime Service: type) type {
                 try ctx.sendErrorResponse(400, 400, "无效的用户 ID");
                 return;
             };
-            const req = ctx.bindJson(UpdateUserReq) catch {
+            const req = ctx.bindJsonLoose(UpdateUserReq) catch {
                 try ctx.sendErrorResponse(400, 400, "请求体格式错误");
                 return;
             };

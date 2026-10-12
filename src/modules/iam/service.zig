@@ -181,7 +181,15 @@ pub const IamService = struct {
             row.free(self.allocator);
             return null;
         }
-        if (!self.sec.module.verifyPassword(client_secret, row.client_secret_hash)) {
+        const secret_ok = self.sec.module.verifyPassword(client_secret, row.client_secret_hash) catch |err| {
+            // A stored client-secret hash we cannot decode is an operational
+            // error, not a bad credential; log it and fail closed. The OAuth
+            // caller maps any error here to `invalid_client`.
+            std.log.err("[iam] client-secret verification failed for {s}: {s}", .{ client_id, @errorName(err) });
+            row.free(self.allocator);
+            return error.Unexpected;
+        };
+        if (!secret_ok) {
             row.free(self.allocator);
             return null;
         }

@@ -89,7 +89,7 @@ pub fn AgentApi(comptime Service: type, comptime UserService: type) type {
                 try ctx.sendErrorResponse(401, 401, "未登录或登录已过期");
                 return;
             };
-            const req = ctx.bindJson(CreateAgentReq) catch {
+            const req = ctx.bindJsonLoose(CreateAgentReq) catch {
                 try ctx.sendErrorResponse(400, 400, "请求体格式错误");
                 return;
             };
@@ -173,7 +173,7 @@ pub fn AgentApi(comptime Service: type, comptime UserService: type) type {
                 try ctx.sendErrorResponse(400, 400, "无效的 Agent ID");
                 return;
             };
-            const req = ctx.bindJson(IssueTokenReq) catch IssueTokenReq{ .ttl = null };
+            const req = ctx.bindJsonLoose(IssueTokenReq) catch IssueTokenReq{ .ttl = null };
             const ttl = req.ttl orelse 3600;
             const tok_opt = self.svc.issueAgentToken(id, ttl) catch {
                 try ctx.sendErrorResponse(500, 500, "服务器内部错误");
@@ -195,7 +195,7 @@ pub fn AgentApi(comptime Service: type, comptime UserService: type) type {
                 try ctx.sendErrorResponse(401, 401, "未登录或登录已过期");
                 return;
             };
-            const req = ctx.bindJson(VerifyTokenReq) catch {
+            const req = ctx.bindJsonLoose(VerifyTokenReq) catch {
                 try ctx.sendErrorResponse(400, 400, "请求体格式错误");
                 return;
             };

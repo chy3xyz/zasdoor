@@ -4,6 +4,7 @@ const std = @import("std");
 const zigmodu = @import("zigmodu");
 const http = zigmodu.http;
 const mw = @import("../../middleware/auth.zig");
+const url_guard = @import("../../http/url_guard.zig");
 const service = @import("service.zig");
 const user_svc = @import("../user/service.zig");
 
@@ -162,6 +163,7 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
 
             // 管理端点。
             var a = try group.use(zigmodu.http.http_middleware.jwtAuthWithSecurity(&self.user_svc.sec.module));
+            a = try a.use(mw.tokenVersionGuard(self.user_svc.sec, self.user_svc.store));
             try a.get("/ai/providers", listProviders, @ptrCast(@alignCast(self)));
             try a.post("/ai/providers", createProvider, @ptrCast(@alignCast(self)));
             try a.put("/ai/providers/{id}", updateProvider, @ptrCast(@alignCast(self)));
@@ -194,7 +196,7 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
                 try ctx.sendErrorResponse(401, 401, "未登录或登录已过期");
                 return null;
             };
-            defer row.free(ctx.allocator);
+            defer row.free(self.user_svc.store.allocator);
             if (!row.admin) {
                 try ctx.sendErrorResponse(403, 403, "需要管理员权限");
                 return null;
@@ -213,7 +215,7 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
                 try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
-            defer result.free(ctx.allocator);
+            defer result.free(self.svc.store.allocator);
             const dtos = try zigmodu.http.Extract.toDtoList(ctx.allocator, result.items, ProviderDto, toProviderDto);
             try zigmodu.http.sendPaged(ctx, dtos, @intCast(result.total), params, .ruoyi);
         }
@@ -221,7 +223,7 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
         fn createProvider(ctx: *http.Context) !void {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
             _ = (try requireAdmin(ctx, self)) orelse return;
-            const req = ctx.bindJson(CreateProviderReq) catch {
+            const req = ctx.bindJsonLoose(CreateProviderReq) catch {
                 try ctx.sendErrorResponse(400, 400, "请求体格式错误");
                 return;
             };
@@ -231,6 +233,11 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
                 ctx.allocator.free(req.api_keys);
                 if (req.models.len > 0) ctx.allocator.free(req.models);
                 if (req.fallback_providers.len > 0) ctx.allocator.free(req.fallback_providers);
+            }
+            // SSRF baseline: the endpoint is admin-supplied and the server dials it.
+            if (!url_guard.isAcceptableOutboundUrl(req.endpoint)) {
+                try ctx.sendErrorResponse(400, 400, "endpoint 不允许：仅 http(s) 且不得指向内网/回环地址");
+                return;
             }
             const encrypted = self.svc.encryptKeys(ctx.allocator, req.api_keys) catch |err| switch (err) {
                 error.MissingKeySecret => {
@@ -268,9 +275,9 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
                 try ctx.sendErrorResponse(404, 404, "Provider 不存在");
                 return;
             };
-            defer cur.free(ctx.allocator);
+            defer cur.free(self.svc.store.allocator);
 
-            const req = ctx.bindJson(UpdateProviderReq) catch {
+            const req = ctx.bindJsonLoose(UpdateProviderReq) catch {
                 try ctx.sendErrorResponse(400, 400, "请求体格式错误");
                 return;
             };
@@ -280,6 +287,13 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
                 if (req.api_keys) |v| ctx.allocator.free(v);
                 if (req.models) |v| ctx.allocator.free(v);
                 if (req.fallback_providers) |v| ctx.allocator.free(v);
+            }
+            // SSRF baseline on the update path too.
+            if (req.endpoint) |ep| {
+                if (!url_guard.isAcceptableOutboundUrl(ep)) {
+                    try ctx.sendErrorResponse(400, 400, "endpoint 不允许：仅 http(s) 且不得指向内网/回环地址");
+                    return;
+                }
             }
 
             var encrypted: []const u8 = cur.api_keys_encrypted;
@@ -349,7 +363,7 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
                 try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
-            defer result.free(ctx.allocator);
+            defer result.free(self.svc.store.allocator);
             const dtos = try zigmodu.http.Extract.toDtoList(ctx.allocator, result.items, SessionDto, toSessionDto);
             try zigmodu.http.sendPaged(ctx, dtos, @intCast(result.total), params, .ruoyi);
         }
@@ -360,7 +374,7 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
                 try ctx.sendErrorResponse(401, 401, "未登录或登录已过期");
                 return;
             };
-            const req = ctx.bindJson(CreateSessionReq) catch {
+            const req = ctx.bindJsonLoose(CreateSessionReq) catch {
                 try ctx.sendErrorResponse(400, 400, "请求体格式错误");
                 return;
             };
@@ -385,13 +399,13 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
                 try ctx.sendErrorResponse(404, 404, "会话不存在");
                 return;
             };
-            defer session.free(ctx.allocator);
+            defer session.free(self.svc.store.allocator);
             var result = self.svc.store.listMessages(sid) catch |err| {
                 std.log.err("internal error: {s}", .{@errorName(err)});
                 try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
-            defer result.free(ctx.allocator);
+            defer result.free(self.svc.store.allocator);
             const dtos = try zigmodu.http.Extract.toDtoList(ctx.allocator, result.items, MessageDto, toMessageDto);
             try ctx.jsonStruct(200, .{ .code = 0, .msg = "", .data = .{ .list = dtos, .total = result.total } });
         }
@@ -410,9 +424,9 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
                 try ctx.sendErrorResponse(404, 404, "会话不存在");
                 return;
             };
-            defer session.free(ctx.allocator);
+            defer session.free(self.svc.store.allocator);
 
-            const req = ctx.bindJson(ChatReq) catch {
+            const req = ctx.bindJsonLoose(ChatReq) catch {
                 try ctx.sendErrorResponse(400, 400, "请求体格式错误");
                 return;
             };
@@ -424,7 +438,9 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
             }
 
             const now = zigmodu.time.wallClockSeconds(self.svc.io);
-            _ = self.svc.store.addMessage(sid, "user", content, "", now) catch {};
+            _ = self.svc.store.addMessage(sid, "user", content, "", now) catch |err| {
+                std.log.err("[ai] persist user message failed: {s}", .{@errorName(err)});
+            };
 
             // SSE 流式模式:Accept: text/event-stream → 旁路推送 reasoning/delta,结束发 done。
             const stream_req = std.mem.eql(u8, ctx.header("Accept") orelse "", "text/event-stream");
@@ -442,7 +458,9 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
                     }
                 }.cb;
                 break :blk self.svc.chat(ctx.allocator, sid, uid, session.tenant_id, content, on_delta, &st) catch |err| {
-                    try sse.sendEvent("error", @errorName(err));
+                    // @errorName goes to the log only; the SSE event is client-facing.
+                    std.log.err("[ai] chat (SSE) failed: {s}", .{@errorName(err)});
+                    try sse.sendEvent("error", "AI 服务调用失败");
                     try sse.done();
                     return;
                 };
@@ -460,13 +478,12 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
                     return;
                 },
                 else => {
-                    const msg = try std.fmt.allocPrint(ctx.allocator, "AI 服务调用失败: {s}", .{@errorName(err)});
-                    defer ctx.allocator.free(msg);
-                    try ctx.sendErrorResponse(502, 502, msg);
+                    std.log.err("[ai] chat failed: {s}", .{@errorName(err)});
+                    try ctx.sendErrorResponse(502, 502, "AI 服务调用失败");
                     return;
                 },
             };
-            defer outcome.free(ctx.allocator);
+            defer outcome.free(self.svc.allocator);
 
             if (stream_req) {
                 var sse2 = try zigmodu.http.SseWriter.init(ctx);
@@ -480,8 +497,12 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
                 try sse2.done();
             }
 
-            _ = self.svc.store.addMessage(sid, "assistant", outcome.answer, outcome.reasoning, now) catch {};
-            _ = self.svc.store.touchSession(sid, now) catch {};
+            _ = self.svc.store.addMessage(sid, "assistant", outcome.answer, outcome.reasoning, now) catch |err| {
+                std.log.err("[ai] persist assistant message failed: {s}", .{@errorName(err)});
+            };
+            _ = self.svc.store.touchSession(sid, now) catch |err| {
+                std.log.warn("[ai] touch session failed: {s}", .{@errorName(err)});
+            };
             try ctx.jsonStruct(200, .{
                 .code = 0,
                 .msg = "",
@@ -536,9 +557,8 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
                     return;
                 },
                 else => {
-                    const msg = try std.fmt.allocPrint(ctx.allocator, "连接失败: {s}", .{@errorName(err)});
-                    defer ctx.allocator.free(msg);
-                    try ctx.sendErrorResponse(502, 502, msg);
+                    std.log.err("[ai] provider check failed: {s}", .{@errorName(err)});
+                    try ctx.sendErrorResponse(502, 502, "连接失败，请检查 Provider 配置");
                     return;
                 },
             };
@@ -557,7 +577,7 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
                 try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
-            defer result.free(ctx.allocator);
+            defer result.free(self.svc.store.allocator);
             const dtos = try zigmodu.http.Extract.toDtoList(ctx.allocator, result.items, ApprovalDto, toApprovalDto);
             try zigmodu.http.sendPaged(ctx, dtos, @intCast(result.total), params, .ruoyi);
         }
@@ -599,7 +619,7 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
                 try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
-            defer result.free(ctx.allocator);
+            defer result.free(self.svc.store.allocator);
             const dtos = try zigmodu.http.Extract.toDtoList(ctx.allocator, result.items, RunDto, toRunDto);
             try zigmodu.http.sendPaged(ctx, dtos, @intCast(result.total), params, .ruoyi);
         }

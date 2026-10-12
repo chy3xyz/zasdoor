@@ -69,6 +69,83 @@ pub fn derive(secret: []const u8) Signer {
     return fromSeed(seed);
 }
 
+/// Maximum number of keys in the ring (current + previous for rotation).
+pub const max_keys = 4;
+
+/// A ring of Ed25519 signers for key rotation.
+///
+/// Index 0 is the *current* signing key; every key in the ring is published in
+/// the JWKS and accepted for verification. Rotating therefore means prepending
+/// the new secret and keeping the old one for at least one token lifetime, so
+/// tokens signed before the rotation still verify during the overlap window.
+pub const KeyRing = struct {
+    signers: [max_keys]Signer = undefined,
+    count: usize = 0,
+
+    /// The key used for new signatures.
+    pub fn current(self: *const KeyRing) *const Signer {
+        return &self.signers[0];
+    }
+
+    /// Signing algorithm advertised by the current key.
+    pub fn alg(self: *const KeyRing) jwt.SigningAlg {
+        return self.signers[0].alg;
+    }
+
+    /// Sign with the current key.
+    pub fn sign(self: *const KeyRing, allocator: std.mem.Allocator, payload_json: []const u8) ![]const u8 {
+        return self.signers[0].sign(allocator, payload_json);
+    }
+
+    /// Verify against every key in the ring (rotation overlap).
+    pub fn verify(self: *const KeyRing, allocator: std.mem.Allocator, token: []const u8) jwt.Error![]const u8 {
+        var last_err: jwt.Error = error.InvalidSignature;
+        var i: usize = 0;
+        while (i < self.count) : (i += 1) {
+            if (self.signers[i].verify(allocator, token)) |payload| {
+                return payload;
+            } else |err| {
+                last_err = err;
+            }
+        }
+        return last_err;
+    }
+
+    /// Render the complete JWKS document with every public key in the ring.
+    pub fn jwksJson(self: *const KeyRing, allocator: std.mem.Allocator) ![]const u8 {
+        var buf = std.ArrayList(u8).empty;
+        errdefer buf.deinit(allocator);
+        try buf.appendSlice(allocator, "{\"keys\":[");
+        var i: usize = 0;
+        while (i < self.count) : (i += 1) {
+            if (i > 0) try buf.append(allocator, ',');
+            const jwk = try self.signers[i].publicJwkJson(allocator);
+            defer allocator.free(jwk);
+            try buf.appendSlice(allocator, jwk);
+        }
+        try buf.appendSlice(allocator, "]}");
+        return buf.toOwnedSlice(allocator);
+    }
+};
+
+/// Build a key ring: the primary secret is the current signer, then up to
+/// max_keys-1 extra secrets from a comma-separated list (older keys, kept for
+/// verification during rotation).
+pub fn deriveRing(primary: []const u8, extra_csv: []const u8) KeyRing {
+    var ring = KeyRing{};
+    ring.signers[0] = derive(primary);
+    ring.count = 1;
+    var it = std.mem.splitScalar(u8, extra_csv, ',');
+    while (it.next()) |raw| {
+        if (ring.count >= max_keys) break;
+        const s = std.mem.trim(u8, raw, " \t");
+        if (s.len == 0) continue;
+        ring.signers[ring.count] = derive(s);
+        ring.count += 1;
+    }
+    return ring;
+}
+
 /// HKDF-SHA256(secret) -> 32-byte seed.
 pub fn deriveSeed(secret: []const u8, info: []const u8, out: *[32]u8) void {
     const prk = HkdfSha256.extract("", secret);

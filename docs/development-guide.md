@@ -85,15 +85,17 @@ src/modules/order/
 
 ### 2.2 注册进 schema.zig
 
-在 `src/schema.zig` 把新表加入对应 graph(或新建 graph):
+在 `src/schema.zig` 把新表加入**唯一**的全量 graph:
 
 ```zig
 const graph = zent.codegen.graph.buildGraph(&.{ tenant_model.Tenant, user_model.User, /* ... */ order_model.Order });
+pub const infos = graph.types;
 ```
 
-> 注意:zent `buildGraph` 单次调用有 comptime 分支配额,表多时拆多个
-> graph(本项目拆了 3 个)并在 `pub const infos = graph.types ++ ...` 汇总,
-> `Client` 由全量 infos 生成。跨表边(WithEdge)需在同 graph 内。
+> zent 自 v0.29.4 起把 `buildGraph` 的 comptime 分支配额提到 1M(实测单次可
+> 容纳约 400 张表,见 zent `docs/UPGRADING.md` §7a),早期「表多要拆 graph」
+> 的说法已过时;拆图还会挡住跨表 `WithEdge`。全项目保持一个 graph、
+> `infos = graph.types`。
 
 ### 2.3 服务装配(main.zig 手工 DI)
 
@@ -206,7 +208,9 @@ try tx.commit();
 ### 3.5 查询聚合与类型
 
 - `Sum` 返回 `f64`(zent v0.29.4 起),转整型用 `@intFromFloat(...)`,
-  不要 `@intCast`。
+  不要 `@intCast`。**可能为空的聚合用 `SumOrZero`**:空结果集时 `Sum` 对
+  SQL NULL 抛 `error.TypeMismatch`,`SumOrZero` 会 COALESCE 回 0
+  (参考 `ai.quotaForUser`)。
 - `Count` 返回 `i64`;`q.paged` / `paginatedWithOptions` 内部一次调用完成
   count + limit/offset。
 - 大表深分页:OFFSET 分页是 O(n),增长表切 `crud.cursorPage`(keyset)。
@@ -236,6 +240,21 @@ try tx.commit();
 - **日志/审计**:管理操作(登录、注册、审批、导出)写平台审计
   `audit.log(...)`;敏感操作失败不要 `catch {}` 静默吞掉——至少
   `std.log.err` 或传播错误。
+- **JSON 入参**:写接口统一用 `ctx.bindJsonLoose`(snake_case/camelCase 与
+  `null` 容错,缺省字段回落声明默认值);必填校验仍在 service 层,不能只
+  依赖绑定。
+- **文件上传**:一律走 zigmodu `UploadGuard.check`——**按字节嗅探**而非
+  只看扩展名(HTML/SVG 改名 `.txt` 也拒),扩展名白名单与大小上限同一次
+  调用完成;失败映射 4xx(见 `file/service.zig`);入库名先过
+  `sanitizeFilename`,存储键扩展名只允许字母数字。
+- **出站 URL(SSRF)**:服务端主动外呼的地址(目前是 AI provider endpoint)
+  写入口与出站前都过 `http/url_guard.zig`:只允许 http(s),字面回环/内网
+  一律拒(防 `http://x@127.0.0.1/` 之类绕过);DNS 解析层的防护需 egress
+  策略兜底。
+- **分配器归属**:store 产出的行用 `store.allocator` 释放,security module
+  产出的 token/口令哈希用其自身 allocator;混用请求侧 arena 的 `free` 是
+  静默空操作(泄漏)。统一走 `UserService.freeSession` 一类封装;
+  `scripts/run_e2e.sh` 的关机门禁会抓这类泄漏。
 
 ---
 
@@ -244,8 +263,8 @@ try tx.commit();
 1. **索引**:凡有按某列过滤/排序的热路径,在 schema 加
    `index.Fields(&.{...})`(复合索引注意列顺序,等值在前、范围在后)。
 2. **批量操作**:循环内逐条 `Update/Exec` 改 `WHERE id IN (...)` 一次
-   (参考 task `requeueStale` 的待办);大批量插入用 `BulkInsert` /
-   `crud.batchCreate`。
+   (已落地:task `requeueStale` 用 `zent.sql.In` 一条 UPDATE 重排全部未超
+   预算任务);大批量插入用 `BulkInsert` / `crud.batchCreate`。
 3. **N+1**:列表 + 每行查关联,改 zent `WithEdge`(同 graph 内)或一次
    `findByIds` 再内存分组。
 4. **分页**:`audit_log`/`ai_run`/`notification` 这类增长表,深分页换
@@ -295,6 +314,9 @@ try tx.commit();
 | 升级依赖后缓存假象 | `--summary all` / 换 global cache 验证真实编译 |
 | 敏感列全行读出 | `q.Select` 列投影 |
 | 循环逐条写 | `IN (...)` 批量 / batchCreate |
+| 服务端外呼未校验 | 写入口 + 出站前过 `url_guard`(SSRF 基线) |
+| handler 静默 return | 返回 error,交 dispatcher 记 last_error 重试 |
+| 跨分配器 free | 用产出者的 allocator(见 `freeSession`) |
 | 未引用函数的编译错误 | 补测试激活该路径 |
 
 ---

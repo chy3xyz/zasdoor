@@ -45,6 +45,8 @@ const SendVerificationReq = struct {};
 const UpdateProfileReq = struct {
     name: ?[]const u8 = null,
     email: ?[]const u8 = null,
+    phone: ?[]const u8 = null,
+    address: ?[]const u8 = null,
 };
 
 const ChangePasswordReq = struct {
@@ -129,7 +131,7 @@ pub fn AuthApi(comptime Service: type) type {
             // Public routes are rate-limited to blunt credential stuffing /
             // reset-token brute force.
             // per-IP 限流(攻击者无法耗尽全局桶误伤他人)。
-            var limited = try group.use(zigmodu.http.tracing_middleware.rateLimitPerClient(self.registry, clientIpKey));
+            var limited = try group.use(try zigmodu.http.tracing_middleware.rateLimitPerClient(self.registry, clientIpKey));
             try limited.post("/auth/register", register, @ptrCast(@alignCast(self)));
             try limited.post("/auth/login", login, @ptrCast(@alignCast(self)));
             try limited.post("/auth/logout", logout, @ptrCast(@alignCast(self)));
@@ -147,7 +149,7 @@ pub fn AuthApi(comptime Service: type) type {
 
         fn register(ctx: *http.Context) !void {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
-            const req = ctx.bindJson(RegisterReq) catch {
+            const req = ctx.bindJsonLoose(RegisterReq) catch {
                 try ctx.sendErrorResponse(400, 400, "请求体格式错误");
                 return;
             };
@@ -158,7 +160,7 @@ pub fn AuthApi(comptime Service: type) type {
             // 公开注册固定进入默认租户:租户指定只允许经认证的管理端 /users 接口
             // (避免伪造 X-Tenant-ID 头注入任意租户)。
             const tenant_id = self.default_tenant_id;
-            var session = self.svc.register(ctx.allocator, req.name, req.email, req.password, false, tenant_id) catch |err| switch (err) {
+            const session = self.svc.register(ctx.allocator, req.name, req.email, req.password, false, tenant_id) catch |err| switch (err) {
                 error.InvalidName => {
                     try ctx.sendErrorResponse(400, 400, "姓名不能为空");
                     return;
@@ -184,7 +186,7 @@ pub fn AuthApi(comptime Service: type) type {
                     return;
                 },
             };
-            defer session.deinit(self.svc.store.allocator);
+            defer self.svc.freeSession(session);
             // Email verification is a background courtesy: never block the
             // registration response on mail delivery.
             if (!session.row.verified) self.sendVerificationMail(ctx, session.row.id);
@@ -203,7 +205,7 @@ pub fn AuthApi(comptime Service: type) type {
 
         fn login(ctx: *http.Context) !void {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
-            const req = ctx.bindJson(LoginReq) catch {
+            const req = ctx.bindJsonLoose(LoginReq) catch {
                 try ctx.sendErrorResponse(400, 400, "请求体格式错误");
                 return;
             };
@@ -227,6 +229,10 @@ pub fn AuthApi(comptime Service: type) type {
                     try ctx.sendErrorResponse(429, 429, "尝试次数过多，请稍后再试");
                     return;
                 },
+                error.Unexpected => {
+                    try ctx.sendErrorResponse(500, 500, "服务器内部错误");
+                    return;
+                },
             };
             const session = session_opt orelse {
                 var d3: [160]u8 = undefined;
@@ -235,7 +241,7 @@ pub fn AuthApi(comptime Service: type) type {
                 try ctx.sendErrorResponse(401, 401, "邮箱或密码错误");
                 return;
             };
-            defer session.deinit(self.svc.store.allocator);
+            defer self.svc.freeSession(session);
             var d4: [128]u8 = undefined;
             const det4 = try std.fmt.bufPrint(&d4, "登录成功: {s}", .{req.email});
             self.audit.log(session.row.id, session.row.name, "auth.login", "user", session.row.id, det4, zigmodu.http.RequestUtil.getRealIp(ctx), true, session.row.tenant_id);
@@ -277,7 +283,7 @@ pub fn AuthApi(comptime Service: type) type {
 
         fn forgotPassword(ctx: *http.Context) !void {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
-            const req = ctx.bindJson(ForgotPasswordReq) catch {
+            const req = ctx.bindJsonLoose(ForgotPasswordReq) catch {
                 try ctx.sendErrorResponse(400, 400, "请求体格式错误");
                 return;
             };
@@ -303,7 +309,7 @@ pub fn AuthApi(comptime Service: type) type {
 
         fn resetPassword(ctx: *http.Context) !void {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
-            const req = ctx.bindJson(ResetPasswordReq) catch {
+            const req = ctx.bindJsonLoose(ResetPasswordReq) catch {
                 try ctx.sendErrorResponse(400, 400, "请求体格式错误");
                 return;
             };
@@ -327,6 +333,10 @@ pub fn AuthApi(comptime Service: type) type {
                     try ctx.sendErrorResponse(400, 400, "重置链接已过期");
                     return;
                 },
+                error.Unexpected => {
+                    try ctx.sendErrorResponse(500, 500, "服务器内部错误");
+                    return;
+                },
             };
             try ctx.jsonStruct(200, .{ .code = 0, .msg = "密码已重置，请重新登录", .data = null });
         }
@@ -344,7 +354,7 @@ pub fn AuthApi(comptime Service: type) type {
 
         fn verifyEmail(ctx: *http.Context) !void {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
-            const req = ctx.bindJson(VerifyEmailReq) catch {
+            const req = ctx.bindJsonLoose(VerifyEmailReq) catch {
                 try ctx.sendErrorResponse(400, 400, "请求体格式错误");
                 return;
             };
@@ -357,6 +367,10 @@ pub fn AuthApi(comptime Service: type) type {
                 },
                 error.TokenExpired => {
                     try ctx.sendErrorResponse(400, 400, "验证链接已过期，请重新发送");
+                    return;
+                },
+                error.Unexpected => {
+                    try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                     return;
                 },
             };
@@ -372,13 +386,15 @@ pub fn AuthApi(comptime Service: type) type {
                 try ctx.sendErrorResponse(401, 401, "未登录或登录已过期");
                 return;
             };
-            const req = ctx.bindJson(UpdateProfileReq) catch {
+            const req = ctx.bindJsonLoose(UpdateProfileReq) catch {
                 try ctx.sendErrorResponse(400, 400, "请求体格式错误");
                 return;
             };
             defer {
                 if (req.name) |n| ctx.allocator.free(n);
                 if (req.email) |e| ctx.allocator.free(e);
+                if (req.phone) |p| ctx.allocator.free(p);
+                if (req.address) |a| ctx.allocator.free(a);
             }
 
             const cur_opt = self.svc.getUserById(uid) catch {
@@ -416,6 +432,27 @@ pub fn AuthApi(comptime Service: type) type {
                 },
             };
 
+            if (req.phone != null or req.address != null) {
+                self.svc.updateContact(uid, req.phone orelse "", req.address orelse "") catch |err| switch (err) {
+                    error.InvalidPhone => {
+                        try ctx.sendErrorResponse(400, 400, "电话号码格式不正确");
+                        return;
+                    },
+                    error.InvalidAddress => {
+                        try ctx.sendErrorResponse(400, 400, "地址格式不正确");
+                        return;
+                    },
+                    error.UserNotFound => {
+                        try ctx.sendErrorResponse(401, 401, "用户不存在");
+                        return;
+                    },
+                    error.Unexpected => {
+                        try ctx.sendErrorResponse(500, 500, "服务器错误");
+                        return;
+                    },
+                };
+            }
+
             const fresh_opt = self.svc.getUserById(uid) catch {
                 try ctx.sendErrorResponse(500, 500, "服务器错误");
                 return;
@@ -435,7 +472,7 @@ pub fn AuthApi(comptime Service: type) type {
                 try ctx.sendErrorResponse(401, 401, "未登录或登录已过期");
                 return;
             };
-            const req = ctx.bindJson(ChangePasswordReq) catch {
+            const req = ctx.bindJsonLoose(ChangePasswordReq) catch {
                 try ctx.sendErrorResponse(400, 400, "请求体格式错误");
                 return;
             };
@@ -457,6 +494,10 @@ pub fn AuthApi(comptime Service: type) type {
                 },
                 error.TokenInvalidationFailed => {
                     try ctx.sendErrorResponse(500, 500, "密码已更新,但旧会话失效失败,请重新登录");
+                    return;
+                },
+                error.Unexpected => {
+                    try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                     return;
                 },
             };

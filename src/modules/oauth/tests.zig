@@ -116,6 +116,33 @@ test "oauth keys: JWKS exposes the public key and no private material" {
     try std.testing.expectEqualStrings(buf[0..n], jwk.get("x").?.string);
 }
 
+test "oauth keys: ring signs with current and verifies rotated keys" {
+    const allocator = std.testing.allocator;
+    const old_ring = keys.deriveRing("secret-old", "");
+    const token = try old_ring.sign(allocator, "{\"sub\":\"1\"}");
+    defer allocator.free(token);
+
+    // The new ring keeps the old secret for the rotation overlap window.
+    const rotated = keys.deriveRing("secret-new", "secret-old");
+    try std.testing.expectEqual(@as(usize, 2), rotated.count);
+    const payload = try rotated.verify(allocator, token);
+    defer allocator.free(payload);
+    try std.testing.expect(std.mem.indexOf(u8, payload, "\"sub\":\"1\"") != null);
+
+    // New tokens use the new kid; the pre-rotation ring cannot verify them.
+    const fresh = try rotated.sign(allocator, "{\"sub\":\"2\"}");
+    defer allocator.free(fresh);
+    try std.testing.expect(!std.mem.eql(u8, rotated.current().kid(), old_ring.current().kid()));
+    try std.testing.expectError(error.InvalidSignature, old_ring.verify(allocator, fresh));
+
+    // JWKS publishes every key in the ring.
+    const jwks = try rotated.jwksJson(allocator);
+    defer allocator.free(jwks);
+    const parsed = try std.json.parseFromSlice(std.json.Value, allocator, jwks, .{});
+    defer parsed.deinit();
+    try std.testing.expectEqual(@as(usize, 2), parsed.value.object.get("keys").?.array.items.len);
+}
+
 test "oauth keys: ES256 JWK renders x and y with no private scalars" {
     const allocator = std.testing.allocator;
     const kp = try p256KeyPair(3);
@@ -151,6 +178,16 @@ test "oauth discovery: advertised alg matches the signer/JWKS alg" {
     try std.testing.expectEqual(@as(usize, 1), algs.items.len);
     try std.testing.expectEqualStrings(signer.alg.name(), algs.items[0].string);
     try std.testing.expectEqualStrings(jwk_alg, algs.items[0].string);
+    // RP-initiated logout is advertised.
+    try std.testing.expect(parsed.value.object.get("end_session_endpoint") != null);
+}
+
+test "oauth redirect: exact match rejects prefix/suffix confusion" {
+    try std.testing.expect(service.jsonListContains("[\"https://a.example/cb\"]", "https://a.example/cb"));
+    try std.testing.expect(!service.jsonListContains("[\"https://a.example/cb\"]", "https://a.example/cb.evil.com"));
+    try std.testing.expect(!service.jsonListContains("[\"https://a.example/cb\"]", "https://a.example"));
+    try std.testing.expect(service.jsonListContains("[\"https://a/cb\",\"https://b/cb\"]", "https://b/cb"));
+    try std.testing.expect(!service.jsonListContains("[]", "https://a/cb"));
 }
 
 // ── Consent coverage (pure) ───────────────────────────────────────────────

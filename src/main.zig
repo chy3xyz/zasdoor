@@ -14,6 +14,8 @@
 
 const std = @import("std");
 const zigmodu = @import("zigmodu");
+const zent = @import("zent");
+const build_info = @import("build_info");
 const config_mod = @import("config.zig");
 const db_mod = @import("db.zig");
 const schema = @import("schema.zig");
@@ -96,6 +98,7 @@ fn jobOAuthCodesPrune(ctx: ?*anyopaque) void {
     const c: *CleanupCtx = @ptrCast(@alignCast(ctx orelse return));
     const now = zigmodu.time.wallClockSeconds(c.io);
     _ = c.iam_store.purgeExpiredAuthCodes(now) catch {};
+    _ = c.iam_store.purgeExpiredDeviceCodes(now) catch {};
 }
 
 fn jobAuditPrune(ctx: ?*anyopaque) void {
@@ -104,17 +107,56 @@ fn jobAuditPrune(ctx: ?*anyopaque) void {
     _ = c.audit_store.purgeOlderThan(now, c.audit_retention_seconds) catch {};
 }
 
+/// Drops lockout rows untouched for a day so the shared table does not grow
+/// without bound as attackers try random emails.
+fn jobLoginAttemptsPrune(ctx: ?*anyopaque) void {
+    const c: *CleanupCtx = @ptrCast(@alignCast(ctx orelse return));
+    const now = zigmodu.time.wallClockSeconds(c.io);
+    _ = c.user_store.purgeStaleLoginAttempts(now, 24 * 3600) catch |err| {
+        std.log.err("[cleanup] login_attempts.prune failed: {s}", .{@errorName(err)});
+    };
+}
+
 pub fn main(init: std.process.Init) !void {
     const allocator = init.gpa;
     const io = init.io;
 
     const cfg = config_mod.Config.fromEnv(init.environ_map);
-    // 生产(PostgreSQL)必须显式设置 JWT 密钥,拒绝使用默认值。
-    if (!cfg.jwt_secret_explicit and std.mem.eql(u8, cfg.db_driver, "postgres")) {
-        std.log.err("ZASDOOR_JWT_SECRET must be set explicitly in production (PostgreSQL). Refusing to start with the default dev secret.", .{});
-        return error.MissingJwtSecret;
+    // Production-shaped startup preflight, fail-closed: a default/short JWT
+    // secret is a full authentication bypass and CORS "*" exposes every
+    // endpoint. Refuse to start rather than silently degrade.
+    if (cfg.isProdLike()) {
+        var env_ctx = zigmodu.Preflight.EnvCheck.fromMap(init.environ_map, &.{"ZASDOOR_JWT_SECRET"});
+        var secret_ctx = zigmodu.Preflight.SecretCheck{ .secret = cfg.jwt_secret, .min_len = 16 };
+        var report = zigmodu.Preflight.run(allocator, &.{
+            zigmodu.Preflight.envCheck(&env_ctx),
+            zigmodu.Preflight.secretCheck(&secret_ctx),
+        });
+        defer report.deinit();
+        report.log();
+        if (!report.ok() or !cfg.jwt_secret_explicit) {
+            std.log.err("ZASDOOR_JWT_SECRET must be set explicitly (>=16 chars, non-placeholder) in production. Refusing to start.", .{});
+            return error.PreflightFailed;
+        }
+        if (std.mem.eql(u8, cfg.cors_origins, "*")) {
+            std.log.err("ZASDOOR_CORS_ORIGINS=* is not allowed in production. Set an explicit origin allow-list.", .{});
+            return error.PreflightFailed;
+        }
     }
-    std.log.info("zasdoor starting (db={s}, port={d})", .{ cfg.db_driver, cfg.http_port });
+    std.log.info("zasdoor starting (db={s}, port={d}, env={s})", .{ cfg.db_driver, cfg.http_port, cfg.env });
+
+    // Route zent's library-level diagnostics (scan/migration/pool err/warn)
+    // into std.log instead of swallowing them.
+    zent.runtime.log.setSink(struct {
+        fn sink(level: zent.runtime.log.Level, message: []const u8) void {
+            switch (level) {
+                .err => std.log.err("[zent] {s}", .{message}),
+                .warn => std.log.warn("[zent] {s}", .{message}),
+                .info => std.log.info("[zent] {s}", .{message}),
+                .debug => std.log.debug("[zent] {s}", .{message}),
+            }
+        }
+    }.sink);
 
     // ── Data store: zent driver + schema-as-code migration ──
     const kind: db_mod.DriverKind = if (std.mem.eql(u8, cfg.db_driver, "postgres")) .postgres else .sqlite;
@@ -159,7 +201,7 @@ pub fn main(init: std.process.Init) !void {
         cfg.mail_console,
     );
     defer mailer.deinit();
-    var cache = cache_svc.CacheService.init(allocator, cfg.cache_max_entries, cfg.cache_ttl_seconds);
+    var cache = cache_svc.CacheService.init(allocator, io, cfg.cache_max_entries, cfg.cache_ttl_seconds);
     defer cache.deinit();
 
     var user_svc = user.service.UserService.init(
@@ -203,7 +245,7 @@ pub fn main(init: std.process.Init) !void {
 
     var iam_store = iam.persistence.IamStore.init(allocator, store_env.client);
     var iam_svc = iam.service.IamService.init(allocator, io, &iam_store, &sec);
-    var oauth_svc = oauth.service.OAuthService.init(allocator, io, &iam_svc, &user_svc, &sec, cfg.app_host);
+    var oauth_svc = oauth.service.OAuthService.initWithExtraKeys(allocator, io, &iam_svc, &user_svc, &sec, cfg.app_host, cfg.oidc_key_secrets);
 
     var event_store = eventstore.persistence.EventStore.init(allocator, store_env.client);
     var event_svc = eventstore.service.EventService.init(allocator, io, &event_store, &.{}); // projections added below
@@ -282,6 +324,12 @@ pub fn main(init: std.process.Init) !void {
             .ctx = &cleanup_ctx,
         },
         .{
+            .name = "login_attempts.prune",
+            .interval_seconds = 24 * 3600,
+            .run = jobLoginAttemptsPrune,
+            .ctx = &cleanup_ctx,
+        },
+        .{
             .name = "eventstore.project",
             .interval_seconds = 30,
             .run = jobEventProjections,
@@ -342,6 +390,11 @@ pub fn main(init: std.process.Init) !void {
         .port = cfg.http_port,
         .name = "zasdoor",
         .max_body_size = cfg.upload_max_bytes + 64 * 1024,
+        // accept back-pressure: instant 503 over the cap (fd/memory protection),
+        // with a per-request timeout as the drain bound.
+        .max_connections = cfg.http_max_connections,
+        .over_limit_response = .unavailable,
+        .request_timeout_ms = cfg.http_request_timeout_ms,
     });
     defer server.deinit();
 
@@ -353,9 +406,9 @@ pub fn main(init: std.process.Init) !void {
     var metrics = metrics_mod.Metrics.init(io);
     try server.addMiddleware(zigmodu.http.tracingMiddleware());
     try server.addMiddleware(metrics.middleware());
-    try server.addMiddleware(sec_headers.securityHeaders());
+    try server.addMiddleware(try sec_headers.securityHeaders());
     try server.addMiddleware(access_log.middleware());
-    try server.addMiddleware(zigmodu.http.http_middleware.cors(.{ .allow_origins = origins }));
+    try server.addMiddleware(try zigmodu.http.http_middleware.cors(.{ .allow_origins = origins }));
 
     var v1 = server.group("/api/v1");
     try auth_api.registerRoutes(&v1);
@@ -422,9 +475,11 @@ pub fn main(init: std.process.Init) !void {
     const MetricsRoute = struct {
         var metrics_ref: *metrics_mod.Metrics = undefined;
         var allow_ips: []const u8 = "";
+        var dispatcher_ref: *task.service.Dispatcher = undefined;
     };
     MetricsRoute.metrics_ref = &metrics;
     MetricsRoute.allow_ips = cfg.metrics_allow_ips;
+    MetricsRoute.dispatcher_ref = &dispatcher;
     try server.addRoute(.{
         .method = .GET,
         .path = "metrics",
@@ -448,7 +503,20 @@ pub fn main(init: std.process.Init) !void {
                 }
                 const body = try MetricsRoute.metrics_ref.renderPrometheus(ctx.allocator, zigmodu.time.wallClockSeconds(ctx.io orelse return error.InternalError));
                 defer ctx.allocator.free(body);
-                try ctx.text(200, body);
+                // Dispatcher counters (previously only incremented internally).
+                const full = try std.fmt.allocPrint(ctx.allocator, "{s}" ++
+                    "# HELP zasdoor_task_processed_total Background tasks completed by the dispatcher.\n" ++
+                    "# TYPE zasdoor_task_processed_total counter\n" ++
+                    "zasdoor_task_processed_total {d}\n" ++
+                    "# HELP zasdoor_task_failed_total Background tasks that ended failed.\n" ++
+                    "# TYPE zasdoor_task_failed_total counter\n" ++
+                    "zasdoor_task_failed_total {d}\n", .{
+                    body,
+                    MetricsRoute.dispatcher_ref.processed.load(.monotonic),
+                    MetricsRoute.dispatcher_ref.failed.load(.monotonic),
+                });
+                defer ctx.allocator.free(full);
+                try ctx.text(200, full);
             }
         }.handle,
     });
@@ -478,7 +546,7 @@ pub fn main(init: std.process.Init) !void {
     std.log.info("shutdown signal received, draining in-flight requests...", .{});
     server.stop();
     server_handle.join();
-    std.log.info("server stopped gracefully", .{});
+    std.log.info("server stopped gracefully (zasdoor {s})", .{build_info.version});
 }
 
 /// Parse `ZASDOOR_CORS_ORIGINS` ("*" or a comma-separated allow-list) into

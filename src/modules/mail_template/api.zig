@@ -89,7 +89,7 @@ pub fn MailTemplateApi(comptime TemplateServiceT: type, comptime UserService: ty
                 try ctx.sendErrorResponse(400, 400, "缺少模板 code");
                 return;
             };
-            const req = ctx.bindJson(UpsertTemplateReq) catch {
+            const req = ctx.bindJsonLoose(UpsertTemplateReq) catch {
                 try ctx.sendErrorResponse(400, 400, "请求体格式错误");
                 return;
             };

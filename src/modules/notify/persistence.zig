@@ -123,8 +123,7 @@ pub const NotificationStore = struct {
         _ = try upd.setFieldValue("read", true);
         _ = try upd.Where(.{preds.idEQ(.{ .int = id })});
         _ = try upd.Where(.{preds.user_idEQ(.{ .int = user_id })});
-        _ = try upd.Save();
-        return true;
+        return (try upd.Save()) > 0;
     }
 
     pub fn markAllRead(self: *NotificationStore, user_id: i64) !void {
@@ -142,8 +141,7 @@ pub const NotificationStore = struct {
         defer d.deinit();
         _ = try d.Where(.{preds.idEQ(.{ .int = id })});
         _ = try d.Where(.{preds.user_idEQ(.{ .int = user_id })});
-        _ = try d.Exec();
-        return true;
+        return (try d.Exec()) > 0;
     }
 
     /// Global sweep (cron): remove notifications older than `max_age` seconds.
@@ -153,8 +151,7 @@ pub const NotificationStore = struct {
         var d = self.client.notification.Delete();
         defer d.deinit();
         _ = try d.Where(.{preds.created_atLT(.{ .int = cutoff })});
-        _ = try d.Exec();
-        return 0;
+        return try d.Exec();
     }
     /// Total notification count (dashboard stats).
     pub fn countAll(self: *NotificationStore) !i64 {

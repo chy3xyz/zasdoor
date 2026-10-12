@@ -117,19 +117,56 @@ pub fn OAuthApi(comptime Service: type, comptime UserService: type) type {
                 }.h,
                 .user_data = self,
             });
+            // RP-initiated logout (OIDC end_session).
+            inline for (.{ .GET, .POST }) |method| {
+                try server.addRoute(.{
+                    .method = method,
+                    .path = "oauth/end-session",
+                    .handler = struct {
+                        fn h(ctx: *http.Context) !void {
+                            const s = Stored.instance orelse return error.UnexpectedError;
+                            try s.endSession(ctx);
+                        }
+                    }.h,
+                    .user_data = self,
+                });
+            }
+            // RFC 8628 device authorization grant.
+            try server.addRoute(.{
+                .method = .POST,
+                .path = "oauth/device_authorization",
+                .handler = struct {
+                    fn h(ctx: *http.Context) !void {
+                        const s = Stored.instance orelse return error.UnexpectedError;
+                        try s.deviceAuthorization(ctx);
+                    }
+                }.h,
+                .user_data = self,
+            });
+            try server.addRoute(.{
+                .method = .POST,
+                .path = "oauth/device",
+                .handler = struct {
+                    fn h(ctx: *http.Context) !void {
+                        const s = Stored.instance orelse return error.UnexpectedError;
+                        try s.deviceConfirm(ctx);
+                    }
+                }.h,
+                .user_data = self,
+            });
         }
 
         // ── Discovery ─────────────────────────────────────────
 
         fn discovery(self: *Self, ctx: *http.Context) !void {
-            const json = try discoveryJson(ctx.allocator, self.svc.issuer, self.svc.signer.alg.name());
+            const json = try discoveryJson(ctx.allocator, self.svc.issuer, self.svc.ring.alg().name());
             defer ctx.allocator.free(json);
             try ctx.json(200, json);
         }
 
         fn jwks(self: *Self, ctx: *http.Context) !void {
             // Publish the real asymmetric public key (never private material).
-            const json = try self.svc.signer.jwksJson(ctx.allocator);
+            const json = try self.svc.ring.jwksJson(ctx.allocator);
             defer ctx.allocator.free(json);
             try ctx.json(200, json);
         }
@@ -227,11 +264,30 @@ pub fn OAuthApi(comptime Service: type, comptime UserService: type) type {
             const code_verifier = ctx.formValue("code_verifier");
             const scope = ctx.formValue("scope");
             const refresh_token = ctx.formValue("refresh_token");
+            const device_code = ctx.formValue("device_code");
 
-            const issue = self.svc.token(grant_type, client_id, client_secret, code, redirect_uri, code_verifier, scope, refresh_token) catch |err| {
-                try self.oauthErrorFrom(ctx, err);
-                return;
-            };
+            var issue: service.OAuthService.TokenIssue = undefined;
+            if (std.mem.eql(u8, grant_type, service.OAuthService.token_exchange_grant)) {
+                issue = self.svc.tokenExchange(
+                    client_id,
+                    client_secret,
+                    ctx.formValue("subject_token") orelse "",
+                    ctx.formValue("subject_token_type") orelse "",
+                    ctx.formValue("actor_token"),
+                    ctx.formValue("actor_token_type"),
+                    ctx.formValue("requested_token_type"),
+                    ctx.formValue("audience"),
+                    scope,
+                ) catch |err| {
+                    try self.oauthErrorFrom(ctx, err);
+                    return;
+                };
+            } else {
+                issue = self.svc.token(grant_type, client_id, client_secret, code, redirect_uri, code_verifier, scope, refresh_token, device_code) catch |err| {
+                    try self.oauthErrorFrom(ctx, err);
+                    return;
+                };
+            }
             defer self.freeTokenIssue(ctx.allocator, issue);
 
             // Serialize the token response (raw OAuth JSON, not the envelope).
@@ -262,6 +318,11 @@ pub fn OAuthApi(comptime Service: type, comptime UserService: type) type {
             }
             try buf.appendSlice(a, ",\"scope\":\"");
             try buf.appendSlice(a, t.scope);
+            if (t.issued_token_type) |it| {
+                try buf.appendSlice(a, "\",\"issued_token_type\":\"");
+                try buf.appendSlice(a, it);
+                try buf.appendSlice(a, "\"");
+            }
             try buf.appendSlice(a, "\"}");
             return try buf.toOwnedSlice(a);
         }
@@ -361,14 +422,128 @@ pub fn OAuthApi(comptime Service: type, comptime UserService: type) type {
             defer row.free(self.users.store.allocator);
 
             const scope = self.objStr(root, "scope") orelse "";
+            var buf = std.ArrayList(u8).empty;
+            defer buf.deinit(ctx.allocator);
+            try buf.appendSlice(ctx.allocator, "{\"sub\":\"");
+            try buf.appendSlice(ctx.allocator, sub);
+            try buf.appendSlice(ctx.allocator, "\",\"name\":\"");
+            try buf.appendSlice(ctx.allocator, row.name);
+            try buf.appendSlice(ctx.allocator, "\",\"email\":\"");
+            try buf.appendSlice(ctx.allocator, row.email);
+            try buf.appendSlice(ctx.allocator, "\",\"email_verified\":");
+            try buf.appendSlice(ctx.allocator, if (row.verified) "true" else "false");
+            if (std.mem.indexOf(u8, scope, "phone") != null and row.phone.len > 0) {
+                try buf.appendSlice(ctx.allocator, ",\"phone_number\":\"");
+                try buf.appendSlice(ctx.allocator, row.phone);
+                try buf.appendSlice(ctx.allocator, "\",\"phone_number_verified\":false");
+            }
+            if (std.mem.indexOf(u8, scope, "address") != null and row.address.len > 0) {
+                try buf.appendSlice(ctx.allocator, ",\"address\":{\"formatted\":\"");
+                try buf.appendSlice(ctx.allocator, row.address);
+                try buf.appendSlice(ctx.allocator, "\"}");
+            }
+            try buf.append(ctx.allocator, '}');
+            try ctx.json(200, buf.items);
+        }
+
+        /// OIDC RP-initiated logout: revoke the user's sessions (token version)
+        /// and, when a registered post_logout_redirect_uri is supplied, redirect.
+        fn endSession(self: *Self, ctx: *http.Context) !void {
+            const post_logout = ctx.formValue("post_logout_redirect_uri") orelse ctx.queryParam("post_logout_redirect_uri");
+            const state = ctx.formValue("state") orelse ctx.queryParam("state");
+            const client_id_param = ctx.formValue("client_id") orelse ctx.queryParam("client_id");
+            const id_token_hint = ctx.formValue("id_token_hint") orelse ctx.queryParam("id_token_hint");
+
+            var user_id: ?i64 = null;
+            var aud: ?[]const u8 = null;
+            if (id_token_hint) |hint| {
+                if (self.svc.verifyToken(ctx.allocator, hint)) |payload| {
+                    defer ctx.allocator.free(payload);
+                    if (std.json.parseFromSlice(std.json.Value, ctx.allocator, payload, .{})) |parsed| {
+                        defer parsed.deinit();
+                        if (self.objStr(parsed.value, "sub")) |s| user_id = std.fmt.parseInt(i64, s, 10) catch null;
+                        aud = self.objStr(parsed.value, "aud");
+                    } else |_| {}
+                } else |_| {}
+            }
+
+            if (user_id) |uid| {
+                self.svc.users.store.bumpTokenVersion(uid, self.svc.now()) catch |err| {
+                    std.log.warn("[oauth] end-session token-version bump failed (user {d}): {s}", .{ uid, @errorName(err) });
+                };
+            }
+
+            const client_id = client_id_param orelse (aud orelse "");
+            if (post_logout) |uri| {
+                if (client_id.len == 0) {
+                    try self.oauthError(ctx, 400, "invalid_request", "post_logout_redirect_uri requires client_id or id_token_hint");
+                    return;
+                }
+                const app_opt = self.svc.iam_svc.getApplicationByClientId(client_id) catch null;
+                if (app_opt) |app| {
+                    defer app.free(self.svc.iam_svc.allocator);
+                    if (service.jsonListContains(app.post_logout_redirect_uris, uri)) {
+                        const loc = if (state) |st|
+                            try std.fmt.allocPrint(ctx.allocator, "{s}?state={s}", .{ uri, st })
+                        else
+                            try std.fmt.allocPrint(ctx.allocator, "{s}", .{uri});
+                        defer ctx.allocator.free(loc);
+                        try ctx.setHeader("Location", loc);
+                        try ctx.text(302, "");
+                        return;
+                    }
+                }
+                try self.oauthError(ctx, 400, "invalid_request", "post_logout_redirect_uri not registered");
+                return;
+            }
+            try ctx.jsonStruct(200, .{ .code = 0, .msg = "logged out", .data = null });
+        }
+
+        /// POST /oauth/device_authorization — start a device grant.
+        fn deviceAuthorization(self: *Self, ctx: *http.Context) !void {
+            const client_id = ctx.formValue("client_id") orelse ctx.queryParam("client_id") orelse {
+                try self.oauthError(ctx, 400, "invalid_request", "missing client_id");
+                return;
+            };
+            const scope = ctx.formValue("scope") orelse ctx.queryParam("scope") orelse "";
+            const da = self.svc.deviceAuthorization(client_id, scope) catch |err| {
+                try self.oauthErrorFrom(ctx, err);
+                return;
+            };
+            defer self.svc.freeDeviceAuthorization(da);
             const json = try std.fmt.allocPrint(
                 ctx.allocator,
-                "{{\"sub\":\"{s}\",\"name\":\"{s}\",\"email\":\"{s}\",\"email_verified\":{s}}}",
-                .{ sub, row.name, row.email, if (row.verified) "true" else "false" },
+                "{{\"device_code\":\"{s}\",\"user_code\":\"{s}\",\"verification_uri\":\"{s}\",\"verification_uri_complete\":\"{s}\",\"expires_in\":{d},\"interval\":{d}}}",
+                .{ da.device_code, da.user_code, da.verification_uri, da.verification_uri_complete, da.expires_in, da.interval },
             );
-            _ = scope;
             defer ctx.allocator.free(json);
             try ctx.json(200, json);
+        }
+
+        /// POST /oauth/device — approve (default) or deny a user_code while
+        /// signed in. Body/query: user_code, approve=true|false (or deny=true).
+        fn deviceConfirm(self: *Self, ctx: *http.Context) !void {
+            const uid = self.authenticatedUserId(ctx) orelse {
+                try self.oauthError(ctx, 401, "unauthorized", "login required");
+                return;
+            };
+            const user_code = ctx.formValue("user_code") orelse ctx.queryParam("user_code") orelse {
+                try self.oauthError(ctx, 400, "invalid_request", "missing user_code");
+                return;
+            };
+            const deny_raw = ctx.formValue("deny") orelse ctx.queryParam("deny");
+            const approve_raw = ctx.formValue("approve") orelse ctx.queryParam("approve");
+            const approve = if (deny_raw) |d|
+                !truthyParam(d)
+            else if (approve_raw) |a|
+                truthyParam(a)
+            else
+                true;
+            self.svc.deviceResolve(user_code, uid, approve) catch |err| {
+                try self.oauthErrorFrom(ctx, err);
+                return;
+            };
+            try ctx.jsonStruct(200, .{ .code = 0, .msg = if (approve) "approved" else "denied", .data = null });
         }
 
         fn objStr(self: *Self, v: std.json.Value, k: []const u8) ?[]const u8 {
@@ -399,6 +574,10 @@ pub fn OAuthApi(comptime Service: type, comptime UserService: type) type {
                 error.UnsupportedGrantType => try self.oauthError(ctx, 400, "unsupported_grant_type", "unsupported grant type"),
                 error.InvalidGrant => try self.oauthError(ctx, 400, "invalid_grant", "invalid grant"),
                 error.InvalidScope => try self.oauthError(ctx, 400, "invalid_scope", "invalid scope"),
+                error.AuthorizationPending => try self.oauthError(ctx, 400, "authorization_pending", "authorization pending"),
+                error.SlowDown => try self.oauthError(ctx, 400, "slow_down", "polling too frequently"),
+                error.AccessDenied => try self.oauthError(ctx, 400, "access_denied", "user denied the request"),
+                error.ExpiredToken => try self.oauthError(ctx, 400, "expired_token", "device code expired"),
                 else => try self.oauthError(ctx, 500, "server_error", "internal error"),
             }
         }
@@ -409,8 +588,8 @@ pub fn OAuthApi(comptime Service: type, comptime UserService: type) type {
 pub fn discoveryJson(allocator: std.mem.Allocator, issuer: []const u8, signing_alg: []const u8) ![]const u8 {
     return std.fmt.allocPrint(
         allocator,
-        "{{\"issuer\":\"{s}\",\"authorization_endpoint\":\"{s}/oauth/authorize\",\"token_endpoint\":\"{s}/oauth/token\",\"introspection_endpoint\":\"{s}/oauth/introspect\",\"revocation_endpoint\":\"{s}/oauth/revoke\",\"userinfo_endpoint\":\"{s}/oauth/userinfo\",\"jwks_uri\":\"{s}/.well-known/jwks.json\",\"response_types_supported\":[\"code\"],\"grant_types_supported\":[\"authorization_code\",\"client_credentials\",\"refresh_token\"],\"subject_types_supported\":[\"public\"],\"id_token_signing_alg_values_supported\":[\"{s}\"],\"scopes_supported\":[\"openid\",\"profile\",\"email\",\"offline_access\"],\"token_endpoint_auth_methods_supported\":[\"client_secret_basic\",\"client_secret_post\"],\"code_challenge_methods_supported\":[\"plain\",\"S256\"]}}",
-        .{ issuer, issuer, issuer, issuer, issuer, issuer, issuer, signing_alg },
+        "{{\"issuer\":\"{s}\",\"authorization_endpoint\":\"{s}/oauth/authorize\",\"token_endpoint\":\"{s}/oauth/token\",\"introspection_endpoint\":\"{s}/oauth/introspect\",\"revocation_endpoint\":\"{s}/oauth/revoke\",\"userinfo_endpoint\":\"{s}/oauth/userinfo\",\"end_session_endpoint\":\"{s}/oauth/end-session\",\"device_authorization_endpoint\":\"{s}/oauth/device_authorization\",\"jwks_uri\":\"{s}/.well-known/jwks.json\",\"response_types_supported\":[\"code\"],\"grant_types_supported\":[\"authorization_code\",\"client_credentials\",\"refresh_token\",\"urn:ietf:params:oauth:grant-type:device_code\",\"urn:ietf:params:oauth:grant-type:token-exchange\"],\"subject_types_supported\":[\"public\"],\"id_token_signing_alg_values_supported\":[\"{s}\"],\"scopes_supported\":[\"openid\",\"profile\",\"email\",\"address\",\"phone\",\"offline_access\"],\"token_endpoint_auth_methods_supported\":[\"client_secret_basic\",\"client_secret_post\"],\"code_challenge_methods_supported\":[\"plain\",\"S256\"]}}",
+        .{ issuer, issuer, issuer, issuer, issuer, issuer, issuer, issuer, issuer, signing_alg },
     );
 }
 

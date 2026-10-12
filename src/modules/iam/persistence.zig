@@ -19,6 +19,7 @@ const graph = zent.codegen.graph.buildGraph(&.{
     model.AuthorizationCode,
     model.RefreshToken,
     model.Consent,
+    model.DeviceCode,
 });
 pub const infos = graph.types;
 /// Shared, application-wide typed client (all schemas registered in schema.zig).
@@ -33,8 +34,32 @@ pub const SessionInfo = infos[5];
 pub const AuthorizationCodeInfo = infos[6];
 pub const RefreshTokenInfo = infos[7];
 pub const ConsentInfo = infos[8];
+pub const DeviceCodeInfo = infos[9];
 
 // ── Row DTOs ────────────────────────────────────────────────────────
+
+/// Persisted RFC 8628 device code (see model.DeviceCode).
+pub const DeviceCodeRow = struct {
+    id: i64,
+    tenant_id: i64,
+    application_id: i64,
+    device_code_hash: []const u8,
+    user_code: []const u8,
+    scope: []const u8,
+    user_id: i64,
+    status: []const u8,
+    expires_at: i64,
+    last_polled_at: i64,
+    created_at: i64,
+    updated_at: i64,
+
+    pub fn free(self: DeviceCodeRow, a: std.mem.Allocator) void {
+        a.free(self.device_code_hash);
+        a.free(self.user_code);
+        a.free(self.scope);
+        a.free(self.status);
+    }
+};
 
 pub const OrganizationRow = struct {
     id: i64,
@@ -190,12 +215,15 @@ pub const RefreshTokenRow = struct {
     scope: []const u8,
     expires_at: i64,
     revoked_at: i64,
+    family_id: []const u8,
+    rotated_at: i64,
     created_at: i64,
     updated_at: i64,
 
     pub fn free(self: RefreshTokenRow, a: std.mem.Allocator) void {
         a.free(self.token_hash);
         a.free(self.scope);
+        a.free(self.family_id);
     }
 };
 
@@ -824,6 +852,8 @@ pub const IamStore = struct {
             .scope = try self.allocator.dupe(u8, e.scope),
             .expires_at = e.expires_at,
             .revoked_at = e.revoked_at,
+            .family_id = try self.allocator.dupe(u8, e.family_id),
+            .rotated_at = e.rotated_at,
             .created_at = ts(e.created_at),
             .updated_at = ts(e.updated_at),
         };
@@ -836,6 +866,7 @@ pub const IamStore = struct {
         user_id: i64,
         session_id: i64,
         token_hash: []const u8,
+        family_id: []const u8,
         scope: []const u8,
         expires_at: i64,
         now: i64,
@@ -847,9 +878,11 @@ pub const IamStore = struct {
         _ = try b.setFieldValue("user_id", user_id);
         _ = try b.setFieldValue("session_id", session_id);
         _ = try b.setFieldValue("token_hash", token_hash);
+        _ = try b.setFieldValue("family_id", family_id);
         _ = try b.setFieldValue("scope", scope);
         _ = try b.setFieldValue("expires_at", expires_at);
         _ = try b.setFieldValue("revoked_at", 0);
+        _ = try b.setFieldValue("rotated_at", 0);
         _ = try b.setFieldValue("created_at", now);
         _ = try b.setFieldValue("updated_at", now);
         var row = try b.Save();
@@ -857,12 +890,11 @@ pub const IamStore = struct {
         return row.id;
     }
 
+    /// Look up a refresh token by hash WITHOUT filtering revoked/rotated rows:
+    /// the caller must see an already-rotated row to detect reuse.
     pub fn findRefreshTokenByHash(self: *IamStore, token_hash: []const u8) !?RefreshTokenRow {
         const preds = self.client.refresh_token.predicates;
-        const h_q = preds.token_hashEQ(.{ .string = token_hash });
-        const r_q = preds.revoked_atEQ(.{ .int = 0 });
-        const and_q = zent.sql.And(&h_q, &r_q);
-        var e = (try crud.first(self.client.refresh_token, .{and_q})) orelse return null;
+        var e = (try crud.first(self.client.refresh_token, .{preds.token_hashEQ(.{ .string = token_hash })})) orelse return null;
         defer zent.codegen.deinitEntity(infos, RefreshTokenInfo, &e, self.allocator);
         return try self.dupRefreshToken(e);
     }
@@ -874,6 +906,31 @@ pub const IamStore = struct {
         _ = try u.setFieldValue("revoked_at", now);
         _ = try u.setFieldValue("updated_at", now);
         _ = try u.Where(.{preds.idEQ(.{ .int = id })});
+        _ = try u.Save();
+    }
+
+    /// Mark a refresh token as rotated away: single-use. The row is kept so a
+    /// later replay of the same token is detectable as reuse.
+    pub fn rotateRefreshToken(self: *IamStore, id: i64, now: i64) !void {
+        const preds = self.client.refresh_token.predicates;
+        var u = self.client.refresh_token.Update();
+        defer u.deinit();
+        _ = try u.setFieldValue("rotated_at", now);
+        _ = try u.setFieldValue("revoked_at", now);
+        _ = try u.setFieldValue("updated_at", now);
+        _ = try u.Where(.{preds.idEQ(.{ .int = id })});
+        _ = try u.Save();
+    }
+
+    /// Revoke every token in a rotation family (reuse detected).
+    pub fn revokeRefreshTokenFamily(self: *IamStore, family_id: []const u8, now: i64) !void {
+        if (family_id.len == 0) return;
+        const preds = self.client.refresh_token.predicates;
+        var u = self.client.refresh_token.Update();
+        defer u.deinit();
+        _ = try u.setFieldValue("revoked_at", now);
+        _ = try u.setFieldValue("updated_at", now);
+        _ = try u.Where(.{preds.family_idEQ(.{ .string = family_id })});
         _ = try u.Save();
     }
 
@@ -936,5 +993,107 @@ pub const IamStore = struct {
         })) orelse return null;
         defer zent.codegen.deinitEntity(infos, ConsentInfo, &e, self.allocator);
         return try self.dupConsent(e);
+    }
+
+    // ── DeviceCode (RFC 8628) ────────────────────────────────
+
+    fn dupDeviceCode(self: *IamStore, e: anytype) !DeviceCodeRow {
+        return .{
+            .id = e.id,
+            .tenant_id = e.tenant_id,
+            .application_id = e.application_id,
+            .device_code_hash = try self.allocator.dupe(u8, e.device_code_hash),
+            .user_code = try self.allocator.dupe(u8, e.user_code),
+            .scope = try self.allocator.dupe(u8, e.scope),
+            .user_id = e.user_id,
+            .status = try self.allocator.dupe(u8, e.status),
+            .expires_at = e.expires_at,
+            .last_polled_at = e.last_polled_at,
+            .created_at = ts(e.created_at),
+            .updated_at = ts(e.updated_at),
+        };
+    }
+
+    pub fn createDeviceCode(
+        self: *IamStore,
+        tenant_id: i64,
+        application_id: i64,
+        device_code_hash: []const u8,
+        user_code: []const u8,
+        scope: []const u8,
+        expires_at: i64,
+        now: i64,
+    ) !i64 {
+        var b = try self.client.device_code.Create();
+        defer b.deinit();
+        _ = try b.setFieldValue("tenant_id", tenant_id);
+        _ = try b.setFieldValue("application_id", application_id);
+        _ = try b.setFieldValue("device_code_hash", device_code_hash);
+        _ = try b.setFieldValue("user_code", user_code);
+        _ = try b.setFieldValue("scope", scope);
+        _ = try b.setFieldValue("user_id", 0);
+        _ = try b.setFieldValue("status", "pending");
+        _ = try b.setFieldValue("expires_at", expires_at);
+        _ = try b.setFieldValue("last_polled_at", 0);
+        _ = try b.setFieldValue("created_at", now);
+        _ = try b.setFieldValue("updated_at", now);
+        var row = try b.Save();
+        defer zent.codegen.deinitEntity(infos, DeviceCodeInfo, &row, self.allocator);
+        return row.id;
+    }
+
+    pub fn getDeviceCodeByHash(self: *IamStore, device_code_hash: []const u8) !?DeviceCodeRow {
+        const preds = self.client.device_code.predicates;
+        var e = (try crud.first(self.client.device_code, .{preds.device_code_hashEQ(.{ .string = device_code_hash })})) orelse return null;
+        defer zent.codegen.deinitEntity(infos, DeviceCodeInfo, &e, self.allocator);
+        return try self.dupDeviceCode(e);
+    }
+
+    pub fn getDeviceCodeByUserCode(self: *IamStore, user_code: []const u8) !?DeviceCodeRow {
+        const preds = self.client.device_code.predicates;
+        var e = (try crud.first(self.client.device_code, .{preds.user_codeEQ(.{ .string = user_code })})) orelse return null;
+        defer zent.codegen.deinitEntity(infos, DeviceCodeInfo, &e, self.allocator);
+        return try self.dupDeviceCode(e);
+    }
+
+    /// Move a pending device code to approved/denied (user-code confirmation).
+    pub fn resolveDeviceCode(self: *IamStore, id: i64, status: []const u8, user_id: i64, now: i64) !void {
+        const preds = self.client.device_code.predicates;
+        var u = self.client.device_code.Update();
+        defer u.deinit();
+        _ = try u.setFieldValue("status", status);
+        _ = try u.setFieldValue("user_id", user_id);
+        _ = try u.setFieldValue("updated_at", now);
+        _ = try u.Where(.{preds.idEQ(.{ .int = id })});
+        _ = try u.Save();
+    }
+
+    pub fn touchDeviceCode(self: *IamStore, id: i64, now: i64) !void {
+        const preds = self.client.device_code.predicates;
+        var u = self.client.device_code.Update();
+        defer u.deinit();
+        _ = try u.setFieldValue("last_polled_at", now);
+        _ = try u.setFieldValue("updated_at", now);
+        _ = try u.Where(.{preds.idEQ(.{ .int = id })});
+        _ = try u.Save();
+    }
+
+    /// Single-use: the token grant marks the code used.
+    pub fn consumeDeviceCode(self: *IamStore, id: i64, now: i64) !void {
+        const preds = self.client.device_code.predicates;
+        var u = self.client.device_code.Update();
+        defer u.deinit();
+        _ = try u.setFieldValue("status", "used");
+        _ = try u.setFieldValue("updated_at", now);
+        _ = try u.Where(.{preds.idEQ(.{ .int = id })});
+        _ = try u.Save();
+    }
+
+    pub fn purgeExpiredDeviceCodes(self: *IamStore, now: i64) !void {
+        const preds = self.client.device_code.predicates;
+        var d = self.client.device_code.Delete();
+        defer d.deinit();
+        _ = try d.Where(.{preds.expires_atLT(.{ .int = now })});
+        _ = try d.Exec();
     }
 };

@@ -97,7 +97,7 @@ pub fn TenantApi(comptime Service: type, comptime UserService: type) type {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
             const admin_id = (try requireAdmin(ctx, self)) orelse return;
 
-            const req = ctx.bindJson(CreateTenantReq) catch {
+            const req = ctx.bindJsonLoose(CreateTenantReq) catch {
                 try ctx.sendErrorResponse(400, 400, "请求体格式错误");
                 return;
             };
@@ -125,7 +125,7 @@ pub fn TenantApi(comptime Service: type, comptime UserService: type) type {
                 try ctx.sendErrorResponse(400, 400, "无效的租户 ID");
                 return;
             };
-            const req = ctx.bindJson(UpdateTenantReq) catch {
+            const req = ctx.bindJsonLoose(UpdateTenantReq) catch {
                 try ctx.sendErrorResponse(400, 400, "请求体格式错误");
                 return;
             };

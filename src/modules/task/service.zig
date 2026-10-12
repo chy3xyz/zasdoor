@@ -68,8 +68,10 @@ pub const TaskService = struct {
 // ── Dispatcher ─────────────────────────────────────────────────────
 
 /// Task handler: `ctx` is the registered handler context (e.g. the Mailer),
-/// `payload` is the JSON/plain string stored on the task row.
-pub const TaskHandler = *const fn (ctx: ?*anyopaque, allocator: std.mem.Allocator, io: std.Io, payload: []const u8) void;
+/// `payload` is the JSON/plain string stored on the task row. Returning an
+/// error fails the run -> the dispatcher records last_error and retries within
+/// the attempt budget; returning normally marks the task done.
+pub const TaskHandler = *const fn (ctx: ?*anyopaque, allocator: std.mem.Allocator, io: std.Io, payload: []const u8) anyerror!void;
 
 pub const Handler = struct {
     name: []const u8,
@@ -143,10 +145,15 @@ pub const Dispatcher = struct {
     /// (sequentially; SQLite favours a single writer).
     pub fn tick(self: *Dispatcher) void {
         const now = @import("zigmodu").time.wallClockSeconds(self.io);
-        _ = self.store.requeueStale(now, self.stale_after_seconds) catch {};
+        _ = self.store.requeueStale(now, self.stale_after_seconds) catch |err| {
+            std.log.err("[task] requeueStale failed: {s}", .{@errorName(err)});
+        };
         if (self.scheduled) |s| s.tick(now);
         while (true) {
-            const task_opt = self.store.claimNext(now) catch break;
+            const task_opt = self.store.claimNext(now) catch |err| {
+                std.log.err("[task] claimNext failed: {s}", .{@errorName(err)});
+                break;
+            };
             const task = task_opt orelse break;
             defer task.free(self.allocator);
             self.runTask(task);
@@ -163,19 +170,36 @@ pub const Dispatcher = struct {
         }
         const handler = found orelse {
             // Unknown handler — fail so the row does not spin forever.
-            self.store.markFailedOrRetry(task.id, task.attempts, task.max_attempts, "no handler registered", wallNow(self), 0) catch {};
+            _ = self.store.markFailedOrRetry(task.id, task.attempts, task.max_attempts, "no handler registered", wallNow(self), 0) catch {
+                std.log.err("[task] #{d} markFailedOrRetry(no handler) failed", .{task.id});
+            };
             _ = self.failed.fetchAdd(1, .monotonic);
             return;
         };
 
-        handler.run(handler.ctx, self.allocator, self.io, task.payload);
-        // Handlers are synchronous and report failures through the shared
-        // mail/notify sinks; a completed run is treated as done.
-        self.store.markDone(task.id, wallNow(self)) catch {
-            self.store.markFailedOrRetry(task.id, task.attempts, task.max_attempts, "store error", wallNow(self), self.retry_interval_seconds) catch {};
+        handler.run(handler.ctx, self.allocator, self.io, task.payload) catch |err| {
+            // Handler-reported failure -> record + retry within the budget
+            // (@errorName goes to the DB/log only, never to the API).
+            std.log.err("[task] #{d} ({s}) handler failed: {s}", .{ task.id, task.name, @errorName(err) });
+            _ = self.store.markFailedOrRetry(task.id, task.attempts, task.max_attempts, @errorName(err), wallNow(self), self.retry_interval_seconds) catch {
+                std.log.err("[task] #{d} markFailedOrRetry failed", .{task.id});
+            };
             _ = self.failed.fetchAdd(1, .monotonic);
             return;
         };
+        // Status-guarded finalize: 0 rows = the task was requeued/failed while
+        // running (a stalled worker's late completion), so do not overwrite.
+        const done = self.store.markDone(task.id, wallNow(self)) catch {
+            _ = self.store.markFailedOrRetry(task.id, task.attempts, task.max_attempts, "store error", wallNow(self), self.retry_interval_seconds) catch {
+                std.log.err("[task] #{d} markFailedOrRetry(store error) failed", .{task.id});
+            };
+            _ = self.failed.fetchAdd(1, .monotonic);
+            return;
+        };
+        if (!done) {
+            std.log.warn("[task] #{d} ({s}) markDone rejected — status moved on (requeued/failed while running)", .{ task.id, task.name });
+            return;
+        }
         _ = self.processed.fetchAdd(1, .monotonic);
     }
 
