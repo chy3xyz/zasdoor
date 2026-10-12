@@ -3,6 +3,8 @@
 .zig-cache-global/
 .zig-global-cache/
 zig-out/
+# Packages fetched from build.zig.zon .url dependencies
+zig-pkg/
 
 # Frontend
 web/node_modules/

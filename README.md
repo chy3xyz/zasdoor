@@ -7,10 +7,10 @@
 Organizations, projects, applications, roles, OAuth2/OIDC, MFA, SIWE — with a Zig backend and a SolidJS admin console.
 
 [![Zig](https://img.shields.io/badge/Zig-0.17-orange?logo=zig&logoColor=white)](https://ziglang.org)
-[![zigmodu](https://img.shields.io/badge/zigmodu-v0.15.44-blue)](https://github.com/chy3xyz/zigmodu)
+[![zigmodu](https://img.shields.io/badge/zigmodu-v0.39.11-blue)](https://github.com/chy3xyz/zigmodu)
 [![zent](https://img.shields.io/badge/zent-ORM-6b46c1)](https://github.com/chy3xyz/zent)
 [![SolidJS](https://img.shields.io/badge/Frontend-SolidJS-2c4f7c?logo=solid&logoColor=white)](https://www.solidjs.com)
-[![Tests](https://img.shields.io/badge/tests-79%20backend%20%2B%205%20frontend-green)]()
+[![Tests](https://img.shields.io/badge/tests-91%20backend%20%2B%205%20frontend-green)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 </div>
@@ -79,7 +79,7 @@ Zasdoor is a self-hosted identity & access management platform. It gives you the
 ### 💎 Engineering quality
 - Schema-as-code migrations (auto at startup), SQLite ↔ PostgreSQL via one env var
 - Type-safe queries end-to-end (no SQL string building)
-- **79 backend tests** (stores, services, HTTP via Testkit incl. IAM/OAuth/MFA/web3/agent routes, JWT/multi-tenancy, OIDC EdDSA+JWKS+consent, federated IdP state/provisioning, password policy & lockout, AI crypto/approval/quota, session revocation) + **5 frontend tests** (vitest)
+- **91 backend tests** (stores, services, HTTP via Testkit incl. IAM/OAuth/MFA/web3/agent routes, JWT/multi-tenancy, OIDC EdDSA+JWKS+consent, federated IdP state/provisioning, password policy & lockout, AI crypto/approval/quota, session revocation) + **5 frontend tests** (vitest)
 - `zig fmt` clean, zero TODOs, graceful shutdown, documented backup strategy
 
 ---
@@ -88,7 +88,7 @@ Zasdoor is a self-hosted identity & access management platform. It gives you the
 
 | Layer | Technology |
 | --- | --- |
-| Backend | [Zig](https://ziglang.org) 0.17 · [zigmodu](https://github.com/chy3xyz/zigmodu) v0.15.44 (HTTP, security, AI, resilience, Application lifecycle) · [zent](https://github.com/chy3xyz/zent) v0.45.0 (ORM, schema, migrations) |
+| Backend | [Zig](https://ziglang.org) 0.17 · [zigmodu](https://github.com/chy3xyz/zigmodu) v0.39.11 (HTTP, security, AI, resilience, Application lifecycle) · [zent](https://github.com/chy3xyz/zent) v0.91.0 (ORM, schema, migrations) |
 | Frontend | [SolidJS](https://www.solidjs.com) · TypeScript · [Rsbuild](https://rsbuild.dev) · [Tailwind CSS](https://tailwindcss.com) 4 · [DaisyUI](https://daisyui.com) · vitest |
 | Database | SQLite (default) · PostgreSQL (one env var) |
 
@@ -206,7 +206,7 @@ Envelope: `{ code, msg, data }`, `code === 0` = success.
 ## 🧪 Testing
 
 ```bash
-zig build test                     # 79 backend tests (in-memory SQLite + Testkit HTTP)
+zig build test                     # 91 backend tests (in-memory SQLite + Testkit HTTP)
 cd web && pnpm run typecheck && pnpm run test && pnpm run build   # vitest + build
 ```
 
@@ -238,7 +238,7 @@ cd web && pnpm run typecheck && pnpm run test && pnpm run build   # vitest + bui
 | ✅ Done | **Streaming chat** — Agent `chatStream` + `on_delta` (zigmodu v0.15.16); SSE reasoning/delta/done feed with typing effect, JSON fallback |
 | ✅ Done | **Run usage audit** — zigmodu v0.15.17 `Metrics.toStats()`; every AI run persists tokens/steps/tool-call usage, admin runs table shows it |
 | ✅ Done | **Streaming tool-JSON fix** — zigmodu v0.15.18; SkillRegistry tools_json emits valid JSON so models no longer reject tool schemas |
-| ✅ Done | **Deps at latest** — zigmodu v0.15.44 + zent v0.45.0 (pinned in CI/Docker) |
+| ✅ Done | **Deps at latest** — Zig 0.17.0 stable + zigmodu v0.39.6 + zent v0.83.0 (pinned in CI/Docker) |
 
 ---
 

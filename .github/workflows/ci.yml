@@ -11,29 +11,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # build.zig.zon depends on sibling checkouts of zigmodu/zent under zig_ws/;
-      # recreate that layout inside CI before building.
-      - name: Recreate sibling dependency layout
-        run: |
-          # Pinned to the exact dependency commits this project is built and
-          # tested against, so CI cannot break from an upstream API change.
-          ZIGMODU_SHA=df7cccb
-          ZENT_SHA=v0.45.0
-          mkdir -p /tmp/ci/w4_proj/zig_ws /tmp/ci/w4_proj/dev_machine/_adm_frame_
-          git clone https://github.com/chy3xyz/zigmodu.git /tmp/ci/w4_proj/zig_ws/zigmodu
-          git -C /tmp/ci/w4_proj/zig_ws/zigmodu checkout --quiet "$ZIGMODU_SHA"
-          git clone https://github.com/chy3xyz/zent.git /tmp/ci/w4_proj/zig_ws/zent
-          git -C /tmp/ci/w4_proj/zig_ws/zent checkout --quiet "$ZENT_SHA"
-          cp -r "$GITHUB_WORKSPACE" /tmp/ci/w4_proj/dev_machine/_adm_frame_/zmadmin
+      # zigmodu/zent are pinned by hash in build.zig.zon (.url deps), so the
+      # build fetches them itself — no sibling checkout layout needed.
       - uses: mlugg/setup-zig@v1
         with:
-          version: 0.17.0-dev.1567+f0354179a
+          version: 0.17.0
       - name: Zig format check
-        working-directory: /tmp/ci/w4_proj/dev_machine/_adm_frame_/zmadmin
         run: zig fmt --check src/ build.zig
       - name: Zig build + tests
-        working-directory: /tmp/ci/w4_proj/dev_machine/_adm_frame_/zmadmin
         run: zig build test --summary all
+      - name: Zig build (ReleaseSafe)
+        run: zig build -Doptimize=ReleaseSafe --summary all
+      - name: E2E smoke (boot/login/shutdown, no panic/leak)
+        run: |
+          zig build --summary all
+          bash scripts/run_e2e.sh
 
   frontend:
     name: Frontend (typecheck + build)

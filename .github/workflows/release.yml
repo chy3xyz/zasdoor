@@ -14,25 +14,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Recreate the sibling dependency layout the build expects, pinned to the
-      # exact commits this project is built and tested against.
-      - name: Recreate sibling dependency layout
-        run: |
-          ZIGMODU_SHA=df7cccb
-          ZENT_SHA=v0.45.0
-          mkdir -p /tmp/rel/w4_proj/zig_ws /tmp/rel/w4_proj/dev_machine/_adm_frame_
-          git clone https://github.com/chy3xyz/zigmodu.git /tmp/rel/w4_proj/zig_ws/zigmodu
-          git -C /tmp/rel/w4_proj/zig_ws/zigmodu checkout --quiet "$ZIGMODU_SHA"
-          git clone https://github.com/chy3xyz/zent.git /tmp/rel/w4_proj/zig_ws/zent
-          git -C /tmp/rel/w4_proj/zig_ws/zent checkout --quiet "$ZENT_SHA"
-          cp -r "$GITHUB_WORKSPACE" /tmp/rel/w4_proj/dev_machine/_adm_frame_/zmadmin
+      # zigmodu/zent are pinned by hash in build.zig.zon (.url deps), so the
+      # build fetches them itself — no sibling checkout layout needed.
 
       - uses: mlugg/setup-zig@v1
         with:
-          version: 0.17.0-dev.1567+f0354179a
+          version: 0.17.0
 
       - name: Build backend (ReleaseSafe)
-        working-directory: /tmp/rel/w4_proj/dev_machine/_adm_frame_/zmadmin
         run: |
           zig build -Doptimize=ReleaseSafe --summary all
           zig build --summary all
@@ -55,7 +44,7 @@ jobs:
       - name: Package artifacts
         run: |
           set -euo pipefail
-          BIN=/tmp/rel/w4_proj/dev_machine/_adm_frame_/zmadmin/zig-out/bin
+          BIN="$GITHUB_WORKSPACE/zig-out/bin"
           mkdir -p dist
           cp "$BIN/zasdoor" "$BIN/zasdoor-admin" dist/
           tar -czf dist/zasdoor-web-dist.tar.gz -C web/dist .

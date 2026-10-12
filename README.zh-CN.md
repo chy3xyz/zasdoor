@@ -7,10 +7,10 @@
 让你在咖啡凉掉之前,把内部管理台搭好上线。
 
 [![Zig](https://img.shields.io/badge/Zig-0.17-orange?logo=zig&logoColor=white)](https://ziglang.org)
-[![zigmodu](https://img.shields.io/badge/zigmodu-v0.15.37-blue)](https://github.com/chy3xyz/zigmodu)
+[![zigmodu](https://img.shields.io/badge/zigmodu-v0.39.11-blue)](https://github.com/chy3xyz/zigmodu)
 [![zent](https://img.shields.io/badge/zent-ORM-6b46c1)](https://github.com/chy3xyz/zent)
 [![SolidJS](https://img.shields.io/badge/前端-SolidJS-2c4f7c?logo=solid&logoColor=white)](https://www.solidjs.com)
-[![Tests](https://img.shields.io/badge/测试-79%20后端%20%2B%205%20前端-green)]()
+[![Tests](https://img.shields.io/badge/测试-91%20后端%20%2B%205%20前端-green)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 [**English**](README.md) · **简体中文**
@@ -80,7 +80,7 @@
 ### 💎 工程品质
 - Schema-as-code 迁移(启动自动);SQLite ↔ PostgreSQL 一个环境变量切换
 - 全链路类型安全查询(零 SQL 字符串拼接)
-- **79 个后端测试**(store/service、Testkit HTTP、JWT/多租户、审计、AI 加密/审批/配额、管理端门禁 401/403/200、会话吊销、IAM、OAuth PKCE、MFA TOTP、SIWE EIP-4361、Agent 预算)+ **5 个前端测试**(vitest)
+- **91 个后端测试**(store/service、Testkit HTTP、JWT/多租户、审计、AI 加密/审批/配额、管理端门禁 401/403/200、会话吊销、IAM、OAuth PKCE、MFA TOTP、SIWE EIP-4361、Agent 预算)+ **5 个前端测试**(vitest)
 - `zig fmt` 全绿、零 TODO、优雅关闭、备份策略文档化
 
 ---
@@ -89,7 +89,7 @@
 
 | 层 | 技术 |
 | --- | --- |
-| 后端 | [Zig](https://ziglang.org) 0.17 · [zigmodu](https://github.com/chy3xyz/zigmodu) v0.15.37(HTTP、安全、AI、resilience、Application 生命周期) · [zent](https://github.com/chy3xyz/zent) v0.37.0(ORM、schema、迁移) |
+| 后端 | [Zig](https://ziglang.org) 0.17 · [zigmodu](https://github.com/chy3xyz/zigmodu) v0.39.11(HTTP、安全、AI、resilience、Application 生命周期) · [zent](https://github.com/chy3xyz/zent) v0.91.0(ORM、schema、迁移) |
 | 前端 | [SolidJS](https://www.solidjs.com) · TypeScript · [Rsbuild](https://rsbuild.dev) · [Tailwind CSS](https://tailwindcss.com) 4 · [DaisyUI](https://daisyui.com) · vitest |
 | 数据库 | SQLite(默认)· PostgreSQL(一个环境变量切换) |
 
@@ -203,7 +203,7 @@ cd web && pnpm install && pnpm run dev
 ## 🧪 测试
 
 ```bash
-zig build test                     # 79 个后端测试(内存 SQLite + Testkit HTTP)
+zig build test                     # 91 个后端测试(内存 SQLite + Testkit HTTP)
 cd web && pnpm run typecheck && pnpm run test && pnpm run build   # vitest + 构建
 ```
 
@@ -227,7 +227,7 @@ cd web && pnpm run typecheck && pnpm run test && pnpm run build   # vitest + 构
 | ✅ 已完成 | **流式聊天** —— Agent `chatStream` + `on_delta`(zigmodu v0.15.16);SSE reasoning/delta/done 打字机效果,JSON 降级 |
 | ✅ 已完成 | **运行用量审计** —— zigmodu v0.15.17 `Metrics.toStats()`;每次 AI run 持久化 tokens/steps/工具调用用量,管理端 runs 表格展示 |
 | ✅ 已完成 | **流式工具 JSON 修复** —— zigmodu v0.15.18(`b28444a`);SkillRegistry tools_json 输出合法 JSON(去掉多余 `}`),修复流式 chat 中 DeepSeek/OpenAI 以 400 拒绝工具 schema(`ProviderError`)的问题 |
-| ✅ 已完成 | **依赖升级到最新** —— zigmodu v0.15.37 + zent v0.37.0;zent `migrateSchema` 走 v0.36+ 默认锁(`MigrateOptions.lock_timeout_ms` 默认 10s,zasdoor SQLite 单写路径不受影响);zent v0.37 池 `Options.max_wait_ms` 在 StoreEnv/TaskStore 单连接链路上保持 0 = 旧非阻塞语义,无需改动 |
+| ✅ 已完成 | **依赖升级到最新** —— Zig **0.17.0 正式版** + zigmodu v0.39.6 + zent v0.83.0(CI/Docker 固定同一版本);0.17 破坏点(口令校验错误联合、中间件工厂可失败、`Stream.read` 结果结构体)已适配 |
 | ✅ 已完成 | **IAM 核心** —— 组织 / 项目 / 应用 / 角色 / 会话 + `authz/check` |
 | ✅ 已完成 | **OAuth2 / OIDC** —— 授权码 + PKCE、客户端凭证、刷新令牌、discovery/JWKS/userinfo/introspection/revocation |
 | ✅ 已完成 | **MFA** —— TOTP 注册与校验、恢复码、租户级策略 |
