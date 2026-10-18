@@ -70,6 +70,39 @@ pub const IdentityLink = Schema("IdentityLink", .{
     .mixins = &.{zent.core.mixin.TimeMixin},
 });
 
+/// A registered WebAuthn/passkey credential. `credential_id` is the
+/// base64url raw credential id; `public_key` is base64url(0x04||x||y) (an
+/// uncompressed P-256 point). Only public material is stored here.
+pub const WebauthnCredential = Schema("WebauthnCredential", .{
+    .fields = &.{
+        field.Int("tenant_id").Default(1),
+        field.Int("user_id"),
+        field.String("credential_id").Unique(),
+        field.String("public_key"),
+        field.Int("sign_count").Default(0),
+        field.String("name").Default(""),
+        field.String("transports").Default("[]"),
+        field.String("aaguid").Default(""),
+        field.Int("last_used_at").Default(0),
+    },
+    .mixins = &.{zent.core.mixin.TimeMixin},
+});
+
+/// Single-use WebAuthn ceremony challenge (register or login). Consumed
+/// exactly once; expires_at bounds the ceremony.
+pub const WebauthnChallenge = Schema("WebauthnChallenge", .{
+    .fields = &.{
+        field.Int("tenant_id").Default(1),
+        field.Int("user_id").Default(0),
+        field.String("challenge").Unique(),
+        field.String("kind").Default("login"), // register | login
+        field.String("login_email").Default(""),
+        field.Int("expires_at"),
+        field.Bool("used").Default(false),
+    },
+    .mixins = &.{zent.core.mixin.TimeMixin},
+});
+
 /// Single-use anti-CSRF `state` for a federated login attempt. Persisted so
 /// the callback can validate and consume it exactly once before the code is
 /// exchanged. `used` is flipped on consumption (replay -> ReusedState);

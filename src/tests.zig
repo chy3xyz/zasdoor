@@ -50,6 +50,7 @@ fn openMemory(allocator: std.mem.Allocator) !db_mod.StoreEnv(schema.infos, .{
     mfa.persistence.infos,
     web3.persistence.infos,
     agent.persistence.infos,
+    authzm.persistence.infos,
 }) {
     return db_mod.StoreEnv(schema.infos, .{
         tenant.persistence.infos,
@@ -69,6 +70,7 @@ fn openMemory(allocator: std.mem.Allocator) !db_mod.StoreEnv(schema.infos, .{
         mfa.persistence.infos,
         web3.persistence.infos,
         agent.persistence.infos,
+        authzm.persistence.infos,
     }).open(allocator, .sqlite, ":memory:");
 }
 
@@ -103,6 +105,7 @@ test "sqlite store query prepares and runs standalone" {
         mfa.persistence.infos,
         web3.persistence.infos,
         agent.persistence.infos,
+        authzm.persistence.infos,
     }).open(allocator, .sqlite, ":memory:");
     defer env.deinit();
     var store = user.persistence.UserStore.init(allocator, env.client);
@@ -1312,6 +1315,162 @@ test "oauth: token exchange (RFC 8693) delegation, audience and downscoping" {
     try std.testing.expectError(error.InvalidRequest, oauth_svc.tokenExchange(creds.client_id, creds.client_secret, subject, "urn:ietf:params:oauth:token-type:saml2", null, null, null, null, null));
 }
 
+// ── WebAuthn test helpers ─────────────────────────────────────────────────
+
+const WebauthnP256 = std.crypto.sign.ecdsa.EcdsaP256Sha256;
+
+fn webauthnB64(allocator: std.mem.Allocator, bytes: []const u8) ![]u8 {
+    const enc = std.base64.url_safe_no_pad.Encoder;
+    const out = try allocator.alloc(u8, enc.calcSize(bytes.len));
+    errdefer allocator.free(out);
+    _ = enc.encode(out, bytes);
+    return out;
+}
+
+fn webauthnAppendCborBytes(allocator: std.mem.Allocator, out: *std.ArrayList(u8), bytes: []const u8) !void {
+    const n = bytes.len;
+    if (n < 24) {
+        try out.append(allocator, 0x40 | @as(u8, @intCast(n)));
+    } else if (n < 256) {
+        try out.append(allocator, 0x58);
+        try out.append(allocator, @intCast(n));
+    } else {
+        try out.append(allocator, 0x59);
+        try out.append(allocator, @intCast((n >> 8) & 0xff));
+        try out.append(allocator, @intCast(n & 0xff));
+    }
+    try out.appendSlice(allocator, bytes);
+}
+
+fn webauthnAttestationObject(allocator: std.mem.Allocator, rp_id: []const u8, cred_id: []const u8, sec1: []const u8) ![]u8 {
+    var auth_data = std.ArrayList(u8).empty;
+    defer auth_data.deinit(allocator);
+    var rp_hash: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(rp_id, &rp_hash, .{});
+    try auth_data.appendSlice(allocator, &rp_hash);
+    try auth_data.append(allocator, 0x41); // UP | AT
+    try auth_data.appendSlice(allocator, &[_]u8{ 0, 0, 0, 0 }); // signCount
+    const aaguid: [16]u8 = @splat(0);
+    try auth_data.appendSlice(allocator, &aaguid);
+    try auth_data.append(allocator, @intCast((cred_id.len >> 8) & 0xff));
+    try auth_data.append(allocator, @intCast(cred_id.len & 0xff));
+    try auth_data.appendSlice(allocator, cred_id);
+    try auth_data.appendSlice(allocator, &[_]u8{ 0xA5, 0x01, 0x02, 0x03, 0x26, 0x20, 0x01 });
+    try auth_data.append(allocator, 0x21); // -2
+    try auth_data.appendSlice(allocator, &[_]u8{ 0x58, 0x20 });
+    try auth_data.appendSlice(allocator, sec1[1..33]);
+    try auth_data.append(allocator, 0x22); // -3
+    try auth_data.appendSlice(allocator, &[_]u8{ 0x58, 0x20 });
+    try auth_data.appendSlice(allocator, sec1[33..65]);
+
+    var out = std.ArrayList(u8).empty;
+    errdefer out.deinit(allocator);
+    try out.append(allocator, 0xA3);
+    try out.appendSlice(allocator, &[_]u8{ 0x63, 'f', 'm', 't', 0x64, 'n', 'o', 'n', 'e' });
+    try out.appendSlice(allocator, &[_]u8{ 0x67, 'a', 't', 't', 'S', 't', 'm', 't', 0xA0 });
+    try out.appendSlice(allocator, &[_]u8{ 0x68, 'a', 'u', 't', 'h', 'D', 'a', 't', 'a' });
+    try webauthnAppendCborBytes(allocator, &out, auth_data.items);
+    return out.toOwnedSlice(allocator);
+}
+
+fn webauthnAssertionAuthData(allocator: std.mem.Allocator, rp_id: []const u8, sign_count: u32) ![]u8 {
+    var out = std.ArrayList(u8).empty;
+    errdefer out.deinit(allocator);
+    var rp_hash: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(rp_id, &rp_hash, .{});
+    try out.appendSlice(allocator, &rp_hash);
+    try out.append(allocator, 0x01); // UP
+    try out.append(allocator, @intCast((sign_count >> 24) & 0xff));
+    try out.append(allocator, @intCast((sign_count >> 16) & 0xff));
+    try out.append(allocator, @intCast((sign_count >> 8) & 0xff));
+    try out.append(allocator, @intCast(sign_count & 0xff));
+    return out.toOwnedSlice(allocator);
+}
+
+test "webauthn: registration then passkey login (ES256)" {
+    const allocator = std.testing.allocator;
+    var env = try openMemory(allocator);
+    defer env.deinit();
+    var user_store = user.persistence.UserStore.init(allocator, env.client);
+    var mfa_store = mfa.persistence.MfaStore.init(allocator, env.client);
+    var sec = zigmodu.security.AppSecurity.init(allocator, std.testing.io, .{ .jwt_secret = "webauthn-secret" });
+    var user_svc = user.service.UserService.init(&user_store, &sec, std.testing.io, 3600, 86400);
+    var wa = mfa.webauthn.WebauthnService.init(allocator, std.testing.io, &mfa_store, &user_svc, .{
+        .rp_id = "localhost",
+        .rp_name = "zasdoor",
+        .origin = "http://localhost:3001",
+    });
+    const uid = try user_store.createUser("Grace", "grace@example.com", "hash", false, false, 1, 100);
+
+    const seed: [32]u8 = @splat(0x42);
+    const kp = try WebauthnP256.KeyPair.generateDeterministic(seed);
+    const sec1 = kp.public_key.toUncompressedSec1();
+
+    const ropts = try wa.beginRegistration(uid);
+    defer wa.freeRegistrationOptions(ropts);
+    const cred_id = [_]u8{ 1, 2, 3, 4, 5, 6, 7, 8 };
+    const create_cd = try std.fmt.allocPrint(allocator, "{{\"type\":\"webauthn.create\",\"challenge\":\"{s}\",\"origin\":\"{s}\"}}", .{ ropts.challenge, wa.cfg.origin });
+    defer allocator.free(create_cd);
+    const att_obj = try webauthnAttestationObject(allocator, "localhost", &cred_id, &sec1);
+    defer allocator.free(att_obj);
+    const create_cd_b64 = try webauthnB64(allocator, create_cd);
+    defer allocator.free(create_cd_b64);
+    const att_b64 = try webauthnB64(allocator, att_obj);
+    defer allocator.free(att_b64);
+    const cred_b64 = try webauthnB64(allocator, &cred_id);
+    defer allocator.free(cred_b64);
+
+    try wa.finishRegistration(uid, .{
+        .credential_id = cred_b64,
+        .client_data_json = create_cd_b64,
+        .attestation_object = att_b64,
+        .name = "test key",
+    });
+    const creds = try wa.listCredentials(allocator, uid);
+    defer wa.freeCredentialInfos(allocator, creds);
+    try std.testing.expectEqual(@as(usize, 1), creds.len);
+    try std.testing.expectEqualStrings("test key", creds[0].name);
+
+    const lopts = try wa.beginLogin("grace@example.com");
+    defer wa.freeLoginOptions(lopts);
+    const get_cd = try std.fmt.allocPrint(allocator, "{{\"type\":\"webauthn.get\",\"challenge\":\"{s}\",\"origin\":\"{s}\"}}", .{ lopts.challenge, wa.cfg.origin });
+    defer allocator.free(get_cd);
+    var client_hash: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(get_cd, &client_hash, .{});
+    const assert_auth = try webauthnAssertionAuthData(allocator, "localhost", 1);
+    defer allocator.free(assert_auth);
+    const msg = try allocator.alloc(u8, assert_auth.len + client_hash.len);
+    defer allocator.free(msg);
+    @memcpy(msg[0..assert_auth.len], assert_auth);
+    @memcpy(msg[assert_auth.len..], &client_hash);
+    const sig = try kp.sign(msg, null);
+    var der_buf: [WebauthnP256.Signature.der_encoded_length_max]u8 = undefined;
+    const der = sig.toDer(&der_buf);
+    const sig_b64 = try webauthnB64(allocator, der);
+    defer allocator.free(sig_b64);
+    const auth_b64 = try webauthnB64(allocator, assert_auth);
+    defer allocator.free(auth_b64);
+    const get_cd_b64 = try webauthnB64(allocator, get_cd);
+    defer allocator.free(get_cd_b64);
+
+    const session = try wa.finishLogin("grace@example.com", .{
+        .credential_id = cred_b64,
+        .client_data_json = get_cd_b64,
+        .authenticator_data = auth_b64,
+        .signature = sig_b64,
+    });
+    defer user_svc.freeSession(session);
+    try std.testing.expect(session.token.len > 0);
+    try std.testing.expectEqual(uid, session.row.id);
+
+    try std.testing.expectError(error.InvalidChallenge, wa.finishLogin("grace@example.com", .{
+        .credential_id = cred_b64,
+        .client_data_json = get_cd_b64,
+        .authenticator_data = auth_b64,
+        .signature = sig_b64,
+    }));
+}
+
 test "oauth: jwt sign/verify round-trip" {
     const allocator = std.testing.allocator;
     const mod = @import("modules/oauth/jwt.zig");
@@ -1411,6 +1570,133 @@ test "authz: role permission resolution -> ALLOW/DENY/UNKNOWN" {
     try std.testing.expectEqual(authzm.service.Decision.unknown, try az.authorize(alice, "proposal", "vote", ctx));
     // Unknown subject: no roles.
     try std.testing.expectEqual(authzm.service.Decision.unknown, try az.authorize(9999, "proposal", "read", ctx));
+}
+
+test "authz: explicit policies with deny-overrides and wildcards" {
+    const allocator = std.testing.allocator;
+    var env = try openMemory(allocator);
+    defer env.deinit();
+    var iam_store = iam.persistence.IamStore.init(allocator, env.client);
+    var az_store = authzm.persistence.AuthzStore.init(allocator, env.client);
+    var sec = zigmodu.security.AppSecurity.init(allocator, std.testing.io, .{ .jwt_secret = "policy-secret" });
+    var iam_svc = iam.service.IamService.init(allocator, std.testing.io, &iam_store, &sec);
+    var az = authzm.service.AuthzService.initWithStore(allocator, &iam_svc, &az_store);
+
+    const pid = try iam_svc.createProject(1, 0, "DAO2", "");
+    const admin_role = try iam_svc.createRole(1, pid, "admin", "Admin", "[\"proposal.*\"]");
+    const viewer_role = try iam_svc.createRole(1, pid, "viewer", "Viewer", "[\"proposal.read\"]");
+    const bob = 2;
+    const alice = 1;
+    _ = try iam_svc.assignRole(1, bob, admin_role, pid);
+    _ = try iam_svc.assignRole(1, alice, viewer_role, pid);
+
+    const now: i64 = 100;
+    const deny_id = try az_store.createPolicy(1, "no-delete", "deny", "*", "proposal", "delete", "", 10, true, now);
+    _ = try az_store.createPolicy(1, "alice-vote", "allow", "user:1", "proposal", "vote", "", 0, true, now);
+    _ = try az_store.createPolicy(1, "ghost", "allow", "user:9999", "proposal", "read", "", 0, false, now);
+
+    const ctx = authzm.service.AuthContext{ .project_id = pid };
+
+    // Deny overrides the role's wildcard allow.
+    const bob_delete = try az.authorizeDetailed(bob, "proposal", "delete", ctx);
+    try std.testing.expectEqual(authzm.service.Decision.deny, bob_delete.decision);
+    try std.testing.expectEqual(authzm.service.DecisionSource.policy, bob_delete.source);
+    try std.testing.expectEqual(deny_id, bob_delete.policy_id.?);
+
+    // A non-conflicting action still falls back to the role.
+    const bob_vote = try az.authorizeDetailed(bob, "proposal", "vote", ctx);
+    try std.testing.expectEqual(authzm.service.Decision.allow, bob_vote.decision);
+    try std.testing.expectEqual(authzm.service.DecisionSource.role, bob_vote.source);
+
+    // Explicit allow for a subject the role alone would refuse.
+    const alice_vote = try az.authorizeDetailed(alice, "proposal", "vote", ctx);
+    try std.testing.expectEqual(authzm.service.Decision.allow, alice_vote.decision);
+    try std.testing.expectEqual(authzm.service.DecisionSource.policy, alice_vote.source);
+
+    // Disabled policies grant nothing.
+    const ghost = try az.authorizeDetailed(9999, "proposal", "read", ctx);
+    try std.testing.expectEqual(authzm.service.Decision.unknown, ghost.decision);
+    try std.testing.expectEqual(authzm.service.DecisionSource.none, ghost.source);
+
+    // Wildcard allow for a subject with no roles.
+    _ = try az_store.createPolicy(1, "all-read", "allow", "*", "*", "read", "", 0, true, now);
+    const any_read = try az.authorizeDetailed(9999, "document", "read", ctx);
+    try std.testing.expectEqual(authzm.service.Decision.allow, any_read.decision);
+    try std.testing.expectEqual(authzm.service.DecisionSource.policy, any_read.source);
+
+    // Role-subject policies match through the role key.
+    _ = try az_store.createPolicy(1, "viewers-write", "allow", "role:viewer", "proposal", "write", "", 0, true, now);
+    const alice_write = try az.authorizeDetailed(alice, "proposal", "write", ctx);
+    try std.testing.expectEqual(authzm.service.Decision.allow, alice_write.decision);
+    try std.testing.expectEqual(authzm.service.DecisionSource.policy, alice_write.source);
+}
+
+test "authz: policy conditions, update and decision log" {
+    const allocator = std.testing.allocator;
+    var env = try openMemory(allocator);
+    defer env.deinit();
+    var iam_store = iam.persistence.IamStore.init(allocator, env.client);
+    var az_store = authzm.persistence.AuthzStore.init(allocator, env.client);
+    var sec = zigmodu.security.AppSecurity.init(allocator, std.testing.io, .{ .jwt_secret = "cond-secret" });
+    var iam_svc = iam.service.IamService.init(allocator, std.testing.io, &iam_store, &sec);
+    var az = authzm.service.AuthzService.initWithStore(allocator, &iam_svc, &az_store);
+
+    const now: i64 = 500;
+    const subject: i64 = 77;
+    const scoped_id = try az_store.createPolicy(1, "p42-read", "allow", "*", "proposal", "read", "{\"project_id\":42}", 0, true, now);
+
+    const in42 = try az.authorizeDetailed(subject, "proposal", "read", .{ .project_id = 42, .now = now });
+    try std.testing.expectEqual(authzm.service.Decision.allow, in42.decision);
+    try std.testing.expectEqual(authzm.service.DecisionSource.policy, in42.source);
+    try std.testing.expectEqual(scoped_id, in42.policy_id.?);
+
+    const in7 = try az.authorizeDetailed(subject, "proposal", "read", .{ .project_id = 7, .now = now });
+    try std.testing.expectEqual(authzm.service.Decision.unknown, in7.decision);
+
+    // Retarget the condition to project 7; the decision flips.
+    try std.testing.expect(try az_store.updatePolicy(scoped_id, .{ .condition = "{\"project_id\":7}" }, now + 1));
+    const now7 = try az.authorizeDetailed(subject, "proposal", "read", .{ .project_id = 7, .now = now + 2 });
+    try std.testing.expectEqual(authzm.service.Decision.allow, now7.decision);
+    const now42 = try az.authorizeDetailed(subject, "proposal", "read", .{ .project_id = 42, .now = now + 3 });
+    try std.testing.expectEqual(authzm.service.Decision.unknown, now42.decision);
+
+    // Every decision is recorded, newest first.
+    const decisions = try az_store.listDecisions(10);
+    defer {
+        for (decisions) |d| d.free(allocator);
+        allocator.free(decisions);
+    }
+    try std.testing.expect(decisions.len >= 4);
+    try std.testing.expectEqual(subject, decisions[0].subject_id);
+
+    // Purge removes records older than the cutoff.
+    _ = try az_store.purgeDecisionsBefore(now + 100);
+    const after = try az_store.listDecisions(10);
+    defer allocator.free(after);
+    try std.testing.expectEqual(@as(usize, 0), after.len);
+
+    // Updating a missing policy reports not found.
+    try std.testing.expect(!try az_store.updatePolicy(99999, .{ .enabled = false }, now));
+}
+
+test "user: federated accounts cannot reset or receive a password reset token" {
+    const allocator = std.testing.allocator;
+    var env = try openMemory(allocator);
+    defer env.deinit();
+    var store = user.persistence.UserStore.init(allocator, env.client);
+    var sec = zigmodu.security.AppSecurity.init(allocator, std.testing.io, .{ .jwt_secret = "federated-reset-secret" });
+    var svc = user.service.UserService.init(&store, &sec, std.testing.io, 3600, 86400);
+    const uid = try store.createUser("Fed", "fed@example.com", user.persistence.FEDERATED_PASSWORD_MARKER, false, false, 1, 100);
+
+    // Forgot-password does not mint a token for federated accounts.
+    try std.testing.expect((try svc.createPasswordResetToken(allocator, "fed@example.com")) == null);
+
+    // Even a pre-existing token cannot be redeemed.
+    const raw = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    const hash = try sec.module.hashPassword(raw);
+    defer sec.module.allocator.free(hash);
+    _ = try store.createPasswordToken(uid, hash, zigmodu.time.wallClockSeconds(std.testing.io));
+    try std.testing.expectError(error.FederatedAccount, svc.resetPassword(uid, raw, "Str0ng-pass-123"));
 }
 
 test "iam: organization create + project scoping" {

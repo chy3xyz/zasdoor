@@ -10,7 +10,7 @@ Organizations, projects, applications, roles, OAuth2/OIDC, MFA, SIWE — with a 
 [![zigmodu](https://img.shields.io/badge/zigmodu-v0.39.11-blue)](https://github.com/chy3xyz/zigmodu)
 [![zent](https://img.shields.io/badge/zent-ORM-6b46c1)](https://github.com/chy3xyz/zent)
 [![SolidJS](https://img.shields.io/badge/Frontend-SolidJS-2c4f7c?logo=solid&logoColor=white)](https://www.solidjs.com)
-[![Tests](https://img.shields.io/badge/tests-91%20backend%20%2B%205%20frontend-green)]()
+[![Tests](https://img.shields.io/badge/tests-107%20backend%20%2B%205%20frontend-green)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 </div>
@@ -79,7 +79,7 @@ Zasdoor is a self-hosted identity & access management platform. It gives you the
 ### 💎 Engineering quality
 - Schema-as-code migrations (auto at startup), SQLite ↔ PostgreSQL via one env var
 - Type-safe queries end-to-end (no SQL string building)
-- **91 backend tests** (stores, services, HTTP via Testkit incl. IAM/OAuth/MFA/web3/agent routes, JWT/multi-tenancy, OIDC EdDSA+JWKS+consent, federated IdP state/provisioning, password policy & lockout, AI crypto/approval/quota, session revocation) + **5 frontend tests** (vitest)
+- **107 backend tests** (stores, services, HTTP via Testkit incl. IAM/OAuth/MFA/web3/agent routes, JWT/multi-tenancy, OIDC EdDSA+JWKS+consent, federated IdP state/provisioning, password policy & lockout, AI crypto/approval/quota, session revocation) + **5 frontend tests** (vitest)
 - `zig fmt` clean, zero TODOs, graceful shutdown, documented backup strategy
 
 ---
@@ -206,7 +206,7 @@ Envelope: `{ code, msg, data }`, `code === 0` = success.
 ## 🧪 Testing
 
 ```bash
-zig build test                     # 91 backend tests (in-memory SQLite + Testkit HTTP)
+zig build test                     # 107 backend tests (in-memory SQLite + Testkit HTTP)
 cd web && pnpm run typecheck && pnpm run test && pnpm run build   # vitest + build
 ```
 

@@ -17,6 +17,29 @@ pub fn IdpApi(comptime Service: type, comptime UserService: type) type {
             return .{ .svc = svc, .users = users, .default_tenant_id = default_tenant_id };
         }
 
+        /// Provider management is admin-only; the public start/callback
+        /// routes deliberately do not use this guard.
+        fn requireAdmin(self: *Self, ctx: *http.Context) !bool {
+            const uid = mw.authUserId(ctx) orelse {
+                try ctx.sendErrorResponse(401, 401, "未登录或登录已过期");
+                return false;
+            };
+            const row_opt = self.users.getUserById(uid) catch {
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
+                return false;
+            };
+            const row = row_opt orelse {
+                try ctx.sendErrorResponse(401, 401, "用户不存在");
+                return false;
+            };
+            defer row.free(self.users.store.allocator);
+            if (!row.admin) {
+                try ctx.sendErrorResponse(403, 403, "需要管理员权限");
+                return false;
+            }
+            return true;
+        }
+
         pub fn registerRoutes(self: *Self, group: *http.RouteGroup) !void {
             // Public social-login entry point + provider callback. The
             // callback is guarded by the persisted single-use state, not a
@@ -36,6 +59,7 @@ pub fn IdpApi(comptime Service: type, comptime UserService: type) type {
 
         fn create(ctx: *http.Context) !void {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
+            if (!(try requireAdmin(self, ctx))) return;
             const req = ctx.bindJsonLoose(CreateIdpReq) catch {
                 try ctx.sendErrorResponse(400, 400, "请求体格式错误");
                 return;
@@ -54,6 +78,7 @@ pub fn IdpApi(comptime Service: type, comptime UserService: type) type {
 
         fn list(ctx: *http.Context) !void {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
+            if (!(try requireAdmin(self, ctx))) return;
             const rows = self.svc.list(self.default_tenant_id) catch {
                 try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
@@ -75,6 +100,7 @@ pub fn IdpApi(comptime Service: type, comptime UserService: type) type {
 
         fn loginLink(ctx: *http.Context) !void {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
+            if (!(try requireAdmin(self, ctx))) return;
             const req = ctx.bindJsonLoose(LinkReq) catch {
                 try ctx.sendErrorResponse(400, 400, "请求体格式错误");
                 return;

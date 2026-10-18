@@ -2,10 +2,21 @@ import { useNavigate } from '@solidjs/router';
 import { type JSX, onMount } from 'solid-js';
 import { createStore } from 'solid-js/store';
 
-import { type AuthUser, login as apiLogin, logout as apiLogout, me as apiMe, register as apiRegister, setAuthToken, setUnauthorizedHandler, verifySiwe } from '#ui/api';
+import {
+  type AuthUser,
+  finishPasskeyLogin,
+  login as apiLogin,
+  logout as apiLogout,
+  me as apiMe,
+  register as apiRegister,
+  setAuthToken,
+  setUnauthorizedHandler,
+  verifySiwe,
+} from '#ui/api';
 import { APP_CONFIG } from '#ui/config';
 import { ROUTE_PATH } from '#ui/constants';
 import { AuthContext, type AuthActions, type AuthContextValue, type AuthState } from '#ui/context';
+import { serializeLoginCredential } from '#ui/utils';
 
 function readStoredSession(): { token: string; user: AuthUser } | null {
   try {
@@ -82,6 +93,25 @@ export function AuthProvider(props: JSX.HTMLAttributes<HTMLElement>) {
         if (!(err instanceof Error && err.message.includes('尚未绑定'))) {
           setStore('error', err instanceof Error ? err.message : '钱包登录失败，请稍后重试');
         }
+        throw err;
+      }
+    },
+    async passkeyLogin(email, credential) {
+      setStore('error', null);
+      try {
+        const result = await finishPasskeyLogin(serializeLoginCredential(email, credential));
+        // The finish endpoint returns a reduced user DTO (no verified /
+        // created_at / updated_at), so re-fetch the full profile exactly like
+        // the SIWE flow does before caching the session.
+        setAuthToken(result.token);
+        const user = await apiMe();
+        applySession(result.token, user);
+        navigate(ROUTE_PATH.index, { replace: true });
+      } catch (err) {
+        setStore(
+          'error',
+          err instanceof Error ? err.message : '通行密钥登录失败，请稍后重试',
+        );
         throw err;
       }
     },

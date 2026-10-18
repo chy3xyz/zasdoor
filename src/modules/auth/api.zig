@@ -329,6 +329,10 @@ pub fn AuthApi(comptime Service: type) type {
                     try ctx.sendErrorResponse(400, 400, "重置链接无效");
                     return;
                 },
+                error.FederatedAccount => {
+                    try ctx.sendErrorResponse(400, 400, "该账号使用第三方登录,不支持密码重置");
+                    return;
+                },
                 error.TokenExpired => {
                     try ctx.sendErrorResponse(400, 400, "重置链接已过期");
                     return;

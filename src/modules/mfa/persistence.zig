@@ -14,6 +14,8 @@ const graph = zent.codegen.graph.buildGraph(&.{
     model.MfaPolicy,
     model.IdentityLink,
     model.FederatedState,
+    model.WebauthnCredential,
+    model.WebauthnChallenge,
 });
 pub const infos = graph.types;
 pub const Client = schema.Client;
@@ -23,12 +25,15 @@ pub const IdpInfo = infos[2];
 pub const PolicyInfo = infos[3];
 pub const LinkInfo = infos[4];
 pub const StateInfo = infos[5];
+pub const WebauthnCredentialInfo = infos[6];
+pub const WebauthnChallengeInfo = infos[7];
 /// The user table belongs to another module but shares the one typed
 /// client; federated provisioning reads/writes it through the same store.
 const UserTableInfo = user_persist.infos[0];
 /// Marker stored in `User.password` for accounts with no local password.
 /// It is not a valid PBKDF2 string, so `verifyPassword` always fails.
-pub const FEDERATED_PASSWORD_MARKER = "!federated";
+/// Canonical definition lives in the user domain.
+pub const FEDERATED_PASSWORD_MARKER = user_persist.FEDERATED_PASSWORD_MARKER;
 
 pub const MfaStore = struct {
     allocator: std.mem.Allocator,
@@ -390,6 +395,153 @@ pub const MfaStore = struct {
         var row = try b.Save();
         defer zent.codegen.deinitEntity(infos, PolicyInfo, &row, self.allocator);
     }
+
+    // ---- WebAuthn credentials ----
+
+    fn dupWebauthnCredential(self: *MfaStore, e: anytype) !WebauthnCredentialRow {
+        return .{
+            .id = e.id,
+            .user_id = e.user_id,
+            .credential_id = try self.allocator.dupe(u8, e.credential_id),
+            .public_key = try self.allocator.dupe(u8, e.public_key),
+            .sign_count = e.sign_count,
+            .name = try self.allocator.dupe(u8, e.name),
+            .transports = try self.allocator.dupe(u8, e.transports),
+            .aaguid = try self.allocator.dupe(u8, e.aaguid),
+            .last_used_at = e.last_used_at,
+        };
+    }
+
+    pub fn createWebauthnCredential(
+        self: *MfaStore,
+        tenant_id: i64,
+        user_id: i64,
+        credential_id: []const u8,
+        public_key: []const u8,
+        name: []const u8,
+        transports: []const u8,
+        aaguid: []const u8,
+        now: i64,
+    ) !i64 {
+        var b = try self.client.webauthn_credential.Create();
+        defer b.deinit();
+        _ = try b.setFieldValue("tenant_id", tenant_id);
+        _ = try b.setFieldValue("user_id", user_id);
+        _ = try b.setFieldValue("credential_id", credential_id);
+        _ = try b.setFieldValue("public_key", public_key);
+        _ = try b.setFieldValue("sign_count", 0);
+        _ = try b.setFieldValue("name", name);
+        _ = try b.setFieldValue("transports", transports);
+        _ = try b.setFieldValue("aaguid", aaguid);
+        _ = try b.setFieldValue("last_used_at", 0);
+        _ = try b.setFieldValue("created_at", now);
+        _ = try b.setFieldValue("updated_at", now);
+        var row = try b.Save();
+        defer zent.codegen.deinitEntity(infos, WebauthnCredentialInfo, &row, self.allocator);
+        return row.id;
+    }
+
+    pub fn listWebauthnCredentials(self: *MfaStore, user_id: i64) ![]WebauthnCredentialRow {
+        const preds = self.client.webauthn_credential.predicates;
+        const rows = try crud.all(self.client.webauthn_credential, .{preds.user_idEQ(.{ .int = user_id })});
+        defer zent.crud_helpers.deinitRows(infos, WebauthnCredentialInfo, rows, self.allocator);
+        var out = try self.allocator.alloc(WebauthnCredentialRow, rows.items.len);
+        var i: usize = 0;
+        errdefer {
+            for (out[0..i]) |r| r.free(self.allocator);
+            self.allocator.free(out);
+        }
+        for (rows.items) |e| {
+            out[i] = try self.dupWebauthnCredential(e);
+            i += 1;
+        }
+        return out;
+    }
+
+    pub fn getWebauthnCredentialByCredentialId(self: *MfaStore, credential_id: []const u8) !?WebauthnCredentialRow {
+        const preds = self.client.webauthn_credential.predicates;
+        var e = (try crud.first(self.client.webauthn_credential, .{preds.credential_idEQ(.{ .string = credential_id })})) orelse return null;
+        defer zent.codegen.deinitEntity(infos, WebauthnCredentialInfo, &e, self.allocator);
+        return try self.dupWebauthnCredential(e);
+    }
+
+    pub fn updateWebauthnSignCount(self: *MfaStore, id: i64, sign_count: i64, now: i64) !void {
+        const preds = self.client.webauthn_credential.predicates;
+        var u = self.client.webauthn_credential.Update();
+        defer u.deinit();
+        _ = try u.setFieldValue("sign_count", sign_count);
+        _ = try u.setFieldValue("last_used_at", now);
+        _ = try u.setFieldValue("updated_at", now);
+        _ = try u.Where(.{preds.idEQ(.{ .int = id })});
+        _ = try u.Save();
+    }
+
+    pub fn deleteWebauthnCredential(self: *MfaStore, id: i64, user_id: i64) !bool {
+        const preds = self.client.webauthn_credential.predicates;
+        var d = self.client.webauthn_credential.Delete();
+        defer d.deinit();
+        _ = try d.Where(.{preds.idEQ(.{ .int = id })});
+        _ = try d.Where(.{preds.user_idEQ(.{ .int = user_id })});
+        return (try d.Exec()) > 0;
+    }
+
+    // ---- WebAuthn challenges ----
+
+    pub fn createWebauthnChallenge(
+        self: *MfaStore,
+        tenant_id: i64,
+        user_id: i64,
+        challenge: []const u8,
+        kind: []const u8,
+        login_email: []const u8,
+        expires_at: i64,
+        now: i64,
+    ) !void {
+        var b = try self.client.webauthn_challenge.Create();
+        defer b.deinit();
+        _ = try b.setFieldValue("tenant_id", tenant_id);
+        _ = try b.setFieldValue("user_id", user_id);
+        _ = try b.setFieldValue("challenge", challenge);
+        _ = try b.setFieldValue("kind", kind);
+        _ = try b.setFieldValue("login_email", login_email);
+        _ = try b.setFieldValue("expires_at", expires_at);
+        _ = try b.setFieldValue("used", false);
+        _ = try b.setFieldValue("created_at", now);
+        _ = try b.setFieldValue("updated_at", now);
+        var row = try b.Save();
+        defer zent.codegen.deinitEntity(infos, WebauthnChallengeInfo, &row, self.allocator);
+    }
+
+    /// Fetch and consume a challenge exactly once. Null when unknown, used,
+    /// expired, or of a different ceremony kind.
+    pub fn consumeWebauthnChallenge(self: *MfaStore, challenge: []const u8, kind: []const u8, now: i64) !?WebauthnChallengeRow {
+        const preds = self.client.webauthn_challenge.predicates;
+        var e = (try crud.first(self.client.webauthn_challenge, .{preds.challengeEQ(.{ .string = challenge })})) orelse return null;
+        defer zent.codegen.deinitEntity(infos, WebauthnChallengeInfo, &e, self.allocator);
+        if (e.used or e.expires_at < now or !std.mem.eql(u8, e.kind, kind)) return null;
+        var u = self.client.webauthn_challenge.Update();
+        defer u.deinit();
+        _ = try u.setFieldValue("used", true);
+        _ = try u.setFieldValue("updated_at", now);
+        _ = try u.Where(.{preds.idEQ(.{ .int = e.id })});
+        _ = try u.Save();
+        return .{
+            .id = e.id,
+            .user_id = e.user_id,
+            .challenge = try self.allocator.dupe(u8, e.challenge),
+            .kind = try self.allocator.dupe(u8, e.kind),
+            .login_email = try self.allocator.dupe(u8, e.login_email),
+            .expires_at = e.expires_at,
+        };
+    }
+
+    pub fn purgeExpiredWebauthnChallenges(self: *MfaStore, now: i64) !usize {
+        const preds = self.client.webauthn_challenge.predicates;
+        var d = self.client.webauthn_challenge.Delete();
+        defer d.deinit();
+        _ = try d.Where(.{preds.expires_atLT(.{ .int = now })});
+        return try d.Exec();
+    }
 };
 
 pub const IdentityProviderRow = struct {
@@ -437,4 +589,39 @@ pub const MfaPolicyRow = struct {
     require_mfa: bool,
     allow_recovery_codes: bool,
     allow_totp: bool,
+};
+
+pub const WebauthnCredentialRow = struct {
+    id: i64,
+    user_id: i64,
+    credential_id: []const u8,
+    public_key: []const u8,
+    sign_count: i64,
+    name: []const u8,
+    transports: []const u8,
+    aaguid: []const u8,
+    last_used_at: i64,
+
+    pub fn free(self: WebauthnCredentialRow, a: std.mem.Allocator) void {
+        a.free(self.credential_id);
+        a.free(self.public_key);
+        a.free(self.name);
+        a.free(self.transports);
+        a.free(self.aaguid);
+    }
+};
+
+pub const WebauthnChallengeRow = struct {
+    id: i64,
+    user_id: i64,
+    challenge: []const u8,
+    kind: []const u8,
+    login_email: []const u8,
+    expires_at: i64,
+
+    pub fn free(self: WebauthnChallengeRow, a: std.mem.Allocator) void {
+        a.free(self.challenge);
+        a.free(self.kind);
+        a.free(self.login_email);
+    }
 };

@@ -10,6 +10,7 @@ export * from './mailTemplate';
 export * from './ai';
 export * from './iam';
 export * from './mfa';
+export * from './webauthn';
 export * from './agent';
 export * from './web3';
 export { getAuthToken, setAuthToken, setUnauthorizedHandler } from './client';

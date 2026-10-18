@@ -63,6 +63,12 @@ pub const Config = struct {
     /// OIDC 密钥环:额外的历史签名密钥(逗号分隔),仅用于轮换期间验签。
     /// 当前签名密钥始终由 ZASDOOR_JWT_SECRET 派生。
     oidc_key_secrets: []const u8 = "",
+    /// WebAuthn relying party。rp_id 必须是 origin 的域名(不含 scheme/端口),
+    /// origin 必须与浏览器发送的 clientData.origin 完全一致。
+    webauthn_rp_id: []const u8 = "localhost",
+    webauthn_rp_name: []const u8 = "zasdoor",
+    webauthn_origin: []const u8 = "http://localhost:3001",
+    webauthn_challenge_ttl_seconds: i64 = 300,
 
     pub fn fromEnv(environ: *const std.process.Environ.Map) Config {
         var cfg: Config = .{};
@@ -98,6 +104,10 @@ pub const Config = struct {
         cfg.http_request_timeout_ms = @intCast(parseIntUsize(environ.get("ZASDOOR_HTTP_REQUEST_TIMEOUT_MS") orelse "30000", 30000));
         cfg.env = environ.get("ZASDOOR_ENV") orelse "development";
         cfg.oidc_key_secrets = environ.get("ZASDOOR_OIDC_KEY_SECRETS") orelse "";
+        cfg.webauthn_rp_id = environ.get("ZASDOOR_WEBAUTHN_RP_ID") orelse "localhost";
+        cfg.webauthn_rp_name = environ.get("ZASDOOR_WEBAUTHN_RP_NAME") orelse "zasdoor";
+        cfg.webauthn_origin = environ.get("ZASDOOR_WEBAUTHN_ORIGIN") orelse "http://localhost:3001";
+        cfg.webauthn_challenge_ttl_seconds = parseInt64(environ.get("ZASDOOR_WEBAUTHN_CHALLENGE_TTL") orelse "300", 300);
         return cfg;
     }
 

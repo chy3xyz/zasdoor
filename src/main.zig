@@ -61,6 +61,8 @@ const CleanupCtx = struct {
     notify_store: *notify.persistence.NotificationStore,
     audit_store: *audit.persistence.AuditStore,
     iam_store: *iam.persistence.IamStore,
+    mfa_store: *mfa.persistence.MfaStore,
+    authz_store: *authz.persistence.AuthzStore,
     password_token_max_age: i64,
     verification_token_max_age: i64,
     notification_max_age: i64,
@@ -72,6 +74,8 @@ fn jobTokensCleanup(ctx: ?*anyopaque) void {
     const now = zigmodu.time.wallClockSeconds(c.io);
     _ = c.user_store.purgeExpiredPasswordTokens(now, c.password_token_max_age) catch {};
     _ = c.user_store.purgeExpiredEmailVerifications(now, c.verification_token_max_age) catch {};
+    _ = c.mfa_store.purgeExpiredWebauthnChallenges(now) catch {};
+    _ = c.authz_store.purgeDecisionsBefore(now - 30 * 24 * 3600) catch {};
 }
 
 fn jobNotifyPrune(ctx: ?*anyopaque) void {
@@ -179,6 +183,7 @@ pub fn main(init: std.process.Init) !void {
         mfa.persistence.infos,
         web3.persistence.infos,
         agent.persistence.infos,
+        authz.persistence.infos,
     }).open(allocator, kind, dsn);
     defer store_env.deinit();
     std.log.info("[zent] migrated schema via {s} ({s})", .{ @tagName(kind), dsn });
@@ -249,12 +254,19 @@ pub fn main(init: std.process.Init) !void {
 
     var event_store = eventstore.persistence.EventStore.init(allocator, store_env.client);
     var event_svc = eventstore.service.EventService.init(allocator, io, &event_store, &.{}); // projections added below
-    var authz_svc = authz.service.AuthzService.init(allocator, &iam_svc);
+    var authz_store = authz.persistence.AuthzStore.init(allocator, store_env.client);
+    var authz_svc = authz.service.AuthzService.initWithStore(allocator, &iam_svc, &authz_store);
     ProjectionCtx.svc = &event_svc;
     var authz_api = authz.api.AuthzApi(@TypeOf(authz_svc), @TypeOf(user_svc)).init(&authz_svc, &user_svc);
     var mfa_store = mfa.persistence.MfaStore.init(allocator, store_env.client);
     var mfa_svc = mfa.service.MfaService.init(allocator, io, &mfa_store, &sec);
     var idp_svc = mfa.idp.IdpService.init(allocator, &mfa_store);
+    var webauthn_svc = mfa.webauthn.WebauthnService.init(allocator, io, &mfa_store, &user_svc, .{
+        .rp_id = cfg.webauthn_rp_id,
+        .rp_name = cfg.webauthn_rp_name,
+        .origin = cfg.webauthn_origin,
+        .challenge_ttl_seconds = cfg.webauthn_challenge_ttl_seconds,
+    });
     var wallet_store = web3.persistence.WalletStore.init(allocator, store_env.client);
     var web3_svc = web3.service.Web3Service.init(allocator, io, &wallet_store, &user_svc, &sec);
     var agent_store = agent.persistence.AgentStore.init(allocator, store_env.client);
@@ -293,6 +305,8 @@ pub fn main(init: std.process.Init) !void {
         .notify_store = &notify_store,
         .audit_store = &audit_store,
         .iam_store = &iam_store,
+        .mfa_store = &mfa_store,
+        .authz_store = &authz_store,
         .password_token_max_age = cfg.password_token_expiration_seconds,
         .verification_token_max_age = cfg.verification_token_expiration_seconds,
         .notification_max_age = 30 * 24 * 3600,
@@ -368,6 +382,7 @@ pub fn main(init: std.process.Init) !void {
     var iam_api = iam.api.IamApi(@TypeOf(iam_svc), @TypeOf(user_svc)).init(&iam_svc, &user_svc, &audit_svc, default_tenant_id);
     var oauth_api = oauth.api.OAuthApi(@TypeOf(oauth_svc), @TypeOf(user_svc)).init(&oauth_svc, &user_svc);
     var mfa_api = mfa.api.MfaApi(@TypeOf(mfa_svc), @TypeOf(user_svc)).init(&mfa_svc, &user_svc, default_tenant_id);
+    var webauthn_api = mfa.webauthn_api.WebauthnApi(@TypeOf(webauthn_svc), @TypeOf(user_svc)).init(&webauthn_svc, &user_svc, &login_registry, default_tenant_id);
     var web3_api = web3.api.Web3Api(@TypeOf(web3_svc), @TypeOf(user_svc)).init(&web3_svc, &user_svc, default_tenant_id);
     var idp_api = mfa.idp_api.IdpApi(@TypeOf(idp_svc), @TypeOf(user_svc)).init(&idp_svc, &user_svc, default_tenant_id);
     var system_api = system.api.SystemApi(@TypeOf(cache), @TypeOf(task_svc)).init(
@@ -423,6 +438,7 @@ pub fn main(init: std.process.Init) !void {
     try iam_api.registerRoutes(&v1);
     try authz_api.registerRoutes(&v1);
     try mfa_api.registerRoutes(&v1);
+    try webauthn_api.registerRoutes(&v1);
     try idp_api.registerRoutes(&v1);
     try web3_api.registerRoutes(&v1);
     try agent_api.registerRoutes(&v1);

@@ -15,6 +15,8 @@ export type AuthActions = {
   login: (email: string, password: string) => Promise<void>;
   /** Sign in with a SIWE message+signature; throws when the wallet is not bound. */
   siweLogin: (message: string, signature: string, domain: string) => Promise<void>;
+  /** Sign in with a WebAuthn assertion produced by `navigator.credentials.get`. */
+  passkeyLogin: (email: string, credential: PublicKeyCredential) => Promise<void>;
   register: (name: string, email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   clearError: () => void;
@@ -34,6 +36,7 @@ export const AuthContext = createContext<AuthContextValue>([
   {
     login: async () => {},
     siweLogin: async () => {},
+    passkeyLogin: async () => {},
     register: async () => {},
     logout: async () => {},
     clearError: () => {},

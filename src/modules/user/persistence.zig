@@ -18,6 +18,11 @@ pub const PasswordTokenInfo = infos[1];
 pub const EmailVerificationInfo = infos[2];
 pub const LoginAttemptInfo = infos[3];
 
+/// Marker stored in User.password for accounts that have no local password
+/// (federated/SSO accounts). It is not a valid PBKDF2 string, so password
+/// verification always fails.
+pub const FEDERATED_PASSWORD_MARKER = "!federated";
+
 pub const UserRow = struct {
     id: i64,
     name: []const u8,

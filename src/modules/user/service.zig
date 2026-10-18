@@ -34,6 +34,8 @@ pub const LoginError = error{
 pub const ResetTokenError = error{
     InvalidToken,
     TokenExpired,
+    /// The account is federated (no local password); reset is refused.
+    FederatedAccount,
     InvalidPassword,
     PasswordTooShort,
     PasswordTooLong,
@@ -487,6 +489,15 @@ pub const UserService = struct {
         s.row.free(self.store.allocator);
     }
 
+    /// Issue a session for an already-authenticated user (e.g. after a
+    /// successful WebAuthn assertion). Loads the row for admin/tenant claims.
+    pub fn issueSessionForUser(self: *UserService, allocator: std.mem.Allocator, id: i64) !Session {
+        const row_opt = try self.store.getUserById(id);
+        const row = row_opt orelse return error.InvalidCredentials;
+        defer row.free(self.store.allocator);
+        return self.issueSession(allocator, row.email, row.admin, row.tenant_id);
+    }
+
     pub fn getUserById(self: *UserService, id: i64) !?UserRow {
         return try self.store.getUserById(id);
     }
@@ -564,6 +575,13 @@ pub const UserService = struct {
         const row = row_opt orelse return null;
         defer row.free(self.store.allocator);
 
+        // Federated/SSO accounts have no local password; never mint a reset
+        // token for them (the request still returns a generic success).
+        const stored_opt = try self.store.getPasswordHashById(row.id);
+        const stored = stored_opt orelse return null;
+        defer self.store.allocator.free(stored);
+        if (std.mem.eql(u8, stored, persist.FEDERATED_PASSWORD_MARKER)) return null;
+
         const raw = try randomToken(allocator, self.io, 32);
         errdefer allocator.free(raw);
         const hash = try self.sec.module.hashPassword(raw);
@@ -612,6 +630,14 @@ pub const UserService = struct {
         const row_opt = self.store.getUserById(user_id) catch return error.Unexpected;
         const row = row_opt orelse return error.InvalidToken;
         defer row.free(self.store.allocator);
+
+        // A federated account must never acquire a local password through the
+        // reset flow, even if a token was minted before the account was linked.
+        const stored_opt = self.store.getPasswordHashById(user_id) catch return error.Unexpected;
+        const stored = stored_opt orelse return error.InvalidToken;
+        defer self.store.allocator.free(stored);
+        if (std.mem.eql(u8, stored, persist.FEDERATED_PASSWORD_MARKER)) return error.FederatedAccount;
+
         self.policy.validate(new_password, row.email, row.name) catch |err| switch (err) {
             error.PasswordTooShort => return error.PasswordTooShort,
             error.PasswordTooLong => return error.PasswordTooLong,

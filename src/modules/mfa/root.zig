@@ -7,3 +7,6 @@ pub const api = @import("api.zig");
 pub const idp_api = @import("idp_api.zig");
 pub const module = @import("module.zig");
 pub const totp = @import("totp.zig");
+pub const cbor = @import("cbor.zig");
+pub const webauthn = @import("webauthn.zig");
+pub const webauthn_api = @import("webauthn_api.zig");

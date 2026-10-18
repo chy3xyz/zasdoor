@@ -1,9 +1,10 @@
 import { A } from '@solidjs/router';
 import { createSignal, Show } from 'solid-js';
 
-import { getSiweNonce } from '#ui/api';
+import { beginPasskeyLogin, getSiweNonce } from '#ui/api';
 import { ROUTE_PATH } from '#ui/constants';
 import { useAuth } from '#ui/hooks';
+import { decodeRequestOptions, isWebAuthnSupported, passkeyErrorMessage } from '#ui/utils';
 
 interface EthereumProvider {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
@@ -22,6 +23,8 @@ function SignIn() {
   const [submitting, setSubmitting] = createSignal(false);
   const [walletBusy, setWalletBusy] = createSignal(false);
   const [walletError, setWalletError] = createSignal<string | null>(null);
+  const [passkeyBusy, setPasskeyBusy] = createSignal(false);
+  const [passkeyError, setPasskeyError] = createSignal<string | null>(null);
 
   const onSubmit = async (e: SubmitEvent) => {
     e.preventDefault();
@@ -73,6 +76,44 @@ function SignIn() {
     }
   };
 
+  const onPasskeySignIn = async () => {
+    actions.clearError();
+    setPasskeyError(null);
+    const mail = email().trim();
+    if (!mail) {
+      setPasskeyError('请先输入邮箱。');
+      return;
+    }
+    if (!isWebAuthnSupported()) {
+      setPasskeyError('当前浏览器或页面环境不支持通行密钥。');
+      return;
+    }
+    setPasskeyBusy(true);
+    let credential: PublicKeyCredential | null = null;
+    try {
+      // 1. Server-issued challenge + allowCredentials (raw options, b64url).
+      const options = await beginPasskeyLogin(mail);
+      // 2. Browser ceremony: fingerprint / face / device PIN.
+      credential = (await navigator.credentials.get({
+        publicKey: decodeRequestOptions(options),
+      })) as PublicKeyCredential | null;
+      if (!credential) throw new Error('未获取到通行密钥');
+    } catch (err) {
+      setPasskeyError(passkeyErrorMessage(err));
+      setPasskeyBusy(false);
+      return;
+    }
+    try {
+      // 3. Verify server-side and persist the session through the auth
+      // provider, so success behaves exactly like a password login.
+      await actions.passkeyLogin(mail, credential);
+    } catch {
+      // auth.error already carries the server's envelope message.
+    } finally {
+      setPasskeyBusy(false);
+    }
+  };
+
   return (
     <div class="card bg-base-100 shadow-xl">
       <div class="card-body">
@@ -118,6 +159,23 @@ function SignIn() {
         </form>
 
         <div class="divider my-2 text-xs text-base-content/50">或</div>
+
+        <Show when={passkeyError()}>
+          <div role="alert" class="alert alert-error py-2 text-sm">
+            {passkeyError()}
+          </div>
+        </Show>
+        <button
+          type="button"
+          class="btn btn-outline w-full"
+          disabled={passkeyBusy()}
+          onClick={onPasskeySignIn}
+        >
+          {passkeyBusy() ? '正在验证通行密钥…' : '使用通行密钥登录 / Sign in with passkey'}
+        </button>
+        <p class="mt-1 text-xs text-base-content/50">
+          需先在「MFA 安全」中注册通行密钥；浏览器会要求指纹、面容或设备 PIN。
+        </p>
 
         <Show when={walletError()}>
           <div role="alert" class="alert alert-error py-2 text-sm">

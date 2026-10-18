@@ -22,6 +22,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `actor_token` adds the delegation `act` claim, `audience` sets the new
   token audience, and `scope` may only be downscoped. Responses carry
   `issued_token_type`; discovery advertises the grant.
+- **WebAuthn / Passkey (ES256)**: register and authenticate passkeys. New
+  `WebauthnCredential` / `WebauthnChallenge` tables, a minimal CBOR decoder
+  (`mfa/cbor.zig`), registration + assertion verification, public passkey
+  login issuing a session JWT, credential list/delete, and config
+  (`ZASDOOR_WEBAUTHN_RP_ID` / `_RP_NAME` / `_ORIGIN` / `_CHALLENGE_TTL`).
+  Public login endpoints are per-IP rate-limited; attestation `none` only.
+- **Authorization policy engine (P2)**: a `Policy` table with nullable
+  `allow`/`deny` effects, `*` / `user:<id>` / `role:<key>` subjects,
+  resource/action wildcards, priority and tenant scoping. Explicit policies
+  are evaluated deny-first before the RBAC fallback; `POST /iam/authz/check`
+  now returns `source` and `policy_id`, and admins manage policies at
+  `/iam/authz/policies` (GET/POST/PUT/DELETE). Policies accept an optional
+  JSON `condition` (`org_id`/`project_id`/`resource_id`), and every decision is
+  recorded in `AuthzDecision` for audit (`GET /iam/authz/decisions`, 30-day
+  scheduled purge).
 
 ### Changed
 
@@ -137,9 +152,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     requested and a value exists. Discovery advertises both scopes.
   - CI gained a `ReleaseSafe` build and the E2E shutdown/leak gate.
 
+### Security
+
+- **Federated accounts cannot acquire a local password**: password reset now
+  refuses `!federated` accounts (`FederatedAccount` -> HTTP 400) even with a
+  previously minted token, and forgot-password no longer creates a reset token
+  for them. The marker constant is defined once in the user domain.
+- **IdP management is admin-only**: `GET/POST /mfa/idps` and
+  `POST /mfa/idps/{id}/link` now require an admin user (403 otherwise); the
+  public `start`/`callback` routes are unchanged.
+
 ### Verified
 
-- `zig build`, `zig build test` (91/91) and `zig build -Doptimize=ReleaseSafe`
+- `zig build`, `zig build test` (107/107) and `zig build -Doptimize=ReleaseSafe`
   pass on Zig 0.17.0; `zig fmt --check` and `scripts/run_e2e.sh` (boot ->
   probes -> admin/login/info -> graceful shutdown, no panic/leak) are green,
   with the web typecheck/vitest/rsbuild also passing.
