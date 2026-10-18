@@ -40,6 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **CI/release**: `mlugg/setup-zig` upgraded from v1 to v2 — the v1 action no
+  longer runs on GitHub-hosted runners, which had broken every backend CI and
+  release build (frontend jobs were unaffected).
 - **Dependencies fetched from git instead of sibling checkouts** — zigmodu
   **v0.39.11** and zent **v0.91.0** are now `.url` + `.hash` entries in
   `build.zig.zon` (tagged tarballs), replacing `.path` entries that pointed at
