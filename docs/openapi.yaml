@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Zasdoor HTTP API
-  version: 0.4.0
+  version: 0.5.0
   summary: 'Admin framework API: auth, users, IAM/OAuth2/OIDC, MFA/WebAuthn, Web3, agents, AI, files, tasks and operations.'
   description: 'Complete HTTP surface derived from the Zig route registrations in `src/main.zig` and `src/modules/*/api.zig`.
 

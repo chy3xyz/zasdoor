@@ -7,7 +7,7 @@ pub fn build(b: *std.Build) void {
 
     // Build-time version baked into /system/info and the shutdown log. Bump in
     // step with the CHANGELOG; releases can override with -Drelease=x.y.z.
-    const version = b.option([]const u8, "release", "Version string embedded in /system/info") orelse "0.4.0";
+    const version = b.option([]const u8, "release", "Version string embedded in /system/info") orelse "0.5.0";
     const build_info = b.addOptions();
     build_info.addOption([]const u8, "version", version);
 
