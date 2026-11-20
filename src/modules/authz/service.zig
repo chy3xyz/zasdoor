@@ -86,7 +86,7 @@ pub const AuthzService = struct {
         return self.store;
     }
 
-    fn subjectMatches(self: *AuthzService, subject: []const u8, subject_id: i64, role_ids: []const i64) bool {
+    fn subjectMatches(self: *AuthzService, subject: []const u8, subject_id: i64, role_ids: []const i64, tenant_id: ?i64) bool {
         if (std.mem.eql(u8, subject, "*")) return true;
         if (std.mem.startsWith(u8, subject, "user:")) {
             const id = std.fmt.parseInt(i64, subject["user:".len..], 10) catch return false;
@@ -95,7 +95,10 @@ pub const AuthzService = struct {
         if (std.mem.startsWith(u8, subject, "role:")) {
             const key = subject["role:".len..];
             for (role_ids) |rid| {
-                const role_opt = self.iam_svc.getRole(rid) catch continue;
+                const role_opt = if (tenant_id) |t|
+                    self.iam_svc.getRoleForTenant(rid, t) catch continue
+                else
+                    self.iam_svc.getRole(rid) catch continue;
                 const role = role_opt orelse continue;
                 defer role.free(self.iam_svc.allocator);
                 if (std.mem.eql(u8, role.key, key)) return true;
@@ -142,7 +145,10 @@ pub const AuthzService = struct {
         action: []const u8,
         context: AuthContext,
     ) !DecisionInfo {
-        const role_ids = try self.iam_svc.store.listRoleIdsForUser(subject_id, context.project_id);
+        const role_ids = if (context.tenant_id) |t|
+            try self.iam_svc.store.listRoleIdsForUserForTenant(subject_id, context.project_id, t)
+        else
+            try self.iam_svc.store.listRoleIdsForUser(subject_id, context.project_id);
         defer self.allocator.free(role_ids);
 
         var info: ?DecisionInfo = null;
@@ -160,7 +166,7 @@ pub const AuthzService = struct {
                 if (!patternMatches(p.resource, resource)) continue;
                 if (!patternMatches(p.action, action)) continue;
                 if (!self.conditionMatches(p.condition, context)) continue;
-                if (!self.subjectMatches(p.subject, subject_id, role_ids)) continue;
+                if (!self.subjectMatches(p.subject, subject_id, role_ids, context.tenant_id)) continue;
                 if (std.mem.eql(u8, p.effect, "deny")) {
                     info = .{ .decision = .deny, .source = .policy, .policy_id = p.id };
                     break;
@@ -176,7 +182,10 @@ pub const AuthzService = struct {
             // Role permission fallback.
             var matched = false;
             for (role_ids) |rid| {
-                const role_opt = try self.iam_svc.getRole(rid);
+                const role_opt = if (context.tenant_id) |t|
+                    try self.iam_svc.getRoleForTenant(rid, t)
+                else
+                    try self.iam_svc.getRole(rid);
                 const role = role_opt orelse continue;
                 defer role.free(self.iam_svc.allocator);
                 var it = std.mem.tokenizeAny(u8, role.permissions, "[],\" \t\n");

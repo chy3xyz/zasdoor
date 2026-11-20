@@ -4,6 +4,7 @@ const std = @import("std");
 const zmodu = @import("zmodu");
 const http = zmodu.http;
 const mw = @import("../../middleware/auth.zig");
+const authorize_mw = @import("../../middleware/authorize.zig");
 const user_svc = @import("../user/service.zig");
 const service = @import("service.zig");
 const oauth_jwt = @import("../oauth/jwt.zig");
@@ -21,6 +22,7 @@ pub fn AgentApi(comptime Service: type, comptime UserService: type) type {
 
         pub fn registerRoutes(self: *Self, group: anytype) !void {
             var g = try group.use(zmodu.http.http_middleware.jwtAuthWithSecurity(&self.users.sec.module));
+            g = try g.use(authorize_mw.enforce());
             g = try g.use(mw.tokenVersionGuard(self.users.sec, self.users.store));
             try g.get("/agents", list, @ptrCast(@alignCast(self)));
             try g.post("/agents", create, @ptrCast(@alignCast(self)));

@@ -1708,6 +1708,37 @@ test "user: federated accounts cannot reset or receive a password reset token" {
     try std.testing.expectError(error.FederatedAccount, svc.resetPassword(uid, raw, "Str0ng-pass-123"));
 }
 
+test "authz: middleware maps HTTP methods to actions" {
+    const mwm = @import("middleware/authorize.zig");
+    try std.testing.expectEqualStrings("read", mwm.actionFor(.GET));
+    try std.testing.expectEqualStrings("read", mwm.actionFor(.HEAD));
+    try std.testing.expectEqualStrings("browse", mwm.actionFor(.OPTIONS));
+    try std.testing.expectEqualStrings("write", mwm.actionFor(.POST));
+    try std.testing.expectEqualStrings("write", mwm.actionFor(.PUT));
+    try std.testing.expectEqualStrings("write", mwm.actionFor(.DELETE));
+}
+
+test "session: password login records an IAM session row" {
+    const allocator = std.testing.allocator;
+    var env = try openMemory(allocator);
+    defer env.deinit();
+    var store = user.persistence.UserStore.init(allocator, env.client);
+    var iam_store = iam.persistence.IamStore.init(allocator, env.client);
+    var sec = zmodu.security.AppSecurity.init(allocator, std.testing.io, .{ .jwt_secret = "session-test" });
+    var user_svc = user.service.UserService.init(&store, &sec, std.testing.io, 3600, 86400);
+    var iam_svc = iam.service.IamService.init(allocator, std.testing.io, &iam_store, &sec);
+    user_svc.bindIamService(&iam_svc);
+    user_svc.setSessionContext(.{ .device_id = "dev-1", .ip = "127.0.0.1", .user_agent = "test" });
+
+    const session = try user_svc.register(allocator, "Sess", "sess@example.com", "Str0ng-Passw0rd!23", false, 1);
+    defer user_svc.freeSession(session);
+    try std.testing.expect(session.session_id > 0);
+    const row = (try iam_svc.getSession(session.session_id)).?;
+    defer row.free(allocator);
+    try std.testing.expectEqualStrings("dev-1", row.device_id);
+    try std.testing.expectEqualStrings("password", row.auth_method);
+}
+
 test "iam: organization create + project scoping" {
     const allocator = std.testing.allocator;
     var env = try openMemory(allocator);

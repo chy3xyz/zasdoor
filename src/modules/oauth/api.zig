@@ -266,6 +266,14 @@ pub fn OAuthApi(comptime Service: type, comptime UserService: type) type {
             const refresh_token = ctx.formValue("refresh_token");
             const device_code = ctx.formValue("device_code");
 
+            // Record request metadata on the Session row created for this
+            // grant (authorization_code / refresh_token / device_code).
+            self.svc.setSessionContext(.{
+                .device_id = ctx.formValue("device_id") orelse ctx.header("x-device-id") orelse "",
+                .ip = zmodu.http.RequestUtil.getRealIp(ctx),
+                .user_agent = ctx.header("user-agent") orelse "",
+            });
+
             var issue: service.OAuthService.TokenIssue = undefined;
             if (std.mem.eql(u8, grant_type, service.OAuthService.token_exchange_grant)) {
                 issue = self.svc.tokenExchange(
@@ -318,12 +326,18 @@ pub fn OAuthApi(comptime Service: type, comptime UserService: type) type {
             }
             try buf.appendSlice(a, ",\"scope\":\"");
             try buf.appendSlice(a, t.scope);
+            try buf.appendSlice(a, "\"");
             if (t.issued_token_type) |it| {
-                try buf.appendSlice(a, "\",\"issued_token_type\":\"");
+                try buf.appendSlice(a, ",\"issued_token_type\":\"");
                 try buf.appendSlice(a, it);
                 try buf.appendSlice(a, "\"");
             }
-            try buf.appendSlice(a, "\"}");
+            if (t.session_id != 0) {
+                var sid_buf: [24]u8 = undefined;
+                const sid_s = try std.fmt.bufPrint(&sid_buf, ",\"session_id\":{d}", .{t.session_id});
+                try buf.appendSlice(a, sid_s);
+            }
+            try buf.appendSlice(a, "}");
             return try buf.toOwnedSlice(a);
         }
 

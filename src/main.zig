@@ -22,6 +22,7 @@ const schema = @import("schema.zig");
 const access_log_mod = @import("middleware/access_log.zig");
 const sec_headers = @import("middleware/security_headers.zig");
 const metrics_mod = @import("middleware/metrics.zig");
+const authorize_mw = @import("middleware/authorize.zig");
 const mail = @import("services/mail.zig");
 const cache_svc = @import("services/cache.zig");
 const jobs = @import("jobs.zig");
@@ -250,12 +251,14 @@ pub fn main(init: std.process.Init) !void {
 
     var iam_store = iam.persistence.IamStore.init(allocator, store_env.client);
     var iam_svc = iam.service.IamService.init(allocator, io, &iam_store, &sec);
+    user_svc.bindIamService(&iam_svc);
     var oauth_svc = oauth.service.OAuthService.initWithExtraKeys(allocator, io, &iam_svc, &user_svc, &sec, cfg.app_host, cfg.oidc_key_secrets);
 
     var event_store = eventstore.persistence.EventStore.init(allocator, store_env.client);
     var event_svc = eventstore.service.EventService.init(allocator, io, &event_store, &.{}); // projections added below
     var authz_store = authz.persistence.AuthzStore.init(allocator, store_env.client);
     var authz_svc = authz.service.AuthzService.initWithStore(allocator, &iam_svc, &authz_store);
+    authorize_mw.install(&authz_svc);
     ProjectionCtx.svc = &event_svc;
     var authz_api = authz.api.AuthzApi(@TypeOf(authz_svc), @TypeOf(user_svc)).init(&authz_svc, &user_svc);
     var mfa_store = mfa.persistence.MfaStore.init(allocator, store_env.client);
@@ -372,6 +375,7 @@ pub fn main(init: std.process.Init) !void {
 
     var user_api = user.api.UserApi(@TypeOf(user_svc)).init(&user_svc, default_tenant_id, &audit_svc);
     var auth_api = auth.api.AuthApi(@TypeOf(user_svc)).init(&user_svc, cfg.app_host, &login_registry, &mailer, &task_svc, &notify_svc, &audit_svc, &template_svc, default_tenant_id);
+    auth_api.mfa = &mfa_svc;
     var task_api = task.api.TaskApi(@TypeOf(task_svc), @TypeOf(user_svc)).init(&task_svc, &user_svc, &audit_svc);
     var file_api = file.api.FileApi(@TypeOf(file_svc), @TypeOf(user_svc)).init(&file_svc, &user_svc, &audit_svc, default_tenant_id);
     var notify_api = notify.api.NotificationApi(@TypeOf(notify_svc), @TypeOf(user_svc)).init(&notify_svc, &user_svc);

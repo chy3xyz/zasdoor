@@ -2264,7 +2264,8 @@ paths:
       summary: Log in with email and password
       operationId: POST_api_v1_auth_login
       description: Returns a JWT session. Repeated failures lock the account (429). Public and rate-limited per client IP
-        (token bucket); returns 429 when exhausted.
+        (token bucket); returns 429 when exhausted. When the tenant requires MFA and the user has TOTP enrolled, this returns
+        403 with data.mfa_required=true and the client must finish at /mfa/login/finish.
       security: []
       requestBody:
         required: true
@@ -2295,6 +2296,24 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Second factor required.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: integer
+                  msg:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      mfa_required:
+                        type: boolean
+                      login_url:
+                        type: string
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -5203,6 +5222,42 @@ paths:
                 - data
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /api/v1/mfa/login/finish:
+    post:
+      tags:
+      - MFA
+      summary: Finish password login with MFA (public)
+      operationId: POST_api_v1_mfa_login_finish
+      description: Verifies email+password and a TOTP code, then returns the normal session JWT. Used after /auth/login answers 403 with mfa_required.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                password:
+                  type: string
+                code:
+                  type: string
+              required:
+              - email
+              - password
+              - code
+      responses:
+        '200':
+          description: Login succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '500':

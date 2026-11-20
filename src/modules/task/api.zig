@@ -5,6 +5,7 @@ const std = @import("std");
 const zmodu = @import("zmodu");
 const http = zmodu.http;
 const mw = @import("../../middleware/auth.zig");
+const authorize_mw = @import("../../middleware/authorize.zig");
 const user_svc = @import("../user/service.zig");
 const service = @import("service.zig");
 const audit_svc = @import("../audit/service.zig");
@@ -56,6 +57,7 @@ pub fn TaskApi(comptime Service: type, comptime UserService: type) type {
 
         pub fn registerRoutes(self: *Self, group: anytype) !void {
             var g = try group.use(zmodu.http.http_middleware.jwtAuthWithSecurity(&self.user_svc.sec.module));
+            g = try g.use(authorize_mw.enforce());
             g = try g.use(mw.tokenVersionGuard(self.user_svc.sec, self.user_svc.store));
             try g.get("/tasks/stats", stats, @ptrCast(@alignCast(self)));
             try g.get("/tasks", list, @ptrCast(@alignCast(self)));

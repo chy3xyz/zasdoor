@@ -6,6 +6,7 @@ const std = @import("std");
 const zmodu = @import("zmodu");
 const http = zmodu.http;
 const mw = @import("../../middleware/auth.zig");
+const authorize_mw = @import("../../middleware/authorize.zig");
 const user_svc = @import("../user/service.zig");
 const audit_svc = @import("../audit/service.zig");
 const service = @import("service.zig");
@@ -24,6 +25,7 @@ pub fn IamApi(comptime Service: type, comptime UserService: type) type {
 
         pub fn registerRoutes(self: *Self, group: anytype) !void {
             var g = try group.use(zmodu.http.http_middleware.jwtAuthWithSecurity(&self.user_svc.sec.module));
+            g = try g.use(authorize_mw.enforce());
             g = try g.use(mw.tokenVersionGuard(self.user_svc.sec, self.user_svc.store));
 
             // Organizations
@@ -104,7 +106,7 @@ pub fn IamApi(comptime Service: type, comptime UserService: type) type {
                 try ctx.sendErrorResponse(400, 400, "无效的组织 ID");
                 return;
             };
-            const row_opt = self.svc.getOrganization(id) catch |err| {
+            const row_opt = self.svc.getOrganizationForTenant(id, self.default_tenant_id) catch |err| {
                 std.log.err("internal error: {s}", .{@errorName(err)});
                 try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
@@ -183,7 +185,7 @@ pub fn IamApi(comptime Service: type, comptime UserService: type) type {
                 try ctx.sendErrorResponse(400, 400, "无效的项目 ID");
                 return;
             };
-            const row_opt = self.svc.getProject(id) catch |err| {
+            const row_opt = self.svc.getProjectForTenant(id, self.default_tenant_id) catch |err| {
                 std.log.err("internal error: {s}", .{@errorName(err)});
                 try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
@@ -440,7 +442,7 @@ pub fn IamApi(comptime Service: type, comptime UserService: type) type {
                 try ctx.sendErrorResponse(400, 400, "请求体格式错误");
                 return;
             };
-            const role_opt = self.svc.getRole(role_id) catch {
+            const role_opt = self.svc.getRoleForTenant(role_id, self.default_tenant_id) catch {
                 try ctx.sendErrorResponse(500, 500, "服务器错误");
                 return;
             };
@@ -466,7 +468,7 @@ pub fn IamApi(comptime Service: type, comptime UserService: type) type {
                 try ctx.sendErrorResponse(400, 400, "无效的用户 ID");
                 return;
             };
-            var result = self.svc.listSessionsForUser(user_id) catch |err| {
+            var result = self.svc.listSessionsForUserForTenant(user_id, self.default_tenant_id) catch |err| {
                 std.log.err("internal error: {s}", .{@errorName(err)});
                 try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;

@@ -4,6 +4,7 @@ const std = @import("std");
 const zmodu = @import("zmodu");
 const http = zmodu.http;
 const mw = @import("../../middleware/auth.zig");
+const authorize_mw = @import("../../middleware/authorize.zig");
 const user_svc = @import("../user/service.zig");
 const user_persist = @import("../user/persistence.zig");
 const task_persist = @import("../task/persistence.zig");
@@ -62,6 +63,7 @@ pub fn SystemApi(comptime CacheT: type, comptime TaskSvcT: type) type {
 
         pub fn registerRoutes(self: *Self, group: anytype) !void {
             var g = try group.use(zmodu.http.http_middleware.jwtAuthWithSecurity(&self.users_svc.sec.module));
+            g = try g.use(authorize_mw.enforce());
             g = try g.use(mw.tokenVersionGuard(self.users_svc.sec, self.users_svc.store));
             try g.get("/system/info", info, @ptrCast(@alignCast(self)));
             try g.get("/system/dashboard", dashboard, @ptrCast(@alignCast(self)));

@@ -4,6 +4,7 @@ const std = @import("std");
 const zmodu = @import("zmodu");
 const http = zmodu.http;
 const mw = @import("../../middleware/auth.zig");
+const authorize_mw = @import("../../middleware/authorize.zig");
 const url_guard = @import("../../http/url_guard.zig");
 const service = @import("service.zig");
 const user_svc = @import("../user/service.zig");
@@ -154,6 +155,7 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
         pub fn registerRoutes(self: *Self, group: anytype) !void {
             // 认证用户可用 AI 助手。
             var g = try group.use(zmodu.http.http_middleware.jwtAuthWithSecurity(&self.user_svc.sec.module));
+            g = try g.use(authorize_mw.enforce());
             g = try g.use(mw.tokenVersionGuard(self.user_svc.sec, self.user_svc.store));
             try g.get("/ai/sessions", listSessions, @ptrCast(@alignCast(self)));
             try g.post("/ai/sessions", createSession, @ptrCast(@alignCast(self)));

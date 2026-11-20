@@ -4,6 +4,7 @@ const std = @import("std");
 const zmodu = @import("zmodu");
 const http = zmodu.http;
 const mw = @import("../../middleware/auth.zig");
+const authorize_mw = @import("../../middleware/authorize.zig");
 const user_svc = @import("../user/service.zig");
 const service = @import("service.zig");
 
@@ -19,7 +20,11 @@ pub fn MfaApi(comptime Service: type, comptime UserService: type) type {
         }
 
         pub fn registerRoutes(self: *Self, group: anytype) !void {
+            // Public second step of password login when a tenant requires MFA.
+            try group.post("/mfa/login/finish", loginFinish, @ptrCast(@alignCast(self)));
+
             var g = try group.use(zmodu.http.http_middleware.jwtAuthWithSecurity(&self.users.sec.module));
+            g = try g.use(authorize_mw.enforce());
             g = try g.use(mw.tokenVersionGuard(self.users.sec, self.users.store));
             try g.post("/mfa/totp/enroll", enrollTotp, @ptrCast(@alignCast(self)));
             try g.post("/mfa/totp/verify", verifyTotp, @ptrCast(@alignCast(self)));
@@ -28,6 +33,55 @@ pub fn MfaApi(comptime Service: type, comptime UserService: type) type {
             try g.post("/mfa/recovery", generateRecovery, @ptrCast(@alignCast(self)));
             try g.get("/mfa/policy", getPolicy, @ptrCast(@alignCast(self)));
             try g.put("/mfa/policy", setPolicy, @ptrCast(@alignCast(self)));
+        }
+
+        /// Public second step: verify password + TOTP and issue the normal
+        /// session. Used when the tenant policy requires MFA.
+        fn loginFinish(ctx: *http.Context) !void {
+            const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
+            const Req = struct { email: []const u8, password: []const u8, code: []const u8 };
+            const req = ctx.bindJsonLoose(Req) catch {
+                try ctx.sendErrorResponse(400, 400, "请求体格式错误");
+                return;
+            };
+            defer {
+                ctx.allocator.free(req.email);
+                ctx.allocator.free(req.password);
+                ctx.allocator.free(req.code);
+            }
+            const session_opt = self.users.login(ctx.allocator, req.email, req.password) catch {
+                try ctx.sendErrorResponse(401, 401, "邮箱或密码错误");
+                return;
+            };
+            const session = session_opt orelse {
+                try ctx.sendErrorResponse(401, 401, "邮箱或密码错误");
+                return;
+            };
+            // A wrong TOTP must not keep the first-factor session alive.
+            const ok = self.svc.verifyTotp(session.row.id, req.code) catch false;
+            if (!ok) {
+                self.users.freeSession(session);
+                try ctx.sendErrorResponse(401, 401, "MFA 验证码无效");
+                return;
+            }
+            defer self.users.freeSession(session);
+            try ctx.jsonStruct(200, .{
+                .code = 0,
+                .msg = "登录成功",
+                .data = .{
+                    .token = session.token,
+                    .user = .{
+                        .id = session.row.id,
+                        .name = session.row.name,
+                        .email = session.row.email,
+                        .verified = session.row.verified,
+                        .admin = session.row.admin,
+                        .tenant_id = session.row.tenant_id,
+                        .created_at = session.row.created_at,
+                        .updated_at = session.row.updated_at,
+                    },
+                },
+            });
         }
 
         fn requireUser(ctx: *http.Context, self: *Self) !?i64 {

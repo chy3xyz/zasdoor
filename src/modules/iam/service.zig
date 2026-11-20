@@ -64,6 +64,11 @@ pub const IamService = struct {
         return self.store.getOrganization(id);
     }
 
+    /// Tenant-scoped organization lookup. Cross-tenant ids return null.
+    pub fn getOrganizationForTenant(self: *IamService, id: i64, tenant_id: i64) !?OrganizationRow {
+        return self.store.getOrganizationForTenant(id, tenant_id);
+    }
+
     pub fn listOrganizations(self: *IamService, page: usize, page_size: usize, tenant_id: ?i64) !OrgListResult {
         return self.store.listOrganizations(page, page_size, tenant_id);
     }
@@ -82,6 +87,10 @@ pub const IamService = struct {
 
     pub fn getProject(self: *IamService, id: i64) !?ProjectRow {
         return self.store.getProject(id);
+    }
+
+    pub fn getProjectForTenant(self: *IamService, id: i64, tenant_id: i64) !?ProjectRow {
+        return self.store.getProjectForTenant(id, tenant_id);
     }
 
     pub fn listProjects(self: *IamService, page: usize, page_size: usize, tenant_id: ?i64) !ProjectListResult {
@@ -200,12 +209,24 @@ pub const IamService = struct {
         return self.store.getApplication(id);
     }
 
+    pub fn getApplicationForTenant(self: *IamService, id: i64, tenant_id: i64) !?ApplicationRow {
+        return self.store.getApplicationForTenant(id, tenant_id);
+    }
+
     pub fn getApplicationByClientId(self: *IamService, client_id: []const u8) !?ApplicationRow {
         return self.store.getApplicationByClientId(client_id);
     }
 
+    pub fn getApplicationByClientIdForTenant(self: *IamService, client_id: []const u8, tenant_id: i64) !?ApplicationRow {
+        return self.store.getApplicationByClientIdForTenant(client_id, tenant_id);
+    }
+
     pub fn listApplicationsByProject(self: *IamService, project_id: i64) !ApplicationListResult {
         return self.store.listApplicationsByProject(project_id);
+    }
+
+    pub fn listApplicationsByProjectForTenant(self: *IamService, project_id: i64, tenant_id: i64) !ApplicationListResult {
+        return self.store.listApplicationsByProjectForTenant(project_id, tenant_id);
     }
 
     pub fn deleteApplication(self: *IamService, id: i64) !void {
@@ -223,8 +244,16 @@ pub const IamService = struct {
         return self.store.getRole(id);
     }
 
+    pub fn getRoleForTenant(self: *IamService, id: i64, tenant_id: i64) !?RoleRow {
+        return self.store.getRoleForTenant(id, tenant_id);
+    }
+
     pub fn listRolesByProject(self: *IamService, project_id: i64) !RoleListResult {
         return self.store.listRolesByProject(project_id);
+    }
+
+    pub fn listRolesByProjectForTenant(self: *IamService, project_id: i64, tenant_id: i64) !RoleListResult {
+        return self.store.listRolesByProjectForTenant(project_id, tenant_id);
     }
 
     pub fn deleteRole(self: *IamService, id: i64) !void {
@@ -237,7 +266,17 @@ pub const IamService = struct {
 
     /// Resolve the role *keys* for a user (optionally scoped to a project).
     pub fn roleKeysForUser(self: *IamService, user_id: i64, project_id: ?i64) ![][]const u8 {
-        const ids = try self.store.listRoleIdsForUser(user_id, project_id);
+        return self.roleKeysForUserForTenant(user_id, project_id, null);
+    }
+
+    /// Tenant-scoped role resolution. Both the assignment rows and the role
+    /// rows must belong to `tenant_id`; a foreign assignment cannot grant a
+    /// local role key.
+    pub fn roleKeysForUserForTenant(self: *IamService, user_id: i64, project_id: ?i64, tenant_id: ?i64) ![][]const u8 {
+        const ids = if (tenant_id) |tid|
+            try self.store.listRoleIdsForUserForTenant(user_id, project_id, tid)
+        else
+            try self.store.listRoleIdsForUser(user_id, project_id);
         defer self.allocator.free(ids);
         var out = std.ArrayList([]const u8).empty;
         errdefer {
@@ -245,7 +284,10 @@ pub const IamService = struct {
             out.deinit(self.allocator);
         }
         for (ids) |id| {
-            const role_opt = try self.store.getRole(id);
+            const role_opt = if (tenant_id) |tid|
+                try self.store.getRoleForTenant(id, tid)
+            else
+                try self.store.getRole(id);
             if (role_opt) |r| {
                 try out.append(self.allocator, try self.allocator.dupe(u8, r.key));
                 r.free(self.allocator);
@@ -275,6 +317,10 @@ pub const IamService = struct {
         return self.store.getSession(id);
     }
 
+    pub fn getSessionForTenant(self: *IamService, id: i64, tenant_id: i64) !?SessionRow {
+        return self.store.getSessionForTenant(id, tenant_id);
+    }
+
     pub fn revokeSession(self: *IamService, id: i64) !void {
         try self.store.revokeSession(id, self.now());
     }
@@ -285,5 +331,9 @@ pub const IamService = struct {
 
     pub fn listSessionsForUser(self: *IamService, user_id: i64) !SessionListResult {
         return self.store.listSessionsForUser(user_id);
+    }
+
+    pub fn listSessionsForUserForTenant(self: *IamService, user_id: i64, tenant_id: i64) !SessionListResult {
+        return self.store.listSessionsForUserForTenant(user_id, tenant_id);
     }
 };

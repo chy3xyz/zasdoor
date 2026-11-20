@@ -36,6 +36,10 @@ pub const OAuthService = struct {
     refresh_ttl_days: i64,
     device_code_ttl_seconds: i64 = 600,
     device_poll_interval_seconds: i64 = 5,
+    /// Optional request metadata recorded on Session rows created for token
+    /// grants. The HTTP layer sets it per request; direct service callers
+    /// (unit tests) leave it empty and still function normally.
+    session_context: user_svc.SessionContext = .{},
 
     pub fn init(
         allocator: std.mem.Allocator,
@@ -74,6 +78,39 @@ pub const OAuthService = struct {
 
     pub fn now(self: *OAuthService) i64 {
         return zmodu.time.wallClockSeconds(self.io);
+    }
+
+    /// Set device/ip/user-agent metadata to attach to Session rows created by
+    /// token grants. Called by the HTTP token endpoint before issuing tokens.
+    pub fn setSessionContext(self: *OAuthService, ctx: user_svc.SessionContext) void {
+        self.session_context = ctx;
+    }
+
+    /// Best-effort Session-row creation for a successful user-bound token
+    /// grant. Returns 0 when the insert fails; token issuance never fails
+    /// because of session bookkeeping.
+    fn recordSession(
+        self: *OAuthService,
+        user_id: i64,
+        tenant_id: i64,
+        client_id: i64,
+        auth_method: []const u8,
+    ) i64 {
+        const meta = self.session_context;
+        const id = self.iam_svc.createSession(
+            tenant_id,
+            user_id,
+            client_id,
+            meta.device_id,
+            meta.ip,
+            meta.user_agent,
+            auth_method,
+            self.refresh_ttl_days * 24 * 3600,
+        ) catch |err| {
+            std.log.warn("[oauth] session record failed for user {d}: {s}", .{ user_id, @errorName(err) });
+            return 0;
+        };
+        return id;
     }
 
     /// Produce an OIDC ID token (JWT) for a user + client.
@@ -352,6 +389,10 @@ pub const OAuthService = struct {
         scope: []const u8,
         /// RFC 8693 Token Exchange responses carry the issued token type.
         issued_token_type: ?[]const u8 = null,
+        /// Id of the persisted IAM Session row for user-bound grants; 0 when
+        /// no session was created (client_credentials, token exchange, or a
+        /// best-effort insert failure).
+        session_id: i64 = 0,
     };
 
     fn tokenExchangeCode(
@@ -387,7 +428,7 @@ pub const OAuthService = struct {
         const user = user_opt orelse return error.InvalidGrant;
         defer user.free(self.users.store.allocator);
 
-        return self.issueTokensForUser(app, user, code_row.scope, code_row.nonce, "");
+        return self.issueTokensForUser(app, user, code_row.scope, code_row.nonce, "", "authorization_code");
     }
 
     fn tokenClientCredentials(
@@ -510,7 +551,7 @@ pub const OAuthService = struct {
         // Single use: mark it used before issuing so a concurrent poll cannot
         // mint two token sets from the same device code.
         self.iam_svc.store.consumeDeviceCode(row.id, self.now()) catch {};
-        return self.issueTokensForUser(app, user, row.scope, "", "");
+        return self.issueTokensForUser(app, user, row.scope, "", "", "device_code");
     }
 
     // ── RFC 8693 token exchange ──────────────────────────────
@@ -660,7 +701,7 @@ pub const OAuthService = struct {
         defer user.free(self.users.store.allocator);
 
         // Issue the successor first, then mark the presented token single-use.
-        const issue = try self.issueTokensForUser(app, user, row.scope, "", row.family_id);
+        const issue = try self.issueTokensForUser(app, user, row.scope, "", row.family_id, "refresh_token");
         self.iam_svc.store.rotateRefreshToken(row.id, self.now()) catch {};
         return issue;
     }
@@ -672,6 +713,7 @@ pub const OAuthService = struct {
         scope: []const u8,
         nonce: []const u8,
         family_id: []const u8,
+        auth_method: []const u8,
     ) OAuthError!TokenIssue {
         const sub = std.fmt.allocPrint(self.allocator, "{d}", .{user.id}) catch return error.ServerError;
         defer self.allocator.free(sub);
@@ -713,12 +755,15 @@ pub const OAuthService = struct {
         errdefer if (refresh_token) |rt| self.allocator.free(rt);
 
         const scope_dup = self.allocator.dupe(u8, scope) catch return error.ServerError;
+        // A user-bound grant always gets a durable Session row (best effort).
+        const session_id = self.recordSession(user.id, app.tenant_id, app.id, auth_method);
         return .{
             .access_token = access,
             .id_token = id_token,
             .refresh_token = refresh_token,
             .expires_in = app.access_token_ttl,
             .scope = scope_dup,
+            .session_id = session_id,
         };
     }
 

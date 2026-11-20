@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.5.0] - 2026-10-18
 
+### Security
+
+- **P0 IAM hardening**: authorization policies are now enforced on all
+  protected module routes via a middleware that maps HTTP method to read/write
+  and refuses DENY decisions (UNKNOWN defers to existing admin guards); the
+  IAM/OAuth/AuthZ query paths use tenant-scoped store methods to close IDOR
+  gaps; password login and OAuth grants now record real IAM Session rows
+  (device/IP/UA/auth_method) so revocation endpoints have data to act on; and
+  a tenant MFA policy now blocks first-factor-only login, requiring
+  `POST /mfa/login/finish` with a TOTP code.
+
 ### Changed
 
 - **Upstream dependency upgrade**: zmodu v0.39.11 -> v0.43.8 and zent v0.91.0
@@ -179,7 +190,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Verified
 
-- `zig build`, `zig build test` (107/107) and `zig build -Doptimize=ReleaseSafe`
+- `zig build`, `zig build test` (109/109) and `zig build -Doptimize=ReleaseSafe`
   pass on Zig 0.17.0; `zig fmt --check` and `scripts/run_e2e.sh` (boot ->
   probes -> admin/login/info -> graceful shutdown, no panic/leak) are green,
   with the web typecheck/vitest/rsbuild also passing.

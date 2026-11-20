@@ -13,6 +13,7 @@ const notify_service = @import("../notify/service.zig");
 const mail = @import("../../services/mail.zig");
 const audit_svc = @import("../audit/service.zig");
 const mail_template_svc = @import("../mail_template/service.zig");
+const mfa_svc_mod = @import("../mfa/service.zig");
 
 const RegisterReq = struct {
     name: []const u8,
@@ -102,6 +103,7 @@ pub fn AuthApi(comptime Service: type) type {
         audit: *audit_svc.AuditService,
         templates: *mail_template_svc.MailTemplateService,
         default_tenant_id: i64,
+        mfa: ?*mfa_svc_mod.MfaService = null,
 
         pub fn init(
             svc: *Service,
@@ -149,6 +151,13 @@ pub fn AuthApi(comptime Service: type) type {
 
         fn register(ctx: *http.Context) !void {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
+            // Registration issues a password session as well; record the same
+            // request metadata as login.
+            self.svc.setSessionContext(.{
+                .device_id = ctx.header("x-device-id") orelse "",
+                .ip = zmodu.http.RequestUtil.getRealIp(ctx),
+                .user_agent = ctx.header("user-agent") orelse "",
+            });
             const req = ctx.bindJsonLoose(RegisterReq) catch {
                 try ctx.sendErrorResponse(400, 400, "请求体格式错误");
                 return;
@@ -199,12 +208,20 @@ pub fn AuthApi(comptime Service: type) type {
                 .data = .{
                     .token = session.token,
                     .user = toDto(session.row),
+                    .session_id = session.session_id,
                 },
             });
         }
 
         fn login(ctx: *http.Context) !void {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
+            // Attach request metadata to the Session row created by the
+            // UserService on successful password authentication.
+            self.svc.setSessionContext(.{
+                .device_id = ctx.header("x-device-id") orelse "",
+                .ip = zmodu.http.RequestUtil.getRealIp(ctx),
+                .user_agent = ctx.header("user-agent") orelse "",
+            });
             const req = ctx.bindJsonLoose(LoginReq) catch {
                 try ctx.sendErrorResponse(400, 400, "请求体格式错误");
                 return;
@@ -241,6 +258,20 @@ pub fn AuthApi(comptime Service: type) type {
                 try ctx.sendErrorResponse(401, 401, "邮箱或密码错误");
                 return;
             };
+            // Tenant-wide MFA policy: the first factor alone never yields a
+            // session token. The client must call POST /mfa/login/finish with
+            // the same credentials plus a TOTP code.
+            if (self.mfa) |mfa| {
+                if (mfa.mfaRequired(session.row.tenant_id) and mfa.userHasMfa(session.row.id)) {
+                    self.svc.freeSession(session);
+                    try ctx.jsonStruct(403, .{
+                        .code = 403,
+                        .msg = "需要二次验证",
+                        .data = .{ .mfa_required = true, .login_url = "/api/v1/mfa/login/finish" },
+                    });
+                    return;
+                }
+            }
             defer self.svc.freeSession(session);
             var d4: [128]u8 = undefined;
             const det4 = try std.fmt.bufPrint(&d4, "登录成功: {s}", .{req.email});
@@ -251,6 +282,7 @@ pub fn AuthApi(comptime Service: type) type {
                 .data = .{
                     .token = session.token,
                     .user = toDto(session.row),
+                    .session_id = session.session_id,
                 },
             });
         }

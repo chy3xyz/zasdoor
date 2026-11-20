@@ -4,6 +4,7 @@
 const std = @import("std");
 const zmodu = @import("zmodu");
 const persist = @import("persistence.zig");
+const iam_svc_mod = @import("../iam/service.zig");
 
 pub const UserRow = persist.UserRow;
 
@@ -84,6 +85,13 @@ pub const VerificationInfo = struct {
     raw: []const u8,
 };
 
+/// Request metadata recorded on a newly-created Session row.
+pub const SessionContext = struct {
+    device_id: []const u8 = "",
+    ip: []const u8 = "",
+    user_agent: []const u8 = "",
+};
+
 /// A signed-in identity: user row plus a fresh JWT.
 ///
 /// Always release through `UserService.freeSession`: the row is produced by the
@@ -92,6 +100,9 @@ pub const VerificationInfo = struct {
 pub const Session = struct {
     row: UserRow,
     token: []const u8,
+    /// Id of the persisted IAM session row, when session recording is bound
+    /// and the insert succeeded. Zero when no session row was created.
+    session_id: i64 = 0,
 };
 
 // ── Password policy ──────────────────────────────────────────────
@@ -294,6 +305,13 @@ pub const UserService = struct {
     policy: PasswordPolicy = .{},
     /// Failed-login lockout thresholds (persisted per email; shared storage).
     lockout_config: LockoutConfig = .{},
+    /// Optional IAM binding used to persist real Session rows on successful
+    /// authentication. Kept optional so unit tests and legacy `init` callers
+    /// keep working without constructing an IamService.
+    iam_svc: ?*iam_svc_mod.IamService = null,
+    /// Request metadata recorded on created sessions. Populated by the HTTP
+    /// layer via `setSessionContext`; empty values are allowed (e.g. unit tests).
+    session_context: SessionContext = .{},
 
     pub fn init(
         store: *persist.UserStore,
@@ -309,6 +327,40 @@ pub const UserService = struct {
             .password_token_expiration_seconds = password_token_expiration_seconds,
             .verification_token_expiration_seconds = verification_token_expiration_seconds,
         };
+    }
+
+    /// Bind the IAM service used to persist Session rows. Called once at
+    /// startup; every later successful authentication records a session.
+    pub fn bindIamService(self: *UserService, iam_svc: *iam_svc_mod.IamService) void {
+        self.iam_svc = iam_svc;
+    }
+
+    /// Set device/ip/user-agent metadata for sessions created from the current
+    /// request. The HTTP layer calls this before login/register.
+    pub fn setSessionContext(self: *UserService, ctx: SessionContext) void {
+        self.session_context = ctx;
+    }
+
+    /// Best-effort creation of a real IAM Session row after a successful
+    /// password authentication. Returns 0 when IAM is not bound or the insert
+    /// fails (auth must not break because of session bookkeeping).
+    pub fn recordSession(self: *UserService, user_id: i64, tenant_id: i64, auth_method: []const u8) i64 {
+        const iam_svc = self.iam_svc orelse return 0;
+        const meta = self.session_context;
+        const id = iam_svc.createSession(
+            tenant_id,
+            user_id,
+            0,
+            meta.device_id,
+            meta.ip,
+            meta.user_agent,
+            auth_method,
+            self.password_token_expiration_seconds,
+        ) catch |err| {
+            std.log.warn("[user] session record failed for user {d}: {s}", .{ user_id, @errorName(err) });
+            return 0;
+        };
+        return id;
     }
 
     fn normalizeEmail(allocator: std.mem.Allocator, email: []const u8) ![]const u8 {
@@ -435,7 +487,11 @@ pub const UserService = struct {
 
         const roles = if (admin) &[_][]const u8{"admin"} else &[_][]const u8{"user"};
         const token = try self.sec.module.generateTokenWithTenantAndVersion(id_str, roles, tenant_str, row.token_version);
-        return .{ .row = row, .token = token };
+        // Best-effort: a successful password authentication always leaves a
+        // durable Session row when IAM is bound; bookkeeping failures never
+        // turn a valid login into an error.
+        const session_id = self.recordSession(row.id, tenant_id, "password");
+        return .{ .row = row, .token = token, .session_id = session_id };
     }
 
     /// True when the key is inside its cooldown. Persisted state is shared

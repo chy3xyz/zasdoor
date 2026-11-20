@@ -39,3 +39,8 @@ API 层把每个错误映射为具体的 400 提示信息。
 - JIT 创建的联邦账号使用 `!federated` 占位密码,`verifyPassword` 恒定失败。
 - **忘记密码**:不会为联邦账号生成重置 token(接口仍返回统一成功,防枚举)。
 - **重置密码**:即使持有历史 token 也返回 `FederatedAccount`(HTTP 400 "该账号使用第三方登录,不支持密码重置"),避免绕过 IdP 获得本地密码。
+
+## 6. MFA 登录强制
+
+- 租户策略 `require_mfa=true` 且用户已配置 TOTP 时,`POST /auth/login` 返回 403 `{mfa_required:true}` 且**不下发 token**。
+- 客户端用同一邮箱/密码 + TOTP code 调 `POST /mfa/login/finish`,服务端再次校验密码与 TOTP 后才签发正式会话。

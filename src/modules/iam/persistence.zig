@@ -336,6 +336,19 @@ pub const IamStore = struct {
         return row.id;
     }
 
+    /// Tenant-scoped lookup: a row from another tenant is indistinguishable
+    /// from a missing row (no cross-tenant IDOR).
+    pub fn getOrganizationForTenant(self: *IamStore, id: i64, tenant_id: i64) !?OrganizationRow {
+        const preds = self.client.organization.predicates;
+        const id_q = preds.idEQ(.{ .int = id });
+        const tenant_q = preds.tenant_idEQ(.{ .int = tenant_id });
+        var e = (try crud.first(self.client.organization, .{zent.sql.And(&id_q, &tenant_q)})) orelse return null;
+        defer zent.codegen.deinitEntity(infos, OrganizationInfo, &e, self.allocator);
+        return try self.dupOrg(e);
+    }
+
+    /// Compatibility lookup. Prefer getOrganizationForTenant when the caller
+    /// knows the tenant; without a scope this returns the first matching row.
     pub fn getOrganization(self: *IamStore, id: i64) !?OrganizationRow {
         var e = (try crud.get(self.client.organization, id)) orelse return null;
         defer zent.codegen.deinitEntity(infos, OrganizationInfo, &e, self.allocator);
@@ -401,6 +414,15 @@ pub const IamStore = struct {
         var row = try b.Save();
         defer zent.codegen.deinitEntity(infos, ProjectInfo, &row, self.allocator);
         return row.id;
+    }
+
+    pub fn getProjectForTenant(self: *IamStore, id: i64, tenant_id: i64) !?ProjectRow {
+        const preds = self.client.project.predicates;
+        const id_q = preds.idEQ(.{ .int = id });
+        const tenant_q = preds.tenant_idEQ(.{ .int = tenant_id });
+        var e = (try crud.first(self.client.project, .{zent.sql.And(&id_q, &tenant_q)})) orelse return null;
+        defer zent.codegen.deinitEntity(infos, ProjectInfo, &e, self.allocator);
+        return try self.dupProject(e);
     }
 
     pub fn getProject(self: *IamStore, id: i64) !?ProjectRow {
@@ -511,8 +533,28 @@ pub const IamStore = struct {
         return row.id;
     }
 
+    pub fn getApplicationForTenant(self: *IamStore, id: i64, tenant_id: i64) !?ApplicationRow {
+        const preds = self.client.application.predicates;
+        const id_q = preds.idEQ(.{ .int = id });
+        const tenant_q = preds.tenant_idEQ(.{ .int = tenant_id });
+        var e = (try crud.first(self.client.application, .{zent.sql.And(&id_q, &tenant_q)})) orelse return null;
+        defer zent.codegen.deinitEntity(infos, ApplicationInfo, &e, self.allocator);
+        return try self.dupApplication(e);
+    }
+
     pub fn getApplication(self: *IamStore, id: i64) !?ApplicationRow {
         var e = (try crud.get(self.client.application, id)) orelse return null;
+        defer zent.codegen.deinitEntity(infos, ApplicationInfo, &e, self.allocator);
+        return try self.dupApplication(e);
+    }
+
+    /// Tenant-scoped client_id lookup. client_id is globally unique in most
+    /// deployments, but callers with a tenant must never resolve a foreign row.
+    pub fn getApplicationByClientIdForTenant(self: *IamStore, client_id: []const u8, tenant_id: i64) !?ApplicationRow {
+        const preds = self.client.application.predicates;
+        const client_q = preds.client_idEQ(.{ .string = client_id });
+        const tenant_q = preds.tenant_idEQ(.{ .int = tenant_id });
+        var e = (try crud.first(self.client.application, .{zent.sql.And(&client_q, &tenant_q)})) orelse return null;
         defer zent.codegen.deinitEntity(infos, ApplicationInfo, &e, self.allocator);
         return try self.dupApplication(e);
     }
@@ -524,7 +566,38 @@ pub const IamStore = struct {
         return try self.dupApplication(e);
     }
 
+    pub fn listApplicationsByProjectForTenant(self: *IamStore, project_id: i64, tenant_id: i64) !ApplicationListResult {
+        const preds = self.client.application.predicates;
+        const project_q = preds.project_idEQ(.{ .int = project_id });
+        const tenant_q = preds.tenant_idEQ(.{ .int = tenant_id });
+        const rows = try crud.all(self.client.application, .{zent.sql.And(&project_q, &tenant_q)});
+        defer zent.crud_helpers.deinitRows(infos, ApplicationInfo, rows, self.allocator);
+        var out = try self.allocator.alloc(ApplicationRow, rows.items.len);
+        var i: usize = 0;
+        errdefer {
+            for (out[0..i]) |r| r.free(self.allocator);
+            self.allocator.free(out);
+        }
+        for (rows.items) |e| {
+            out[i] = try self.dupApplication(e);
+            i += 1;
+        }
+        return .{ .items = out, .total = @intCast(i) };
+    }
+
+    /// Legacy project-scoped list. When the parent project exists, its tenant
+    /// is used as an implicit scope so a guessed project_id cannot enumerate
+    /// another tenant's applications. project_id == 0 keeps the unscoped
+    /// behaviour for bootstrap/administrative callers.
     pub fn listApplicationsByProject(self: *IamStore, project_id: i64) !ApplicationListResult {
+        if (project_id != 0) {
+            if (try self.getProject(project_id)) |parent| {
+                defer parent.free(self.allocator);
+                return self.listApplicationsByProjectForTenant(project_id, parent.tenant_id);
+            } else {
+                return .{ .items = try self.allocator.alloc(ApplicationRow, 0), .total = 0 };
+            }
+        }
         const preds = self.client.application.predicates;
         const rows = try crud.all(self.client.application, .{preds.project_idEQ(.{ .int = project_id })});
         defer zent.crud_helpers.deinitRows(infos, ApplicationInfo, rows, self.allocator);
@@ -580,13 +653,51 @@ pub const IamStore = struct {
         return row.id;
     }
 
+    pub fn getRoleForTenant(self: *IamStore, id: i64, tenant_id: i64) !?RoleRow {
+        const preds = self.client.role.predicates;
+        const id_q = preds.idEQ(.{ .int = id });
+        const tenant_q = preds.tenant_idEQ(.{ .int = tenant_id });
+        var e = (try crud.first(self.client.role, .{zent.sql.And(&id_q, &tenant_q)})) orelse return null;
+        defer zent.codegen.deinitEntity(infos, RoleInfo, &e, self.allocator);
+        return try self.dupRole(e);
+    }
+
     pub fn getRole(self: *IamStore, id: i64) !?RoleRow {
         var e = (try crud.get(self.client.role, id)) orelse return null;
         defer zent.codegen.deinitEntity(infos, RoleInfo, &e, self.allocator);
         return try self.dupRole(e);
     }
 
+    pub fn listRolesByProjectForTenant(self: *IamStore, project_id: i64, tenant_id: i64) !RoleListResult {
+        const preds = self.client.role.predicates;
+        const project_q = preds.project_idEQ(.{ .int = project_id });
+        const tenant_q = preds.tenant_idEQ(.{ .int = tenant_id });
+        const rows = try crud.all(self.client.role, .{zent.sql.And(&project_q, &tenant_q)});
+        defer zent.crud_helpers.deinitRows(infos, RoleInfo, rows, self.allocator);
+        var out = try self.allocator.alloc(RoleRow, rows.items.len);
+        var i: usize = 0;
+        errdefer {
+            for (out[0..i]) |r| r.free(self.allocator);
+            self.allocator.free(out);
+        }
+        for (rows.items) |e| {
+            out[i] = try self.dupRole(e);
+            i += 1;
+        }
+        return .{ .items = out, .total = @intCast(i) };
+    }
+
+    /// Legacy project-scoped list. Derived tenant scope from the parent
+    /// project when available (see listApplicationsByProject).
     pub fn listRolesByProject(self: *IamStore, project_id: i64) !RoleListResult {
+        if (project_id != 0) {
+            if (try self.getProject(project_id)) |parent| {
+                defer parent.free(self.allocator);
+                return self.listRolesByProjectForTenant(project_id, parent.tenant_id);
+            } else {
+                return .{ .items = try self.allocator.alloc(RoleRow, 0), .total = 0 };
+            }
+        }
         const preds = self.client.role.predicates;
         const rows = try crud.all(self.client.role, .{preds.project_idEQ(.{ .int = project_id })});
         defer zent.crud_helpers.deinitRows(infos, RoleInfo, rows, self.allocator);
@@ -628,16 +739,43 @@ pub const IamStore = struct {
         return row.id;
     }
 
-    /// Returns role ids assigned to a user (optionally scoped to a project).
+    /// Returns role ids assigned to a user (optionally scoped to a project and
+    /// tenant). A tenant scope must always be supplied when the caller knows
+    /// it: otherwise a foreign tenant's assignment could grant local roles.
+    pub fn listRoleIdsForUserForTenant(self: *IamStore, user_id: i64, project_id: ?i64, tenant_id: i64) ![]i64 {
+        const preds = self.client.role_assignment.predicates;
+        var buf: [3]zent.sql.Predicate = undefined;
+        var n: usize = 0;
+        buf[n] = preds.tenant_idEQ(.{ .int = tenant_id });
+        n += 1;
+        buf[n] = preds.user_idEQ(.{ .int = user_id });
+        n += 1;
+        if (project_id) |pid| {
+            buf[n] = preds.project_idEQ(.{ .int = pid });
+            n += 1;
+        }
+        const rows = try crud.all(self.client.role_assignment, buf[0..n]);
+        defer zent.crud_helpers.deinitRows(infos, RoleAssignmentInfo, rows, self.allocator);
+
+        var out = try self.allocator.alloc(i64, rows.items.len);
+        var i: usize = 0;
+        for (rows.items) |e| {
+            out[i] = e.role_id;
+            i += 1;
+        }
+        return out[0..i];
+    }
+
+    /// Compatibility wrapper (no tenant filter). Prefer the scoped variant.
     pub fn listRoleIdsForUser(self: *IamStore, user_id: i64, project_id: ?i64) ![]i64 {
         const preds = self.client.role_assignment.predicates;
         var buf: [2]zent.sql.Predicate = undefined;
         var n: usize = 0;
-        buf[0] = preds.user_idEQ(.{ .int = user_id });
-        n = 1;
+        buf[n] = preds.user_idEQ(.{ .int = user_id });
+        n += 1;
         if (project_id) |pid| {
-            buf[1] = preds.project_idEQ(.{ .int = pid });
-            n = 2;
+            buf[n] = preds.project_idEQ(.{ .int = pid });
+            n += 1;
         }
         const rows = try crud.all(self.client.role_assignment, buf[0..n]);
         defer zent.crud_helpers.deinitRows(infos, RoleAssignmentInfo, rows, self.allocator);
@@ -710,6 +848,15 @@ pub const IamStore = struct {
         return row.id;
     }
 
+    pub fn getSessionForTenant(self: *IamStore, id: i64, tenant_id: i64) !?SessionRow {
+        const preds = self.client.session.predicates;
+        const id_q = preds.idEQ(.{ .int = id });
+        const tenant_q = preds.tenant_idEQ(.{ .int = tenant_id });
+        var e = (try crud.first(self.client.session, .{zent.sql.And(&id_q, &tenant_q)})) orelse return null;
+        defer zent.codegen.deinitEntity(infos, SessionInfo, &e, self.allocator);
+        return try self.dupSession(e);
+    }
+
     pub fn getSession(self: *IamStore, id: i64) !?SessionRow {
         var e = (try crud.get(self.client.session, id)) orelse return null;
         defer zent.codegen.deinitEntity(infos, SessionInfo, &e, self.allocator);
@@ -738,6 +885,25 @@ pub const IamStore = struct {
         _ = try u.setFieldValue("updated_at", now);
         _ = try u.Where(.{and_q});
         _ = try u.Save();
+    }
+
+    pub fn listSessionsForUserForTenant(self: *IamStore, user_id: i64, tenant_id: i64) !SessionListResult {
+        const preds = self.client.session.predicates;
+        const user_q = preds.user_idEQ(.{ .int = user_id });
+        const tenant_q = preds.tenant_idEQ(.{ .int = tenant_id });
+        const rows = try crud.all(self.client.session, .{zent.sql.And(&user_q, &tenant_q)});
+        defer zent.crud_helpers.deinitRows(infos, SessionInfo, rows, self.allocator);
+        var out = try self.allocator.alloc(SessionRow, rows.items.len);
+        var i: usize = 0;
+        errdefer {
+            for (out[0..i]) |r| r.free(self.allocator);
+            self.allocator.free(out);
+        }
+        for (rows.items) |e| {
+            out[i] = try self.dupSession(e);
+            i += 1;
+        }
+        return .{ .items = out, .total = @intCast(i) };
     }
 
     pub fn listSessionsForUser(self: *IamStore, user_id: i64) !SessionListResult {
@@ -814,6 +980,15 @@ pub const IamStore = struct {
     }
 
     /// Look up an authorization code by its stored (hashed) code value.
+    pub fn getAuthCodeByHashForTenant(self: *IamStore, code_hash: []const u8, tenant_id: i64) !?AuthorizationCodeRow {
+        const preds = self.client.authorization_code.predicates;
+        const hash_q = preds.code_hashEQ(.{ .string = code_hash });
+        const tenant_q = preds.tenant_idEQ(.{ .int = tenant_id });
+        var e = (try crud.first(self.client.authorization_code, .{zent.sql.And(&hash_q, &tenant_q)})) orelse return null;
+        defer zent.codegen.deinitEntity(infos, AuthorizationCodeInfo, &e, self.allocator);
+        return try self.dupAuthCode(e);
+    }
+
     pub fn getAuthCodeByHash(self: *IamStore, code_hash: []const u8) !?AuthorizationCodeRow {
         const preds = self.client.authorization_code.predicates;
         var e = (try crud.first(self.client.authorization_code, .{preds.code_hashEQ(.{ .string = code_hash })})) orelse return null;
@@ -892,6 +1067,15 @@ pub const IamStore = struct {
 
     /// Look up a refresh token by hash WITHOUT filtering revoked/rotated rows:
     /// the caller must see an already-rotated row to detect reuse.
+    pub fn findRefreshTokenByHashForTenant(self: *IamStore, token_hash: []const u8, tenant_id: i64) !?RefreshTokenRow {
+        const preds = self.client.refresh_token.predicates;
+        const hash_q = preds.token_hashEQ(.{ .string = token_hash });
+        const tenant_q = preds.tenant_idEQ(.{ .int = tenant_id });
+        var e = (try crud.first(self.client.refresh_token, .{zent.sql.And(&hash_q, &tenant_q)})) orelse return null;
+        defer zent.codegen.deinitEntity(infos, RefreshTokenInfo, &e, self.allocator);
+        return try self.dupRefreshToken(e);
+    }
+
     pub fn findRefreshTokenByHash(self: *IamStore, token_hash: []const u8) !?RefreshTokenRow {
         const preds = self.client.refresh_token.predicates;
         var e = (try crud.first(self.client.refresh_token, .{preds.token_hashEQ(.{ .string = token_hash })})) orelse return null;
@@ -983,6 +1167,18 @@ pub const IamStore = struct {
         return row.id;
     }
 
+    pub fn getConsentForTenant(self: *IamStore, application_id: i64, user_id: i64, tenant_id: i64) !?ConsentRow {
+        const preds = self.client.consent.predicates;
+        const app_q = preds.application_idEQ(.{ .int = application_id });
+        const user_q = preds.user_idEQ(.{ .int = user_id });
+        const tenant_q = preds.tenant_idEQ(.{ .int = tenant_id });
+        var e = (try crud.first(self.client.consent, .{
+            zent.sql.And(&zent.sql.And(&app_q, &user_q), &tenant_q),
+        })) orelse return null;
+        defer zent.codegen.deinitEntity(infos, ConsentInfo, &e, self.allocator);
+        return try self.dupConsent(e);
+    }
+
     pub fn getConsent(self: *IamStore, application_id: i64, user_id: i64) !?ConsentRow {
         const preds = self.client.consent.predicates;
         var e = (try crud.first(self.client.consent, .{
@@ -1042,9 +1238,27 @@ pub const IamStore = struct {
         return row.id;
     }
 
+    pub fn getDeviceCodeByHashForTenant(self: *IamStore, device_code_hash: []const u8, tenant_id: i64) !?DeviceCodeRow {
+        const preds = self.client.device_code.predicates;
+        const hash_q = preds.device_code_hashEQ(.{ .string = device_code_hash });
+        const tenant_q = preds.tenant_idEQ(.{ .int = tenant_id });
+        var e = (try crud.first(self.client.device_code, .{zent.sql.And(&hash_q, &tenant_q)})) orelse return null;
+        defer zent.codegen.deinitEntity(infos, DeviceCodeInfo, &e, self.allocator);
+        return try self.dupDeviceCode(e);
+    }
+
     pub fn getDeviceCodeByHash(self: *IamStore, device_code_hash: []const u8) !?DeviceCodeRow {
         const preds = self.client.device_code.predicates;
         var e = (try crud.first(self.client.device_code, .{preds.device_code_hashEQ(.{ .string = device_code_hash })})) orelse return null;
+        defer zent.codegen.deinitEntity(infos, DeviceCodeInfo, &e, self.allocator);
+        return try self.dupDeviceCode(e);
+    }
+
+    pub fn getDeviceCodeByUserCodeForTenant(self: *IamStore, user_code: []const u8, tenant_id: i64) !?DeviceCodeRow {
+        const preds = self.client.device_code.predicates;
+        const code_q = preds.user_codeEQ(.{ .string = user_code });
+        const tenant_q = preds.tenant_idEQ(.{ .int = tenant_id });
+        var e = (try crud.first(self.client.device_code, .{zent.sql.And(&code_q, &tenant_q)})) orelse return null;
         defer zent.codegen.deinitEntity(infos, DeviceCodeInfo, &e, self.allocator);
         return try self.dupDeviceCode(e);
     }
