@@ -1,7 +1,7 @@
 //! Tenant service — tenant CRUD plus default-tenant bootstrap.
 
 const std = @import("std");
-const zigmodu = @import("zigmodu");
+const zmodu = @import("zmodu");
 const persist = @import("persistence.zig");
 
 pub const TenantRow = persist.TenantRow;
@@ -17,7 +17,7 @@ pub const TenantService = struct {
     }
 
     pub fn create(self: *TenantService, name: []const u8) !i64 {
-        return self.store.create(name, "active", zigmodu.time.wallClockSeconds(self.io));
+        return self.store.create(name, "active", zmodu.time.wallClockSeconds(self.io));
     }
 
     pub fn get(self: *TenantService, id: i64) !?TenantRow {
@@ -29,7 +29,7 @@ pub const TenantService = struct {
     }
 
     pub fn update(self: *TenantService, id: i64, name: []const u8, status: []const u8) !bool {
-        return self.store.update(id, name, status, zigmodu.time.wallClockSeconds(self.io));
+        return self.store.update(id, name, status, zmodu.time.wallClockSeconds(self.io));
     }
 
     /// Create the bootstrap tenant when none exists (idempotent). Returns
@@ -39,6 +39,6 @@ pub const TenantService = struct {
         var result = try self.store.list(1, 1);
         defer result.free(self.allocator);
         if (result.items.len > 0) return result.items[0].id;
-        return self.store.create("Default", "active", zigmodu.time.wallClockSeconds(self.io));
+        return self.store.create("Default", "active", zmodu.time.wallClockSeconds(self.io));
     }
 };

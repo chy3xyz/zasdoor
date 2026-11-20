@@ -3,8 +3,8 @@
 //! a valid JWT with an `admin` role.
 
 const std = @import("std");
-const zigmodu = @import("zigmodu");
-const http = zigmodu.http;
+const zmodu = @import("zmodu");
+const http = zmodu.http;
 const mw = @import("../../middleware/auth.zig");
 const user_svc = @import("../user/service.zig");
 const audit_svc = @import("../audit/service.zig");
@@ -22,8 +22,8 @@ pub fn IamApi(comptime Service: type, comptime UserService: type) type {
             return .{ .svc = svc, .user_svc = users, .audit = audit, .default_tenant_id = default_tenant_id };
         }
 
-        pub fn registerRoutes(self: *Self, group: *http.RouteGroup) !void {
-            var g = try group.use(zigmodu.http.http_middleware.jwtAuthWithSecurity(&self.user_svc.sec.module));
+        pub fn registerRoutes(self: *Self, group: anytype) !void {
+            var g = try group.use(zmodu.http.http_middleware.jwtAuthWithSecurity(&self.user_svc.sec.module));
             g = try g.use(mw.tokenVersionGuard(self.user_svc.sec, self.user_svc.store));
 
             // Organizations
@@ -86,15 +86,15 @@ pub fn IamApi(comptime Service: type, comptime UserService: type) type {
         fn listOrganizations(ctx: *http.Context) !void {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
             _ = (try requireAdmin(ctx, self)) orelse return;
-            const params = zigmodu.http.PageParams.parse(ctx, .{ .max_page_size = 100 });
+            const params = zmodu.http.PageParams.parse(ctx, .{ .max_page_size = 100 });
             var result = self.svc.listOrganizations(params.page, params.page_size, null) catch |err| {
                 std.log.err("internal error: {s}", .{@errorName(err)});
                 try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
             defer result.free(self.svc.allocator);
-            const dtos = try zigmodu.http.Extract.toDtoList(ctx.allocator, result.items, OrgDto, orgToDto);
-            try zigmodu.http.sendPaged(ctx, dtos, @intCast(result.total), params, .ruoyi);
+            const dtos = try zmodu.http.Extract.toDtoList(ctx.allocator, result.items, OrgDto, orgToDto);
+            try zmodu.http.sendPaged(ctx, dtos, @intCast(result.total), params, .ruoyi);
         }
 
         fn getOrganization(ctx: *http.Context) !void {
@@ -138,7 +138,7 @@ pub fn IamApi(comptime Service: type, comptime UserService: type) type {
                     return;
                 },
             };
-            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "iam.organization.create", "organization", id, req.name, zigmodu.http.RequestUtil.getRealIp(ctx), true, self.default_tenant_id);
+            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "iam.organization.create", "organization", id, req.name, zmodu.http.RequestUtil.getRealIp(ctx), true, self.default_tenant_id);
             try ctx.jsonStruct(201, .{ .code = 0, .msg = "组织已创建", .data = .{ .id = id } });
         }
 
@@ -154,7 +154,7 @@ pub fn IamApi(comptime Service: type, comptime UserService: type) type {
                 try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
-            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "iam.organization.delete", "organization", id, "", zigmodu.http.RequestUtil.getRealIp(ctx), true, self.default_tenant_id);
+            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "iam.organization.delete", "organization", id, "", zmodu.http.RequestUtil.getRealIp(ctx), true, self.default_tenant_id);
             try ctx.jsonStruct(200, .{ .code = 0, .msg = "ok", .data = null });
         }
 
@@ -165,15 +165,15 @@ pub fn IamApi(comptime Service: type, comptime UserService: type) type {
         fn listProjects(ctx: *http.Context) !void {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
             _ = (try requireAdmin(ctx, self)) orelse return;
-            const params = zigmodu.http.PageParams.parse(ctx, .{ .max_page_size = 100 });
+            const params = zmodu.http.PageParams.parse(ctx, .{ .max_page_size = 100 });
             var result = self.svc.listProjects(params.page, params.page_size, null) catch |err| {
                 std.log.err("internal error: {s}", .{@errorName(err)});
                 try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
             defer result.free(self.svc.allocator);
-            const dtos = try zigmodu.http.Extract.toDtoList(ctx.allocator, result.items, ProjectDto, projectToDto);
-            try zigmodu.http.sendPaged(ctx, dtos, @intCast(result.total), params, .ruoyi);
+            const dtos = try zmodu.http.Extract.toDtoList(ctx.allocator, result.items, ProjectDto, projectToDto);
+            try zmodu.http.sendPaged(ctx, dtos, @intCast(result.total), params, .ruoyi);
         }
 
         fn getProject(ctx: *http.Context) !void {
@@ -216,7 +216,7 @@ pub fn IamApi(comptime Service: type, comptime UserService: type) type {
                     return;
                 },
             };
-            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "iam.project.create", "project", id, req.name, zigmodu.http.RequestUtil.getRealIp(ctx), true, self.default_tenant_id);
+            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "iam.project.create", "project", id, req.name, zmodu.http.RequestUtil.getRealIp(ctx), true, self.default_tenant_id);
             try ctx.jsonStruct(201, .{ .code = 0, .msg = "项目已创建", .data = .{ .id = id } });
         }
 
@@ -232,7 +232,7 @@ pub fn IamApi(comptime Service: type, comptime UserService: type) type {
                 try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
-            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "iam.project.delete", "project", id, "", zigmodu.http.RequestUtil.getRealIp(ctx), true, self.default_tenant_id);
+            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "iam.project.delete", "project", id, "", zmodu.http.RequestUtil.getRealIp(ctx), true, self.default_tenant_id);
             try ctx.jsonStruct(200, .{ .code = 0, .msg = "ok", .data = null });
         }
 
@@ -327,7 +327,7 @@ pub fn IamApi(comptime Service: type, comptime UserService: type) type {
             };
             defer creds.deinit(self.svc.allocator);
 
-            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "iam.application.create", "application", 0, req.name, zigmodu.http.RequestUtil.getRealIp(ctx), true, self.default_tenant_id);
+            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "iam.application.create", "application", 0, req.name, zmodu.http.RequestUtil.getRealIp(ctx), true, self.default_tenant_id);
             try ctx.jsonStruct(201, .{
                 .code = 0,
                 .msg = "应用已创建",
@@ -350,7 +350,7 @@ pub fn IamApi(comptime Service: type, comptime UserService: type) type {
                 try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
-            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "iam.application.delete", "application", id, "", zigmodu.http.RequestUtil.getRealIp(ctx), true, self.default_tenant_id);
+            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "iam.application.delete", "application", id, "", zmodu.http.RequestUtil.getRealIp(ctx), true, self.default_tenant_id);
             try ctx.jsonStruct(200, .{ .code = 0, .msg = "ok", .data = null });
         }
 
@@ -405,7 +405,7 @@ pub fn IamApi(comptime Service: type, comptime UserService: type) type {
                     return;
                 },
             };
-            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "iam.role.create", "role", id, req.key, zigmodu.http.RequestUtil.getRealIp(ctx), true, self.default_tenant_id);
+            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "iam.role.create", "role", id, req.key, zmodu.http.RequestUtil.getRealIp(ctx), true, self.default_tenant_id);
             try ctx.jsonStruct(201, .{ .code = 0, .msg = "角色已创建", .data = .{ .id = id } });
         }
 
@@ -421,7 +421,7 @@ pub fn IamApi(comptime Service: type, comptime UserService: type) type {
                 try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
-            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "iam.role.delete", "role", id, "", zigmodu.http.RequestUtil.getRealIp(ctx), true, self.default_tenant_id);
+            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "iam.role.delete", "role", id, "", zmodu.http.RequestUtil.getRealIp(ctx), true, self.default_tenant_id);
             try ctx.jsonStruct(200, .{ .code = 0, .msg = "ok", .data = null });
         }
 
@@ -453,7 +453,7 @@ pub fn IamApi(comptime Service: type, comptime UserService: type) type {
                 try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
-            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "iam.role.assign", "role", role_id, "", zigmodu.http.RequestUtil.getRealIp(ctx), true, self.default_tenant_id);
+            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "iam.role.assign", "role", role_id, "", zmodu.http.RequestUtil.getRealIp(ctx), true, self.default_tenant_id);
             try ctx.jsonStruct(201, .{ .code = 0, .msg = "角色已分配", .data = .{ .id = assignment_id } });
         }
 
@@ -493,7 +493,7 @@ pub fn IamApi(comptime Service: type, comptime UserService: type) type {
                 try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
-            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "iam.session.revoke", "session", id, "", zigmodu.http.RequestUtil.getRealIp(ctx), true, self.default_tenant_id);
+            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "iam.session.revoke", "session", id, "", zmodu.http.RequestUtil.getRealIp(ctx), true, self.default_tenant_id);
             try ctx.jsonStruct(200, .{ .code = 0, .msg = "ok", .data = null });
         }
 
@@ -509,7 +509,7 @@ pub fn IamApi(comptime Service: type, comptime UserService: type) type {
                 try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
-            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "iam.session.revoke_all", "user", user_id, "", zigmodu.http.RequestUtil.getRealIp(ctx), true, self.default_tenant_id);
+            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "iam.session.revoke_all", "user", user_id, "", zmodu.http.RequestUtil.getRealIp(ctx), true, self.default_tenant_id);
             try ctx.jsonStruct(200, .{ .code = 0, .msg = "ok", .data = null });
         }
     };

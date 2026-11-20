@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # zigmodu/zent are pinned by hash in build.zig.zon (.url deps), so the
+      # zmodu/zent are pinned by hash in build.zig.zon (.url deps), so the
       # build fetches them itself — no sibling checkout layout needed.
 
       - uses: mlugg/setup-zig@v2

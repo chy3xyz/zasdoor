@@ -1,7 +1,7 @@
 //! ZigModu module `auth` — pure BFF routing layer, no own DB tables.
-const zigmodu = @import("zigmodu");
+const zmodu = @import("zmodu");
 
-pub const info = zigmodu.api.Module{
+pub const info = zmodu.api.Module{
     .name = "auth",
     .description = "authentication BFF (register/login/logout/password reset)",
     .dependencies = &.{"user"},

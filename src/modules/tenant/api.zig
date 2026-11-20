@@ -1,8 +1,8 @@
 //! Admin-facing tenant API — platform administrators manage tenants.
 
 const std = @import("std");
-const zigmodu = @import("zigmodu");
-const http = zigmodu.http;
+const zmodu = @import("zmodu");
+const http = zmodu.http;
 const mw = @import("../../middleware/auth.zig");
 const user_svc = @import("../user/service.zig");
 const audit_svc = @import("../audit/service.zig");
@@ -47,8 +47,8 @@ pub fn TenantApi(comptime Service: type, comptime UserService: type) type {
             return .{ .svc = svc, .user_svc = users, .audit = audit };
         }
 
-        pub fn registerRoutes(self: *Self, group: *http.RouteGroup) !void {
-            var g = try group.use(zigmodu.http.http_middleware.jwtAuthWithSecurity(&self.user_svc.sec.module));
+        pub fn registerRoutes(self: *Self, group: anytype) !void {
+            var g = try group.use(zmodu.http.http_middleware.jwtAuthWithSecurity(&self.user_svc.sec.module));
             g = try g.use(mw.tokenVersionGuard(self.user_svc.sec, self.user_svc.store));
             try g.get("/tenants", list, @ptrCast(@alignCast(self)));
             try g.post("/tenants", create, @ptrCast(@alignCast(self)));
@@ -81,7 +81,7 @@ pub fn TenantApi(comptime Service: type, comptime UserService: type) type {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
             _ = (try requireAdmin(ctx, self)) orelse return;
 
-            const params = zigmodu.http.PageParams.parse(ctx, .{ .max_page_size = 100 });
+            const params = zmodu.http.PageParams.parse(ctx, .{ .max_page_size = 100 });
             var result = self.svc.list(params.page, params.page_size) catch |err| {
                 std.log.err("internal error: {s}", .{@errorName(err)});
                 try ctx.sendErrorResponse(500, 500, "服务器内部错误");
@@ -89,8 +89,8 @@ pub fn TenantApi(comptime Service: type, comptime UserService: type) type {
             };
             defer result.free(self.svc.allocator);
 
-            const dtos = try zigmodu.http.Extract.toDtoList(ctx.allocator, result.items, TenantDto, toDto);
-            try zigmodu.http.sendPaged(ctx, dtos, @intCast(result.total), params, .ruoyi);
+            const dtos = try zmodu.http.Extract.toDtoList(ctx.allocator, result.items, TenantDto, toDto);
+            try zmodu.http.sendPaged(ctx, dtos, @intCast(result.total), params, .ruoyi);
         }
 
         fn create(ctx: *http.Context) !void {
@@ -113,7 +113,7 @@ pub fn TenantApi(comptime Service: type, comptime UserService: type) type {
             };
             var d1: [128]u8 = undefined;
             const det1 = try std.fmt.bufPrint(&d1, "创建租户 {s}", .{req.name});
-            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "tenant.create", "tenant", id, det1, zigmodu.http.RequestUtil.getRealIp(ctx), true, id);
+            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "tenant.create", "tenant", id, det1, zmodu.http.RequestUtil.getRealIp(ctx), true, id);
             try ctx.jsonStruct(201, .{ .code = 0, .msg = "租户已创建", .data = .{ .id = id } });
         }
 
@@ -156,7 +156,7 @@ pub fn TenantApi(comptime Service: type, comptime UserService: type) type {
             };
             var d2: [128]u8 = undefined;
             const det2 = try std.fmt.bufPrint(&d2, "更新租户 #{d} → {s}", .{ id, status });
-            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "tenant.update", "tenant", id, det2, zigmodu.http.RequestUtil.getRealIp(ctx), true, id);
+            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "tenant.update", "tenant", id, det2, zmodu.http.RequestUtil.getRealIp(ctx), true, id);
             try ctx.jsonStruct(200, .{ .code = 0, .msg = "ok", .data = null });
         }
     };

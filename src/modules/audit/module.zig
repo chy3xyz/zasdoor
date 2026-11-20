@@ -1,7 +1,7 @@
 //! ZigModu module `audit` — admin audit trail.
-const zigmodu = @import("zigmodu");
+const zmodu = @import("zmodu");
 
-pub const info = zigmodu.api.Module{
+pub const info = zmodu.api.Module{
     .name = "audit",
     .description = "admin audit trail: who did what, when, from where",
     .dependencies = &.{},

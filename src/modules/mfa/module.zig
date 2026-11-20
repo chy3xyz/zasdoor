@@ -1,7 +1,7 @@
 //! ZigModu module `mfa`.
-const zigmodu = @import("zigmodu");
+const zmodu = @import("zmodu");
 
-pub const info = zigmodu.api.Module{
+pub const info = zmodu.api.Module{
     .name = "mfa",
     .description = "multi-factor auth (TOTP, recovery codes, IdP, MFA policy)",
     .dependencies = &.{},

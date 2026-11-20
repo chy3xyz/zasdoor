@@ -5,7 +5,7 @@
 //! config and must match the browser's clientData exactly.
 
 const std = @import("std");
-const zigmodu = @import("zigmodu");
+const zmodu = @import("zmodu");
 const persist = @import("persistence.zig");
 const user_svc = @import("../user/service.zig");
 const cbor = @import("cbor.zig");
@@ -93,7 +93,7 @@ pub const WebauthnService = struct {
     }
 
     pub fn now(self: *WebauthnService) i64 {
-        return zigmodu.time.wallClockSeconds(self.io);
+        return zmodu.time.wallClockSeconds(self.io);
     }
 
     fn randomB64(self: *WebauthnService, n: usize) Error![]const u8 {

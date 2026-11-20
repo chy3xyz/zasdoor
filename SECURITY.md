@@ -38,4 +38,4 @@ Zasdoor fails closed in production, but a secure deployment still depends on con
 
 In scope: authentication and session handling, OAuth2/OIDC authorization and token endpoints, MFA, SIWE/wallet binding, the authorization kernel, multi-tenant isolation, file upload handling, and the admin API.
 
-Out of scope: issues that require an already-compromised host or database, missing hardening headers on the bundled development server, and vulnerabilities in third-party dependencies that should be reported upstream (zigmodu, zent).
+Out of scope: issues that require an already-compromised host or database, missing hardening headers on the bundled development server, and vulnerabilities in third-party dependencies that should be reported upstream (zmodu, zent).

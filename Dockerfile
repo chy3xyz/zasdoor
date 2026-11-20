@@ -2,7 +2,7 @@
 # The frontend is a static SPA: serve `web/dist` from any static host and
 # proxy `/api` (and `/health`, `/metrics`) to this image on :8000.
 #
-# Build context must be the repository root. zigmodu/zent are pinned by hash in
+# Build context must be the repository root. zmodu/zent are pinned by hash in
 # build.zig.zon (.url deps), so the build fetches them itself.
 
 # ── Stage 1: build the Zig backend ─────────────────────────────────────────

@@ -1,7 +1,7 @@
 //! Auth module tests: shared password policy and per-account login lockout.
 
 const std = @import("std");
-const zigmodu = @import("zigmodu");
+const zmodu = @import("zmodu");
 const db_mod = @import("../../db.zig");
 const schema = @import("../../schema.zig");
 const user = @import("../user/root.zig");
@@ -44,7 +44,7 @@ test "password policy enforced on register, change and reset" {
     var env = try openUserDb(allocator);
     defer env.deinit();
     var store = user.persistence.UserStore.init(allocator, env.client);
-    var sec = zigmodu.security.AppSecurity.init(allocator, std.testing.io, .{ .jwt_secret = "test-secret" });
+    var sec = zmodu.security.AppSecurity.init(allocator, std.testing.io, .{ .jwt_secret = "test-secret" });
     var svc = service.UserService.init(&store, &sec, std.testing.io, 3600, 86400);
 
     try std.testing.expectError(error.PasswordTooShort, svc.register(allocator, "Alice", "alice@example.com", "short", false, 1));
@@ -104,7 +104,7 @@ test "login lockout: failed attempts lock, correct password waits for cooldown" 
     var env = try openUserDb(allocator);
     defer env.deinit();
     var store = user.persistence.UserStore.init(allocator, env.client);
-    var sec = zigmodu.security.AppSecurity.init(allocator, std.testing.io, .{ .jwt_secret = "test-secret" });
+    var sec = zmodu.security.AppSecurity.init(allocator, std.testing.io, .{ .jwt_secret = "test-secret" });
     var svc = service.UserService.init(&store, &sec, std.testing.io, 3600, 86400);
 
     service.resetLoginLockout(std.testing.io);

@@ -7,7 +7,7 @@
 让你在咖啡凉掉之前,把内部管理台搭好上线。
 
 [![Zig](https://img.shields.io/badge/Zig-0.17-orange?logo=zig&logoColor=white)](https://ziglang.org)
-[![zigmodu](https://img.shields.io/badge/zigmodu-v0.39.11-blue)](https://github.com/chy3xyz/zigmodu)
+[![zmodu](https://img.shields.io/badge/zmodu-v0.43.8-blue)](https://github.com/chy3xyz/zmodu)
 [![zent](https://img.shields.io/badge/zent-ORM-6b46c1)](https://github.com/chy3xyz/zent)
 [![SolidJS](https://img.shields.io/badge/前端-SolidJS-2c4f7c?logo=solid&logoColor=white)](https://www.solidjs.com)
 [![Tests](https://img.shields.io/badge/测试-107%20后端%20%2B%205%20前端-green)]()
@@ -74,8 +74,8 @@
 - **技能** —— LLM 可调用的平台工具:用户搜索、任务统计、审计检索、租户列表(只读)+ `notify.send`(写,人工审批)
 - **聊天** —— 按用户会话、历史持久化、**推理链折叠展示**(DeepSeek-R1 等)
 - **人工审批** —— 审批队列,批准时真正执行
-- **治理** —— 滚动 24h 配额、4 路并发 Bulkhead、**熔断保护**(连续失败 → 开路 + 半开探测)、Provider 健康检查、运行审计记录**实际应答模型**与**每次 run 用量快照**(tokens/steps/工具调用,基于 `Metrics.toStats()`,zigmodu v0.15.17)、Prometheus AI 指标
-- **工作流** —— 基于 zigmodu.ai 的只读健康报告编排
+- **治理** —— 滚动 24h 配额、4 路并发 Bulkhead、**熔断保护**(连续失败 → 开路 + 半开探测)、Provider 健康检查、运行审计记录**实际应答模型**与**每次 run 用量快照**(tokens/steps/工具调用,基于 `Metrics.toStats()`,zmodu v0.15.17)、Prometheus AI 指标
+- **工作流** —— 基于 zmodu.ai 的只读健康报告编排
 
 ### 💎 工程品质
 - Schema-as-code 迁移(启动自动);SQLite ↔ PostgreSQL 一个环境变量切换
@@ -89,7 +89,7 @@
 
 | 层 | 技术 |
 | --- | --- |
-| 后端 | [Zig](https://ziglang.org) 0.17 · [zigmodu](https://github.com/chy3xyz/zigmodu) v0.39.11(HTTP、安全、AI、resilience、Application 生命周期) · [zent](https://github.com/chy3xyz/zent) v0.91.0(ORM、schema、迁移) |
+| 后端 | [Zig](https://ziglang.org) 0.17 · [zmodu](https://github.com/chy3xyz/zmodu) v0.43.8(HTTP、安全、AI、resilience、Application 生命周期) · [zent](https://github.com/chy3xyz/zent) v0.97.3(ORM、schema、迁移) |
 | 前端 | [SolidJS](https://www.solidjs.com) · TypeScript · [Rsbuild](https://rsbuild.dev) · [Tailwind CSS](https://tailwindcss.com) 4 · [DaisyUI](https://daisyui.com) · vitest |
 | 数据库 | SQLite(默认)· PostgreSQL(一个环境变量切换) |
 
@@ -101,14 +101,14 @@
 浏览器（SolidJS SPA）
    │  /api/v1（JSON 信封：{ code, msg, data }）
    ▼
-Zig HTTP 服务（zigmodu,异步 fiber）
+Zig HTTP 服务（zmodu,异步 fiber）
    │  安全响应头 → 访问日志 → CORS → JWT（租户）→ token 版本校验
    ▼
 模块 API ──► 服务层 ──► 持久化（zent,类型安全）──► SQLite / PostgreSQL
    │
    ├── 任务调度器（后台线程）
    │     └── 持久化队列 · mail.send 处理器 · 维护任务（令牌/审计清理）
-   └── AI Agent（zigmodu.ai）
+   └── AI Agent（zmodu.ai）
          └── SkillRegistry → 平台技能 → 人工审批 → 运行审计
 ```
 
@@ -213,7 +213,7 @@ cd web && pnpm run typecheck && pnpm run test && pnpm run build   # vitest + 构
 - **CI**:GitHub Actions —— `zig fmt --check`、`zig build test`、前端 typecheck/测试/构建。
 - **优雅关闭**:SIGTERM/SIGINT 排空在途请求后干净退出。
 - **备份**:[`docs/backup.md`](docs/backup.md) —— SQLite 在线 `.backup`、`pg_dump`/恢复、uploads 快照、保留节奏。
-- **开发指南**:[`docs/development-guide.md`](docs/development-guide.md) —— 新增业务模块的完整步骤(zent/zigmodu 约定、事务、安全、性能、测试陷阱)。
+- **开发指南**:[`docs/development-guide.md`](docs/development-guide.md) —— 新增业务模块的完整步骤(zent/zmodu 约定、事务、安全、性能、测试陷阱)。
 - **模块文档**:[`docs/iam.md`](docs/iam.md) · [`docs/oauth.md`](docs/oauth.md) · [`docs/mfa.md`](docs/mfa.md) · [`docs/auth.md`](docs/auth.md) · [`docs/agent.md`](docs/agent.md) · [`docs/web3.md`](docs/web3.md) · [`docs/eventstore.md`](docs/eventstore.md) · [`docs/authz.md`](docs/authz.md)
 - **安全检查清单**:显式 `ZASDOOR_JWT_SECRET`(PostgreSQL 下强制)、AI 用 `ZASDOOR_AI_KEY_SECRET`、`/metrics` IP 白名单、审计保留。
 
@@ -224,10 +224,10 @@ cd web && pnpm run typecheck && pnpm run test && pnpm run build   # vitest + 构
 | 状态 | 项目 |
 | --- | --- |
 | ✅ 已完成 | 智能助手(Provider/技能/聊天/审批/工作流/配额)、审计日志 + CSV、概览面板、邮件模板、按 IP 限流、**会话吊销**、文件白名单、优雅关闭、Docker/CI、前端测试、主题切换 |
-| ✅ 已完成 | **流式聊天** —— Agent `chatStream` + `on_delta`(zigmodu v0.15.16);SSE reasoning/delta/done 打字机效果,JSON 降级 |
-| ✅ 已完成 | **运行用量审计** —— zigmodu v0.15.17 `Metrics.toStats()`;每次 AI run 持久化 tokens/steps/工具调用用量,管理端 runs 表格展示 |
-| ✅ 已完成 | **流式工具 JSON 修复** —— zigmodu v0.15.18(`b28444a`);SkillRegistry tools_json 输出合法 JSON(去掉多余 `}`),修复流式 chat 中 DeepSeek/OpenAI 以 400 拒绝工具 schema(`ProviderError`)的问题 |
-| ✅ 已完成 | **依赖升级到最新** —— Zig **0.17.0 正式版** + zigmodu v0.39.6 + zent v0.83.0(CI/Docker 固定同一版本);0.17 破坏点(口令校验错误联合、中间件工厂可失败、`Stream.read` 结果结构体)已适配 |
+| ✅ 已完成 | **流式聊天** —— Agent `chatStream` + `on_delta`(zmodu v0.15.16);SSE reasoning/delta/done 打字机效果,JSON 降级 |
+| ✅ 已完成 | **运行用量审计** —— zmodu v0.15.17 `Metrics.toStats()`;每次 AI run 持久化 tokens/steps/工具调用用量,管理端 runs 表格展示 |
+| ✅ 已完成 | **流式工具 JSON 修复** —— zmodu v0.15.18(`b28444a`);SkillRegistry tools_json 输出合法 JSON(去掉多余 `}`),修复流式 chat 中 DeepSeek/OpenAI 以 400 拒绝工具 schema(`ProviderError`)的问题 |
+| ✅ 已完成 | **依赖升级到最新** —— Zig **0.17.0 正式版** + zmodu v0.39.6 + zent v0.83.0(CI/Docker 固定同一版本);0.17 破坏点(口令校验错误联合、中间件工厂可失败、`Stream.read` 结果结构体)已适配 |
 | ✅ 已完成 | **IAM 核心** —— 组织 / 项目 / 应用 / 角色 / 会话 + `authz/check` |
 | ✅ 已完成 | **OAuth2 / OIDC** —— 授权码 + PKCE、客户端凭证、刷新令牌、discovery/JWKS/userinfo/introspection/revocation |
 | ✅ 已完成 | **MFA** —— TOTP 注册与校验、恢复码、租户级策略 |

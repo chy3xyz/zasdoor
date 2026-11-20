@@ -4,8 +4,8 @@
 //! discovery, jwks, authorize, token, introspect, revoke, userinfo.
 
 const std = @import("std");
-const zigmodu = @import("zigmodu");
-const http = zigmodu.http;
+const zmodu = @import("zmodu");
+const http = zmodu.http;
 const service = @import("service.zig");
 const user_svc = @import("../user/service.zig");
 const jwt = @import("jwt.zig");
@@ -244,7 +244,7 @@ pub fn OAuthApi(comptime Service: type, comptime UserService: type) type {
 
         fn authenticatedUserId(self: *Self, ctx: *http.Context) ?i64 {
             const hdr = ctx.header("authorization") orelse return null;
-            const tok = zigmodu.security.SecurityModule.extractBearerToken(hdr) orelse return null;
+            const tok = zmodu.security.SecurityModule.extractBearerToken(hdr) orelse return null;
             const payload = self.svc.sec.module.verifyToken(tok) catch return null;
             defer self.svc.sec.module.freePayload(payload);
             return std.fmt.parseInt(i64, payload.sub, 10) catch null;
@@ -374,7 +374,7 @@ pub fn OAuthApi(comptime Service: type, comptime UserService: type) type {
             const row_opt = self.svc.iam_svc.store.findRefreshTokenByHash(hash) catch null;
             if (row_opt) |row| {
                 row.free(self.svc.iam_svc.allocator);
-                self.svc.iam_svc.store.revokeRefreshToken(row.id, zigmodu.time.wallClockSeconds(self.svc.io)) catch {};
+                self.svc.iam_svc.store.revokeRefreshToken(row.id, zmodu.time.wallClockSeconds(self.svc.io)) catch {};
             }
             try ctx.text(200, "");
         }
@@ -387,7 +387,7 @@ pub fn OAuthApi(comptime Service: type, comptime UserService: type) type {
                 try ctx.text(401, "");
                 return;
             };
-            const tok = zigmodu.security.SecurityModule.extractBearerToken(hdr) orelse {
+            const tok = zmodu.security.SecurityModule.extractBearerToken(hdr) orelse {
                 try ctx.setHeader("WWW-Authenticate", "Bearer");
                 try ctx.text(401, "");
                 return;

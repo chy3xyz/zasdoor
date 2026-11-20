@@ -6,7 +6,7 @@
 //! mark (EventPosition) so replays are incremental.
 
 const std = @import("std");
-const zigmodu = @import("zigmodu");
+const zmodu = @import("zmodu");
 const persist = @import("persistence.zig");
 
 pub const EventRow = persist.EventRow;
@@ -42,7 +42,7 @@ pub const EventService = struct {
     }
 
     fn now(self: *EventService) i64 {
-        return zigmodu.time.wallClockSeconds(self.io);
+        return zmodu.time.wallClockSeconds(self.io);
     }
 
     /// Append a domain event with optimistic concurrency, returning the new id.

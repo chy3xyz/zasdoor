@@ -1,8 +1,8 @@
 //! Admin audit-log API — query the audit trail (write side is the service).
 
 const std = @import("std");
-const zigmodu = @import("zigmodu");
-const http = zigmodu.http;
+const zmodu = @import("zmodu");
+const http = zmodu.http;
 const mw = @import("../../middleware/auth.zig");
 const service = @import("service.zig");
 
@@ -44,8 +44,8 @@ pub fn AuditApi(comptime AuditServiceT: type, comptime UserService: type) type {
             return .{ .svc = svc, .user_svc = users };
         }
 
-        pub fn registerRoutes(self: *Self, group: *http.RouteGroup) !void {
-            var g = try group.use(zigmodu.http.http_middleware.jwtAuthWithSecurity(&self.user_svc.sec.module));
+        pub fn registerRoutes(self: *Self, group: anytype) !void {
+            var g = try group.use(zmodu.http.http_middleware.jwtAuthWithSecurity(&self.user_svc.sec.module));
             g = try g.use(mw.tokenVersionGuard(self.user_svc.sec, self.user_svc.store));
             try g.get("/audit-logs", listLogs, @ptrCast(@alignCast(self)));
             try g.get("/audit-logs/export", exportLogs, @ptrCast(@alignCast(self)));
@@ -84,7 +84,7 @@ pub fn AuditApi(comptime AuditServiceT: type, comptime UserService: type) type {
             };
             defer result.free(ctx.allocator);
 
-            var csv = zigmodu.csv.Writer.init(ctx.allocator);
+            var csv = zmodu.csv.Writer.init(ctx.allocator);
             defer csv.deinit();
             try csv.writeHeader(&.{ "id", "action", "actor_user_id", "actor_name", "target_type", "target_id", "detail", "ip", "success", "created_at" });
             for (result.items) |r| {
@@ -106,12 +106,12 @@ pub fn AuditApi(comptime AuditServiceT: type, comptime UserService: type) type {
             const admin_id = (try requireAdmin(ctx, self)) orelse return;
             _ = admin_id;
 
-            const params = zigmodu.http.PageParams.parse(ctx, .{ .max_page_size = 200 });
+            const params = zmodu.http.PageParams.parse(ctx, .{ .max_page_size = 200 });
             const actor = ctx.queryInt(i64, "actor", 0);
             const action_raw = ctx.queryParam("action");
             const keyword_raw = ctx.queryParam("keyword");
 
-            // zigmodu percent-decodes query values at parse time — do not
+            // zmodu percent-decodes query values at parse time — do not
             // decode again here (would corrupt literal %XX sequences).
             const filters: service.AuditFilters = .{
                 .actor_user_id = if (actor > 0) actor else null,
@@ -125,8 +125,8 @@ pub fn AuditApi(comptime AuditServiceT: type, comptime UserService: type) type {
             };
             defer result.free(self.svc.allocator);
 
-            const dtos = try zigmodu.http.Extract.toDtoList(ctx.allocator, result.items, AuditDto, toDto);
-            try zigmodu.http.sendPaged(ctx, dtos, @intCast(result.total), params, .ruoyi);
+            const dtos = try zmodu.http.Extract.toDtoList(ctx.allocator, result.items, AuditDto, toDto);
+            try zmodu.http.sendPaged(ctx, dtos, @intCast(result.total), params, .ruoyi);
         }
     };
 }

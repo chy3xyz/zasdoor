@@ -1,7 +1,7 @@
 //! File service — local-disk storage with DB metadata.
 
 const std = @import("std");
-const zigmodu = @import("zigmodu");
+const zmodu = @import("zmodu");
 const persist = @import("persistence.zig");
 
 pub const FileRow = persist.FileRow;
@@ -38,11 +38,11 @@ pub const FileService = struct {
 
     /// Persist raw bytes to disk and record metadata. `filename` is the
     /// user-facing name; the on-disk name is a generated storage key. Content
-    /// is validated by zigmodu `UploadGuard.check`: bytes are sniffed, so
+    /// is validated by zmodu `UploadGuard.check`: bytes are sniffed, so
     /// active content (SVG/HTML) renamed to `.txt` is refused — an extension
     /// allowlist alone cannot stop a rename bypass.
     pub fn save(self: *FileService, uploader_id: i64, tenant_id: i64, filename: []const u8, mime: []const u8, data: []const u8) !FileRow {
-        _ = zigmodu.http.UploadGuard.check(filename, data, .{
+        _ = zmodu.http.UploadGuard.check(filename, data, .{
             .extensions = &allowed_extensions,
             .max_bytes = self.max_bytes,
             // General-purpose store: docx/xlsx/pptx sniff as zip and tar/mov
@@ -133,7 +133,7 @@ pub const FileService = struct {
 };
 
 fn wallNow(io: std.Io) i64 {
-    return zigmodu.time.wallClockSeconds(io);
+    return zmodu.time.wallClockSeconds(io);
 }
 
 /// 允许上传的扩展名白名单(排除 html/svg/脚本等可执行内容)。

@@ -1,7 +1,7 @@
 //! ZigModu module `ai` — agentic assistant over platform skills.
-const zigmodu = @import("zigmodu");
+const zmodu = @import("zmodu");
 
-pub const info = zigmodu.api.Module{
+pub const info = zmodu.api.Module{
     .name = "ai",
     .description = "agentic assistant: providers, skills, chat, approvals, workflow",
     .dependencies = &.{},

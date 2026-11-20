@@ -1,9 +1,9 @@
-//! Access-log middleware — structured per-request logs backed by zigmodu's
+//! Access-log middleware — structured per-request logs backed by zmodu's
 //! AccessLogger (which redacts Authorization/Cookie headers).
 
 const std = @import("std");
-const zigmodu = @import("zigmodu");
-const http = zigmodu.http;
+const zmodu = @import("zmodu");
+const http = zmodu.http;
 
 pub const AccessLog = struct {
     logger: http.AccessLogger,

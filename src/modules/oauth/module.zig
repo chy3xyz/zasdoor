@@ -1,7 +1,7 @@
 //! ZigModu module `oauth` (stateless protocol endpoints).
-const zigmodu = @import("zigmodu");
+const zmodu = @import("zmodu");
 
-pub const info = zigmodu.api.Module{
+pub const info = zmodu.api.Module{
     .name = "oauth",
     .description = "oauth2 / oidc endpoints (authorize, token, introspection, discovery)",
     .dependencies = &.{},

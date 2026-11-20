@@ -7,7 +7,7 @@
 Organizations, projects, applications, roles, OAuth2/OIDC, MFA, SIWE — with a Zig backend and a SolidJS admin console.
 
 [![Zig](https://img.shields.io/badge/Zig-0.17-orange?logo=zig&logoColor=white)](https://ziglang.org)
-[![zigmodu](https://img.shields.io/badge/zigmodu-v0.39.11-blue)](https://github.com/chy3xyz/zigmodu)
+[![zmodu](https://img.shields.io/badge/zmodu-v0.43.8-blue)](https://github.com/chy3xyz/zmodu)
 [![zent](https://img.shields.io/badge/zent-ORM-6b46c1)](https://github.com/chy3xyz/zent)
 [![SolidJS](https://img.shields.io/badge/Frontend-SolidJS-2c4f7c?logo=solid&logoColor=white)](https://www.solidjs.com)
 [![Tests](https://img.shields.io/badge/tests-107%20backend%20%2B%205%20frontend-green)]()
@@ -74,7 +74,7 @@ Zasdoor is a self-hosted identity & access management platform. It gives you the
 - **Chat** — per-user sessions with persisted history, **reasoning-chain display** (DeepSeek-R1 etc.)
 - **Human-in-the-loop** — approval queue, approve executes the action
 - **Governance** — rolling 24h quota, 4-way concurrency bulkhead, **circuit breaker** (5-failure → 60s OPEN + half-open probe), provider health check, run audit with the **actual model** + **per-run usage snapshot**, Prometheus AI metrics
-- **Workflow** — read-only health-report orchestration via zigmodu.ai
+- **Workflow** — read-only health-report orchestration via zmodu.ai
 
 ### 💎 Engineering quality
 - Schema-as-code migrations (auto at startup), SQLite ↔ PostgreSQL via one env var
@@ -88,7 +88,7 @@ Zasdoor is a self-hosted identity & access management platform. It gives you the
 
 | Layer | Technology |
 | --- | --- |
-| Backend | [Zig](https://ziglang.org) 0.17 · [zigmodu](https://github.com/chy3xyz/zigmodu) v0.39.11 (HTTP, security, AI, resilience, Application lifecycle) · [zent](https://github.com/chy3xyz/zent) v0.91.0 (ORM, schema, migrations) |
+| Backend | [Zig](https://ziglang.org) 0.17 · [zmodu](https://github.com/chy3xyz/zmodu) v0.43.8 (HTTP, security, AI, resilience, Application lifecycle) · [zent](https://github.com/chy3xyz/zent) v0.97.3 (ORM, schema, migrations) |
 | Frontend | [SolidJS](https://www.solidjs.com) · TypeScript · [Rsbuild](https://rsbuild.dev) · [Tailwind CSS](https://tailwindcss.com) 4 · [DaisyUI](https://daisyui.com) · vitest |
 | Database | SQLite (default) · PostgreSQL (one env var) |
 
@@ -100,7 +100,7 @@ Zasdoor is a self-hosted identity & access management platform. It gives you the
 Browser (SolidJS SPA)
    │  /api/v1  (JSON envelope: { code, msg, data })
    ▼
-Zig HTTP server (zigmodu, async fibers)
+Zig HTTP server (zmodu, async fibers)
    │  security headers → access log → CORS → JWT (tenant) → token-version guard
    ▼
 Module APIs ──► Services ──► Persistence (zent, type-safe) ──► SQLite / PostgreSQL
@@ -111,7 +111,7 @@ Module APIs ──► Services ──► Persistence (zent, type-safe) ──►
    ├── Web3 (SIWE nonce / verify / wallet bind)
    ├── Task Dispatcher (background thread)
    │     └── durable queue · mail.send handler · housekeeping (tokens/audit)
-   └── AI Agent (zigmodu.ai)
+   └── AI Agent (zmodu.ai)
          └── SkillRegistry → platform skills → human approval → run audit
 ```
 
@@ -216,7 +216,7 @@ cd web && pnpm run typecheck && pnpm run test && pnpm run build   # vitest + bui
 - **CI**: GitHub Actions — `zig fmt --check`, `zig build test`, frontend typecheck/tests/build.
 - **Graceful shutdown**: SIGTERM/SIGINT drains in-flight requests, then stops cleanly.
 - **Backups**: [`docs/backup.md`](docs/backup.md) — online SQLite `.backup`, `pg_dump`/restore, uploads snapshots, retention schedule.
-- **Dev guide**: [`docs/development-guide.md`](docs/development-guide.md) — how to add a business module (zent/zigmodu conventions, transactions, security, performance, testing pitfalls).
+- **Dev guide**: [`docs/development-guide.md`](docs/development-guide.md) — how to add a business module (zent/zmodu conventions, transactions, security, performance, testing pitfalls).
 - **Module docs**: [`docs/iam.md`](docs/iam.md) · [`docs/oauth.md`](docs/oauth.md) · [`docs/mfa.md`](docs/mfa.md) · [`docs/auth.md`](docs/auth.md) · [`docs/agent.md`](docs/agent.md) · [`docs/web3.md`](docs/web3.md) · [`docs/eventstore.md`](docs/eventstore.md) · [`docs/authz.md`](docs/authz.md)
 - **Security checklist**: explicit `ZASDOOR_JWT_SECRET` (mandatory on PostgreSQL), `ZASDOOR_AI_KEY_SECRET` for AI, `/metrics` IP allow-list, audit retention.
 
@@ -235,10 +235,10 @@ cd web && pnpm run typecheck && pnpm run test && pnpm run build   # vitest + bui
 | ✅ Done | **AI Agents** — machine identities with capability/scopes + per-period budget ledger |
 | ✅ Done | **Event store** — append-only domain events |
 | ✅ Done | AI assistant (providers/skills/chat/approvals/workflow/quota), audit log + CSV, dashboard, email templates, per-IP rate limiting, **session revocation**, file allow-list, graceful shutdown, Docker/CI, frontend tests, theme toggle |
-| ✅ Done | **Streaming chat** — Agent `chatStream` + `on_delta` (zigmodu v0.15.16); SSE reasoning/delta/done feed with typing effect, JSON fallback |
-| ✅ Done | **Run usage audit** — zigmodu v0.15.17 `Metrics.toStats()`; every AI run persists tokens/steps/tool-call usage, admin runs table shows it |
-| ✅ Done | **Streaming tool-JSON fix** — zigmodu v0.15.18; SkillRegistry tools_json emits valid JSON so models no longer reject tool schemas |
-| ✅ Done | **Deps at latest** — Zig 0.17.0 stable + zigmodu v0.39.6 + zent v0.83.0 (pinned in CI/Docker) |
+| ✅ Done | **Streaming chat** — Agent `chatStream` + `on_delta` (zmodu v0.15.16); SSE reasoning/delta/done feed with typing effect, JSON fallback |
+| ✅ Done | **Run usage audit** — zmodu v0.15.17 `Metrics.toStats()`; every AI run persists tokens/steps/tool-call usage, admin runs table shows it |
+| ✅ Done | **Streaming tool-JSON fix** — zmodu v0.15.18; SkillRegistry tools_json emits valid JSON so models no longer reject tool schemas |
+| ✅ Done | **Deps at latest** — Zig 0.17.0 stable + zmodu v0.39.6 + zent v0.83.0 (pinned in CI/Docker) |
 
 ---
 

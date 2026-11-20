@@ -1,16 +1,16 @@
 //! Auth helpers for zasdoor HTTP handlers.
 //!
-//! JWT verification uses zigmodu's built-in `jwtAuthWithSecurity` middleware
+//! JWT verification uses zmodu's built-in `jwtAuthWithSecurity` middleware
 //! (mounted per route group in the module `api.zig` files). The helpers here
 //! read the context attributes that middleware sets: `user_id` (JWT `sub`)
 //! and `tenant_id` (JWT `aud`).
 
 const std = @import("std");
-const zigmodu = @import("zigmodu");
-const http = zigmodu.http;
+const zmodu = @import("zmodu");
+const http = zmodu.http;
 const user_persist = @import("../modules/user/persistence.zig");
 
-/// Context attribute names set by zigmodu's built-in JWT middleware
+/// Context attribute names set by zmodu's built-in JWT middleware
 /// (`verifyJwtLoadPermsAndNext` in `api/Middleware.zig`).
 pub const user_id_attr = "user_id";
 pub const tenant_id_attr = "tenant_id";
@@ -30,10 +30,10 @@ pub fn authTenantId(ctx: *http.Context) ?i64 {
 
 /// 挂载在 `jwtAuthWithSecurity` 之后:比对 JWT 的 `ver` claim 与数据库中的
 /// 用户凭证版本;改密/踢下线(版本递增)后旧 token 立即失效(401)。
-pub fn tokenVersionGuard(sec: *zigmodu.security.AppSecurity, user_store: *user_persist.UserStore) http.Middleware {
-    // 模块级 static:Zig 内嵌 fn 无法捕获外层参数(与 zigmodu 中间件同模式)。
+pub fn tokenVersionGuard(sec: *zmodu.security.AppSecurity, user_store: *user_persist.UserStore) http.Middleware {
+    // 模块级 static:Zig 内嵌 fn 无法捕获外层参数(与 zmodu 中间件同模式)。
     const S = struct {
-        var stored_sec: *zigmodu.security.AppSecurity = undefined;
+        var stored_sec: *zmodu.security.AppSecurity = undefined;
         var stored_store: *user_persist.UserStore = undefined;
     };
     S.stored_sec = sec;
@@ -49,7 +49,7 @@ pub fn tokenVersionGuard(sec: *zigmodu.security.AppSecurity, user_store: *user_p
                     try ctx.sendErrorResponse(401, 401, "未登录或登录已过期");
                     return;
                 };
-                const token = zigmodu.security.SecurityModule.extractBearerToken(hdr) orelse {
+                const token = zmodu.security.SecurityModule.extractBearerToken(hdr) orelse {
                     try ctx.sendErrorResponse(401, 401, "未登录或登录已过期");
                     return;
                 };

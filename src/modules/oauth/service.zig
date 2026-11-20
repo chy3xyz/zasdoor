@@ -3,7 +3,7 @@
 //! to IamService and user data to UserService.
 
 const std = @import("std");
-const zigmodu = @import("zigmodu");
+const zmodu = @import("zmodu");
 const jwt = @import("jwt.zig");
 const keys = @import("keys.zig");
 const iam = @import("../iam/service.zig");
@@ -29,7 +29,7 @@ pub const OAuthService = struct {
     io: std.Io,
     iam_svc: *iam.IamService,
     users: *user_svc.UserService,
-    sec: *zigmodu.security.AppSecurity,
+    sec: *zmodu.security.AppSecurity,
     issuer: []const u8,
     ring: keys.KeyRing,
     code_ttl_seconds: i64,
@@ -42,7 +42,7 @@ pub const OAuthService = struct {
         io: std.Io,
         iam_svc: *iam.IamService,
         users: *user_svc.UserService,
-        sec: *zigmodu.security.AppSecurity,
+        sec: *zmodu.security.AppSecurity,
         issuer: []const u8,
     ) OAuthService {
         return initWithExtraKeys(allocator, io, iam_svc, users, sec, issuer, "");
@@ -55,7 +55,7 @@ pub const OAuthService = struct {
         io: std.Io,
         iam_svc: *iam.IamService,
         users: *user_svc.UserService,
-        sec: *zigmodu.security.AppSecurity,
+        sec: *zmodu.security.AppSecurity,
         issuer: []const u8,
         extra_key_secrets_csv: []const u8,
     ) OAuthService {
@@ -73,7 +73,7 @@ pub const OAuthService = struct {
     }
 
     pub fn now(self: *OAuthService) i64 {
-        return zigmodu.time.wallClockSeconds(self.io);
+        return zmodu.time.wallClockSeconds(self.io);
     }
 
     /// Produce an OIDC ID token (JWT) for a user + client.

@@ -2,8 +2,8 @@
 //! JWT and an `admin` role (checked against the DB, not the token claim).
 
 const std = @import("std");
-const zigmodu = @import("zigmodu");
-const http = zigmodu.http;
+const zmodu = @import("zmodu");
+const http = zmodu.http;
 const mw = @import("../../middleware/auth.zig");
 const service = @import("service.zig");
 const audit_svc = @import("../audit/service.zig");
@@ -60,8 +60,8 @@ pub fn UserApi(comptime Service: type) type {
             return .{ .svc = svc, .default_tenant_id = default_tenant_id, .audit = audit };
         }
 
-        pub fn registerRoutes(self: *Self, group: *http.RouteGroup) !void {
-            var g = try group.use(zigmodu.http.http_middleware.jwtAuthWithSecurity(&self.svc.sec.module));
+        pub fn registerRoutes(self: *Self, group: anytype) !void {
+            var g = try group.use(zmodu.http.http_middleware.jwtAuthWithSecurity(&self.svc.sec.module));
             g = try g.use(mw.tokenVersionGuard(self.svc.sec, self.svc.store));
             try g.get("/users", listUsers, @ptrCast(@alignCast(self)));
             try g.get("/users/export", exportUsers, @ptrCast(@alignCast(self)));
@@ -106,7 +106,7 @@ pub fn UserApi(comptime Service: type) type {
             };
             defer result.free(ctx.allocator);
 
-            var csv = zigmodu.csv.Writer.init(ctx.allocator);
+            var csv = zmodu.csv.Writer.init(ctx.allocator);
             defer csv.deinit();
             try csv.writeHeader(&.{ "id", "name", "email", "admin", "tenant_id", "created_at" });
             for (result.items) |u| {
@@ -126,15 +126,15 @@ pub fn UserApi(comptime Service: type) type {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
             _ = (try requireAdmin(ctx, self)) orelse return;
 
-            const params = zigmodu.http.PageParams.parse(ctx, .{ .max_page_size = 100 });
+            const params = zmodu.http.PageParams.parse(ctx, .{ .max_page_size = 100 });
             const keyword_raw = ctx.queryParam("keyword");
             const tenant_query = ctx.queryInt(i64, "tenant_id", 0);
             const tenant_filter: ?i64 = if (tenant_query > 0) tenant_query else null;
-            const sort = zigmodu.http.page.parseSort(ctx, &.{ "name", "email", "created_at" });
+            const sort = zmodu.http.page.parseSort(ctx, &.{ "name", "email", "created_at" });
             const sort_col: ?[]const u8 = if (sort) |s| s.column else null;
             const sort_desc = if (sort) |s| s.desc else false;
 
-            // zigmodu percent-decodes query values at parse time, so the
+            // zmodu percent-decodes query values at parse time, so the
             // keyword arrives already decoded (CJK searches included).
             var result = self.svc.listUsers(params.page, params.page_size, keyword_raw, tenant_filter, sort_col, sort_desc) catch |err| {
                 std.log.err("internal error: {s}", .{@errorName(err)});
@@ -143,8 +143,8 @@ pub fn UserApi(comptime Service: type) type {
             };
             defer self.svc.freeList(&result);
 
-            const dtos = try zigmodu.http.Extract.toDtoList(ctx.allocator, result.items, UserDto, toDto);
-            try zigmodu.http.sendPaged(ctx, dtos, @intCast(result.total), params, .ruoyi);
+            const dtos = try zmodu.http.Extract.toDtoList(ctx.allocator, result.items, UserDto, toDto);
+            try zmodu.http.sendPaged(ctx, dtos, @intCast(result.total), params, .ruoyi);
         }
 
         fn getUser(ctx: *http.Context) !void {
@@ -190,7 +190,7 @@ pub fn UserApi(comptime Service: type) type {
 
             var detail_buf: [160]u8 = undefined;
             const detail = try std.fmt.bufPrint(&detail_buf, "创建用户 {s} ({s})", .{ req.name, req.email });
-            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "user.create", "user", session.row.id, detail, zigmodu.http.RequestUtil.getRealIp(ctx), true, tenant_id);
+            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "user.create", "user", session.row.id, detail, zmodu.http.RequestUtil.getRealIp(ctx), true, tenant_id);
 
             try ctx.jsonStruct(201, .{
                 .code = 0,
@@ -278,7 +278,7 @@ pub fn UserApi(comptime Service: type) type {
             }
             var detail_buf: [160]u8 = undefined;
             const detail = try std.fmt.bufPrint(&detail_buf, "更新用户 #{d}", .{id});
-            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "user.update", "user", id, detail, zigmodu.http.RequestUtil.getRealIp(ctx), true, 0);
+            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "user.update", "user", id, detail, zmodu.http.RequestUtil.getRealIp(ctx), true, 0);
             try ctx.jsonStruct(200, .{ .code = 0, .msg = "ok", .data = null });
         }
 
@@ -295,7 +295,7 @@ pub fn UserApi(comptime Service: type) type {
                 try ctx.sendErrorResponse(400, 400, "不能踢下线当前登录账号");
                 return;
             }
-            const now = zigmodu.time.wallClockSeconds(self.svc.io);
+            const now = zmodu.time.wallClockSeconds(self.svc.io);
             self.svc.store.bumpTokenVersion(id, now) catch |err| switch (err) {
                 error.UserNotFound => {
                     try ctx.sendErrorResponse(404, 404, "用户不存在");
@@ -329,7 +329,7 @@ pub fn UserApi(comptime Service: type) type {
             };
             var detail_buf: [160]u8 = undefined;
             const detail = try std.fmt.bufPrint(&detail_buf, "删除用户 #{d}", .{id});
-            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "user.delete", "user", id, detail, zigmodu.http.RequestUtil.getRealIp(ctx), true, 0);
+            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "user.delete", "user", id, detail, zmodu.http.RequestUtil.getRealIp(ctx), true, 0);
             try ctx.jsonStruct(200, .{ .code = 0, .msg = "ok", .data = null });
         }
 

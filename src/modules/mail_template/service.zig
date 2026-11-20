@@ -1,7 +1,7 @@
 //! Email-template service — variable rendering + CRUD over the store.
 
 const std = @import("std");
-const zigmodu = @import("zigmodu");
+const zmodu = @import("zmodu");
 const persist = @import("persistence.zig");
 
 pub const TemplateRow = persist.TemplateRow;
@@ -91,7 +91,7 @@ pub const MailTemplateService = struct {
     }
 
     pub fn upsert(self: *MailTemplateService, code: []const u8, subject: []const u8, body: []const u8) !void {
-        const now = zigmodu.time.wallClockSeconds(self.io);
+        const now = zmodu.time.wallClockSeconds(self.io);
         return self.store.upsert(code, subject, body, now);
     }
 

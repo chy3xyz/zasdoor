@@ -1,7 +1,7 @@
 //! ZigModu module `authz`.
-const zigmodu = @import("zigmodu");
+const zmodu = @import("zmodu");
 
-pub const info = zigmodu.api.Module{
+pub const info = zmodu.api.Module{
     .name = "authz",
     .description = "authorization kernel (subject -> resource -> action -> ALLOW/DENY)",
     .dependencies = &.{},

@@ -4,8 +4,8 @@
 //! through the shared Mailer (console sink in dev, SMTP in prod).
 
 const std = @import("std");
-const zigmodu = @import("zigmodu");
-const http = zigmodu.http;
+const zmodu = @import("zmodu");
+const http = zmodu.http;
 const mw = @import("../../middleware/auth.zig");
 const user_service = @import("../user/service.zig");
 const task_service = @import("../task/service.zig");
@@ -95,7 +95,7 @@ pub fn AuthApi(comptime Service: type) type {
         const Self = @This();
         svc: *Service,
         app_host: []const u8,
-        registry: *zigmodu.RateLimiterRegistry,
+        registry: *zmodu.RateLimiterRegistry,
         mailer: *const mail.Mailer,
         task_svc: *task_service.TaskService,
         notify_svc: *notify_service.NotificationService,
@@ -106,7 +106,7 @@ pub fn AuthApi(comptime Service: type) type {
         pub fn init(
             svc: *Service,
             app_host: []const u8,
-            registry: *zigmodu.RateLimiterRegistry,
+            registry: *zmodu.RateLimiterRegistry,
             mailer: *const mail.Mailer,
             task_svc: *task_service.TaskService,
             notify_svc: *notify_service.NotificationService,
@@ -127,11 +127,11 @@ pub fn AuthApi(comptime Service: type) type {
             };
         }
 
-        pub fn registerRoutes(self: *Self, group: *http.RouteGroup) !void {
+        pub fn registerRoutes(self: *Self, group: anytype) !void {
             // Public routes are rate-limited to blunt credential stuffing /
             // reset-token brute force.
             // per-IP 限流(攻击者无法耗尽全局桶误伤他人)。
-            var limited = try group.use(try zigmodu.http.tracing_middleware.rateLimitPerClient(self.registry, clientIpKey));
+            var limited = try group.use(try zmodu.http.tracing_middleware.rateLimitPerClient(self.registry, clientIpKey));
             try limited.post("/auth/register", register, @ptrCast(@alignCast(self)));
             try limited.post("/auth/login", login, @ptrCast(@alignCast(self)));
             try limited.post("/auth/logout", logout, @ptrCast(@alignCast(self)));
@@ -139,7 +139,7 @@ pub fn AuthApi(comptime Service: type) type {
             try limited.post("/auth/reset-password", resetPassword, @ptrCast(@alignCast(self)));
             try limited.post("/auth/verify-email", verifyEmail, @ptrCast(@alignCast(self)));
 
-            var g = try group.use(zigmodu.http.http_middleware.jwtAuthWithSecurity(&self.svc.sec.module));
+            var g = try group.use(zmodu.http.http_middleware.jwtAuthWithSecurity(&self.svc.sec.module));
             g = try g.use(mw.tokenVersionGuard(self.svc.sec, self.svc.store));
             try g.get("/auth/me", me, @ptrCast(@alignCast(self)));
             try g.post("/auth/send-verification", sendVerification, @ptrCast(@alignCast(self)));
@@ -192,7 +192,7 @@ pub fn AuthApi(comptime Service: type) type {
             if (!session.row.verified) self.sendVerificationMail(ctx, session.row.id);
             var d1: [128]u8 = undefined;
             const det1 = try std.fmt.bufPrint(&d1, "注册账号 {s}", .{req.email});
-            self.audit.log(session.row.id, session.row.name, "auth.register", "user", session.row.id, det1, zigmodu.http.RequestUtil.getRealIp(ctx), true, tenant_id);
+            self.audit.log(session.row.id, session.row.name, "auth.register", "user", session.row.id, det1, zmodu.http.RequestUtil.getRealIp(ctx), true, tenant_id);
             try ctx.jsonStruct(201, .{
                 .code = 0,
                 .msg = "注册成功",
@@ -216,7 +216,7 @@ pub fn AuthApi(comptime Service: type) type {
                 error.InvalidCredentials => {
                     var d2: [160]u8 = undefined;
                     const det2 = try std.fmt.bufPrint(&d2, "登录失败: {s}", .{req.email});
-                    self.audit.log(0, "", "auth.login.fail", "user", 0, det2, zigmodu.http.RequestUtil.getRealIp(ctx), false, 0);
+                    self.audit.log(0, "", "auth.login.fail", "user", 0, det2, zmodu.http.RequestUtil.getRealIp(ctx), false, 0);
                     try ctx.sendErrorResponse(401, 401, "邮箱或密码错误");
                     return;
                 },
@@ -225,7 +225,7 @@ pub fn AuthApi(comptime Service: type) type {
                     // lockout never reveals whether an account exists.
                     var d5: [160]u8 = undefined;
                     const det5 = try std.fmt.bufPrint(&d5, "登录锁定: {s}", .{req.email});
-                    self.audit.log(0, "", "auth.login.locked", "user", 0, det5, zigmodu.http.RequestUtil.getRealIp(ctx), false, 0);
+                    self.audit.log(0, "", "auth.login.locked", "user", 0, det5, zmodu.http.RequestUtil.getRealIp(ctx), false, 0);
                     try ctx.sendErrorResponse(429, 429, "尝试次数过多，请稍后再试");
                     return;
                 },
@@ -237,14 +237,14 @@ pub fn AuthApi(comptime Service: type) type {
             const session = session_opt orelse {
                 var d3: [160]u8 = undefined;
                 const det3 = try std.fmt.bufPrint(&d3, "登录失败: {s}", .{req.email});
-                self.audit.log(0, "", "auth.login.fail", "user", 0, det3, zigmodu.http.RequestUtil.getRealIp(ctx), false, 0);
+                self.audit.log(0, "", "auth.login.fail", "user", 0, det3, zmodu.http.RequestUtil.getRealIp(ctx), false, 0);
                 try ctx.sendErrorResponse(401, 401, "邮箱或密码错误");
                 return;
             };
             defer self.svc.freeSession(session);
             var d4: [128]u8 = undefined;
             const det4 = try std.fmt.bufPrint(&d4, "登录成功: {s}", .{req.email});
-            self.audit.log(session.row.id, session.row.name, "auth.login", "user", session.row.id, det4, zigmodu.http.RequestUtil.getRealIp(ctx), true, session.row.tenant_id);
+            self.audit.log(session.row.id, session.row.name, "auth.login", "user", session.row.id, det4, zmodu.http.RequestUtil.getRealIp(ctx), true, session.row.tenant_id);
             try ctx.jsonStruct(200, .{
                 .code = 0,
                 .msg = "登录成功",
@@ -534,7 +534,7 @@ pub fn AuthApi(comptime Service: type) type {
 
 /// 按客户端 IP 限流的 key(优先级 X-Real-IP > X-Forwarded-For > 远端地址)。
 fn clientIpKey(ctx: *http.Context) []const u8 {
-    return zigmodu.http.RequestUtil.getRealIp(ctx);
+    return zmodu.http.RequestUtil.getRealIp(ctx);
 }
 
 /// Build the JSON payload the `mail.send` task handler expects. Subjects and

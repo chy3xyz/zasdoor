@@ -1,6 +1,6 @@
 # 流式聊天接入契约(Streaming Chat)
 
-> 状态:**已落地**。zigmodu v0.15.16(`e7cf9df`)修复 `requestStream` 本地路径并
+> 状态:**已落地**。zmodu v0.15.16(`e7cf9df`)修复 `requestStream` 本地路径并
 > 完成 Agent 流式切换(TODO #4);zasdoor 已按本契约接入(后端 SSE + 前端打字机)。
 >
 > **v0.15.18 补丁(`b28444a`)**:`SkillRegistry.toOpenAiFunctionsAlloc` 曾为每个
@@ -52,7 +52,7 @@ var stream_ctx = ChatStreamCtx{ .session_id = session_id };
 agent.hooks = .{
     .ctx = &stream_ctx,
     .on_delta = struct {
-        fn onDelta(_: ?*anyopaque, delta: zigmodu.ai.AiProvider.StreamDelta) anyerror!void {
+        fn onDelta(_: ?*anyopaque, delta: zmodu.ai.AiProvider.StreamDelta) anyerror!void {
             // 经 Sse writer 推送(见步骤 2);当前可先转发到内存队列。
             _ = delta;
         }
@@ -60,14 +60,14 @@ agent.hooks = .{
 };
 ```
 
-`AgentHooks.on_delta`(`zigmodu/src/ai/agent.zig:73`)签名已确认:
+`AgentHooks.on_delta`(`zmodu/src/ai/agent.zig:73`)签名已确认:
 `fn (?*anyopaque, AiProvider.StreamDelta) anyerror!void`,delta 含
 `content_delta` / `reasoning_delta` / `tool_name` / `tool_arguments_delta` / `done`。
 
 ### 2. `src/modules/ai/api.zig` — chat 端点改 SSE
 
 - 响应头 `Content-Type: text/event-stream`、`Cache-Control: no-cache`。
-- 用 zigmodu `http.Sse`(`zigmodu/http/Sse.zig`)writer。
+- 用 zmodu `http.Sse`(`zmodu/http/Sse.zig`)writer。
 - `agent.run` 同步执行期间,`on_delta` 推送到 Sse writer;run 结束后发 `done`。
 - 现有逻辑保持:消息落库(user/assistant 带完整 answer + reasoning)、`touchSession`、
   配额/Bulkhead/run 审计不变。
@@ -81,7 +81,7 @@ agent.hooks = .{
 
 ## 前置检查
 
-- [ ] zigmodu Agent 主循环 `chatWith → chatStream + DeltaBridge` 已切换(`agent.zig` 无 `TODO(#4)`)
-- [ ] zigmodu `requestStream` 本地(非 TLS)路径修复(框架 bug 候选;真实 HTTPS 已验证正常)
+- [ ] zmodu Agent 主循环 `chatWith → chatStream + DeltaBridge` 已切换(`agent.zig` 无 `TODO(#4)`)
+- [ ] zmodu `requestStream` 本地(非 TLS)路径修复(框架 bug 候选;真实 HTTPS 已验证正常)
 - [ ] Agent 主循环切换后 `on_delta` 触发;Testkit 增加 SSE 直连测试
 - [ ] zasdoor `zig build test` 通过后接 SSE 测试(Testkit 直连 chat 端点)

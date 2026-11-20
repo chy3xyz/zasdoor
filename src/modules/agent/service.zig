@@ -2,7 +2,7 @@
 //! and expiration checks, budget ledger (dev.md V4).
 
 const std = @import("std");
-const zigmodu = @import("zigmodu");
+const zmodu = @import("zmodu");
 const persist = @import("persistence.zig");
 const oauth_jwt = @import("../oauth/jwt.zig");
 const user_svc = @import("../user/service.zig");
@@ -19,7 +19,7 @@ pub const AgentService = struct {
     io: std.Io,
     store: *persist.AgentStore,
     users: *user_svc.UserService,
-    sec: *zigmodu.security.AppSecurity,
+    sec: *zmodu.security.AppSecurity,
     issuer: []const u8,
 
     pub fn init(
@@ -27,14 +27,14 @@ pub const AgentService = struct {
         io: std.Io,
         store: *persist.AgentStore,
         users: *user_svc.UserService,
-        sec: *zigmodu.security.AppSecurity,
+        sec: *zmodu.security.AppSecurity,
         issuer: []const u8,
     ) AgentService {
         return .{ .allocator = allocator, .io = io, .store = store, .users = users, .sec = sec, .issuer = issuer };
     }
 
     fn now(self: *AgentService) i64 {
-        return zigmodu.time.wallClockSeconds(self.io);
+        return zmodu.time.wallClockSeconds(self.io);
     }
 
     pub fn createAgent(

@@ -2,7 +2,7 @@
 //!
 //! Every module registers its schemas here so a single `StoreEnv` can
 //! migrate the full schema and expose one type-safe client to all stores
-//! (zigmodu + zent best practice: one client, schema-as-code in one place).
+//! (zmodu + zent best practice: one client, schema-as-code in one place).
 
 const zent = @import("zent");
 

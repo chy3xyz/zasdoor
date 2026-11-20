@@ -1,7 +1,7 @@
 //! ZigModu module `mail_template` — configurable email templates.
-const zigmodu = @import("zigmodu");
+const zmodu = @import("zmodu");
 
-pub const info = zigmodu.api.Module{
+pub const info = zmodu.api.Module{
     .name = "mail_template",
     .description = "configurable email templates (verify-email, reset-password)",
     .dependencies = &.{},

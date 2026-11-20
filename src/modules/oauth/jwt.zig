@@ -1,6 +1,6 @@
 //! Minimal HS256 JWT signer for OIDC access/ID tokens.
 //!
-//! The existing `SecurityModule` hardcodes `iss="zigmodu"` and `aud=tenant`,
+//! The existing `SecurityModule` hardcodes `iss="zmodu"` and `aud=tenant`,
 //! which is fine for the admin API but not OIDC (OIDC needs `iss` = the
 //! configured issuer URL and `aud` = the client_id). This self-contained
 //! signer gives full claim control while sharing the platform JWT secret.

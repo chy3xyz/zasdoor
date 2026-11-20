@@ -10,7 +10,7 @@
 //! can be unit-tested without a live provider.
 
 const std = @import("std");
-const zigmodu = @import("zigmodu");
+const zmodu = @import("zmodu");
 const persist = @import("persistence.zig");
 
 pub const IdpError = error{
@@ -267,9 +267,9 @@ pub const IdpService = struct {
         body.appendSlice(self.allocator, "&client_secret=") catch return error.TokenExchangeFailed;
         appendFormValue(self.allocator, &body, cfg.client_secret) catch return error.TokenExchangeFailed;
 
-        var http = zigmodu.http.HttpClient.init(self.allocator, io, 4, 15_000);
+        var http = zmodu.http.HttpClient.init(self.allocator, io, 4, 15_000);
         defer http.deinit();
-        var req = zigmodu.http.HttpClient.HttpRequest.init(self.allocator, "POST", cfg.token_url);
+        var req = zmodu.http.HttpClient.HttpRequest.init(self.allocator, "POST", cfg.token_url);
         defer req.deinit();
         req.setHeader("content-type", "application/x-www-form-urlencoded") catch return error.TokenExchangeFailed;
         req.setHeader("accept", "application/json") catch return error.TokenExchangeFailed;
@@ -296,9 +296,9 @@ pub const IdpService = struct {
     /// Fetch the userinfo document with the bearer access token.
     pub fn fetchUserInfo(self: *IdpService, io: std.Io, cfg: IdpConfig, access_token: []const u8) IdpError!UserInfo {
         if (cfg.userinfo_url.len == 0) return error.UserInfoFailed;
-        var http = zigmodu.http.HttpClient.init(self.allocator, io, 4, 15_000);
+        var http = zmodu.http.HttpClient.init(self.allocator, io, 4, 15_000);
         defer http.deinit();
-        var req = zigmodu.http.HttpClient.HttpRequest.init(self.allocator, "GET", cfg.userinfo_url);
+        var req = zmodu.http.HttpClient.HttpRequest.init(self.allocator, "GET", cfg.userinfo_url);
         defer req.deinit();
         const bearer = std.fmt.allocPrint(self.allocator, "Bearer {s}", .{access_token}) catch return error.UserInfoFailed;
         defer self.allocator.free(bearer);

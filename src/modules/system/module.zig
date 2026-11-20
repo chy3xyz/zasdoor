@@ -1,7 +1,7 @@
 //! ZigModu module `system` — runtime introspection (admin diagnostics).
-const zigmodu = @import("zigmodu");
+const zmodu = @import("zmodu");
 
-pub const info = zigmodu.api.Module{
+pub const info = zmodu.api.Module{
     .name = "system",
     .description = "runtime introspection: uptime, db, mail, cache, tasks",
     .dependencies = &.{},

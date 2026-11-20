@@ -1,8 +1,8 @@
 //! Web3 HTTP API - wallet binding and SIWE verification.
 
 const std = @import("std");
-const zigmodu = @import("zigmodu");
-const http = zigmodu.http;
+const zmodu = @import("zmodu");
+const http = zmodu.http;
 const mw = @import("../../middleware/auth.zig");
 const user_svc = @import("../user/service.zig");
 const service = @import("service.zig");
@@ -18,12 +18,12 @@ pub fn Web3Api(comptime Service: type, comptime UserService: type) type {
             return .{ .svc = svc, .users = users, .default_tenant_id = default_tenant_id };
         }
 
-        pub fn registerRoutes(self: *Self, group: *http.RouteGroup) !void {
+        pub fn registerRoutes(self: *Self, group: anytype) !void {
             // Public SIWE login endpoints (no JWT required).
             try group.post("/web3/siwe/nonce", siweNonce, @ptrCast(@alignCast(self)));
             try group.post("/web3/siwe/verify", siweVerify, @ptrCast(@alignCast(self)));
 
-            var g = try group.use(zigmodu.http.http_middleware.jwtAuthWithSecurity(&self.users.sec.module));
+            var g = try group.use(zmodu.http.http_middleware.jwtAuthWithSecurity(&self.users.sec.module));
             g = try g.use(mw.tokenVersionGuard(self.users.sec, self.users.store));
             try g.post("/web3/wallet/bind", bindWallet, @ptrCast(@alignCast(self)));
         }

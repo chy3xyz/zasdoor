@@ -1,7 +1,7 @@
 //! Web3 service: SIWE wallet verification + EIP-4361 validation + binding.
 
 const std = @import("std");
-const zigmodu = @import("zigmodu");
+const zmodu = @import("zmodu");
 const persist = @import("persistence.zig");
 const siwe = @import("siwe.zig");
 const siwe_msg = @import("siwe_message.zig");
@@ -30,20 +30,20 @@ pub const Web3Service = struct {
     io: std.Io,
     store: *persist.WalletStore,
     users: *user_svc.UserService,
-    sec: *zigmodu.security.AppSecurity,
+    sec: *zmodu.security.AppSecurity,
 
     pub fn init(
         allocator: std.mem.Allocator,
         io: std.Io,
         store: *persist.WalletStore,
         users: *user_svc.UserService,
-        sec: *zigmodu.security.AppSecurity,
+        sec: *zmodu.security.AppSecurity,
     ) Web3Service {
         return .{ .allocator = allocator, .io = io, .store = store, .users = users, .sec = sec };
     }
 
     fn now(self: *Web3Service) i64 {
-        return zigmodu.time.wallClockSeconds(self.io);
+        return zmodu.time.wallClockSeconds(self.io);
     }
 
     /// Verify an EIP-191 (personal_sign) SIWE signature and derive the address.

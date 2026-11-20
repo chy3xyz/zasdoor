@@ -1,7 +1,7 @@
 //! ZigModu module `agent`.
-const zigmodu = @import("zigmodu");
+const zmodu = @import("zmodu");
 
-pub const info = zigmodu.api.Module{
+pub const info = zmodu.api.Module{
     .name = "agent",
     .description = "AI agent identity (owner, capabilities, budget, delegation)",
     .dependencies = &.{},

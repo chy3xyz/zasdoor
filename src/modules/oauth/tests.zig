@@ -2,7 +2,7 @@
 //! consistency and the consent gate. Pure unit tests plus one in-memory
 //! store-backed consent flow test.
 const std = @import("std");
-const zigmodu = @import("zigmodu");
+const zmodu = @import("zmodu");
 const db_mod = @import("../../db.zig");
 const schema = @import("../../schema.zig");
 const tenant = @import("../tenant/root.zig");
@@ -221,7 +221,7 @@ test "oauth consent: authorize requires consent, then issues after grant" {
     defer env.deinit();
     var iam_store = iam.persistence.IamStore.init(allocator, env.client);
     var user_store = user.persistence.UserStore.init(allocator, env.client);
-    var sec = zigmodu.security.AppSecurity.init(allocator, std.testing.io, .{ .jwt_secret = "consent-secret" });
+    var sec = zmodu.security.AppSecurity.init(allocator, std.testing.io, .{ .jwt_secret = "consent-secret" });
     var iam_svc = iam.service.IamService.init(allocator, std.testing.io, &iam_store, &sec);
     var user_svc = user.service.UserService.init(&user_store, &sec, std.testing.io, 3600, 86400);
     const uid = try user_store.createUser("Carol", "carol@example.com", "hash", false, true, 1, 100);

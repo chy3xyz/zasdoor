@@ -14,7 +14,7 @@ pub fn build(b: *std.Build) void {
     // Link SQLite + Postgres + MySQL drivers (drivers discovered by db_link/dependency build).
     const features = db_link.Features.all;
 
-    const zigmodu_dep = b.dependency("zigmodu", .{
+    const zmodu_dep = b.dependency("zmodu", .{
         .target = target,
         .optimize = optimize,
     });
@@ -29,7 +29,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .link_libc = true,
     });
-    exe_mod.addImport("zigmodu", zigmodu_dep.module("zigmodu"));
+    exe_mod.addImport("zmodu", zmodu_dep.module("zmodu"));
     exe_mod.addImport("zent", zent_dep.module("zent"));
     exe_mod.addOptions("build_info", build_info);
     db_link.link(exe_mod, b, features);
@@ -49,7 +49,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .link_libc = true,
     });
-    admin_mod.addImport("zigmodu", zigmodu_dep.module("zigmodu"));
+    admin_mod.addImport("zmodu", zmodu_dep.module("zmodu"));
     admin_mod.addImport("zent", zent_dep.module("zent"));
     admin_mod.addOptions("build_info", build_info);
     db_link.link(admin_mod, b, features);
@@ -69,7 +69,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .link_libc = true,
     });
-    tests_mod.addImport("zigmodu", zigmodu_dep.module("zigmodu"));
+    tests_mod.addImport("zmodu", zmodu_dep.module("zmodu"));
     tests_mod.addImport("zent", zent_dep.module("zent"));
     tests_mod.addOptions("build_info", build_info);
     db_link.link(tests_mod, b, features);

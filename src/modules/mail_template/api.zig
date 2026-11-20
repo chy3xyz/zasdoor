@@ -1,8 +1,8 @@
 //! Admin email-template API — list and upsert customizable templates.
 
 const std = @import("std");
-const zigmodu = @import("zigmodu");
-const http = zigmodu.http;
+const zmodu = @import("zmodu");
+const http = zmodu.http;
 const mw = @import("../../middleware/auth.zig");
 const service = @import("service.zig");
 
@@ -37,8 +37,8 @@ pub fn MailTemplateApi(comptime TemplateServiceT: type, comptime UserService: ty
             return .{ .svc = svc, .user_svc = users };
         }
 
-        pub fn registerRoutes(self: *Self, group: *http.RouteGroup) !void {
-            var g = try group.use(zigmodu.http.http_middleware.jwtAuthWithSecurity(&self.user_svc.sec.module));
+        pub fn registerRoutes(self: *Self, group: anytype) !void {
+            var g = try group.use(zmodu.http.http_middleware.jwtAuthWithSecurity(&self.user_svc.sec.module));
             g = try g.use(mw.tokenVersionGuard(self.user_svc.sec, self.user_svc.store));
             try g.get("/email-templates", listTemplates, @ptrCast(@alignCast(self)));
             try g.put("/email-templates/{code}", upsertTemplate, @ptrCast(@alignCast(self)));
@@ -69,7 +69,7 @@ pub fn MailTemplateApi(comptime TemplateServiceT: type, comptime UserService: ty
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
             _ = (try requireAdmin(ctx, self)) orelse return;
 
-            const params = zigmodu.http.PageParams.parse(ctx, .{ .max_page_size = 100 });
+            const params = zmodu.http.PageParams.parse(ctx, .{ .max_page_size = 100 });
             var result = self.svc.list(params.page, params.page_size) catch |err| {
                 std.log.err("internal error: {s}", .{@errorName(err)});
                 try ctx.sendErrorResponse(500, 500, "服务器内部错误");
@@ -77,8 +77,8 @@ pub fn MailTemplateApi(comptime TemplateServiceT: type, comptime UserService: ty
             };
             defer result.free(self.svc.allocator);
 
-            const dtos = try zigmodu.http.Extract.toDtoList(ctx.allocator, result.items, TemplateDto, toDto);
-            try zigmodu.http.sendPaged(ctx, dtos, @intCast(result.total), params, .ruoyi);
+            const dtos = try zmodu.http.Extract.toDtoList(ctx.allocator, result.items, TemplateDto, toDto);
+            try zmodu.http.sendPaged(ctx, dtos, @intCast(result.total), params, .ruoyi);
         }
 
         fn upsertTemplate(ctx: *http.Context) !void {

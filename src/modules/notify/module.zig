@@ -1,7 +1,7 @@
 //! ZigModu module `notify` — per-user notifications.
-const zigmodu = @import("zigmodu");
+const zmodu = @import("zmodu");
 
-pub const info = zigmodu.api.Module{
+pub const info = zmodu.api.Module{
     .name = "notify",
     .description = "per-user notifications (flash messages, task events)",
     .dependencies = &.{},

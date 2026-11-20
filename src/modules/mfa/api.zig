@@ -1,8 +1,8 @@
 //! MFA HTTP API - TOTP enrollment/verification, recovery codes, IdP, policy.
 
 const std = @import("std");
-const zigmodu = @import("zigmodu");
-const http = zigmodu.http;
+const zmodu = @import("zmodu");
+const http = zmodu.http;
 const mw = @import("../../middleware/auth.zig");
 const user_svc = @import("../user/service.zig");
 const service = @import("service.zig");
@@ -18,8 +18,8 @@ pub fn MfaApi(comptime Service: type, comptime UserService: type) type {
             return .{ .svc = svc, .users = users, .default_tenant_id = default_tenant_id };
         }
 
-        pub fn registerRoutes(self: *Self, group: *http.RouteGroup) !void {
-            var g = try group.use(zigmodu.http.http_middleware.jwtAuthWithSecurity(&self.users.sec.module));
+        pub fn registerRoutes(self: *Self, group: anytype) !void {
+            var g = try group.use(zmodu.http.http_middleware.jwtAuthWithSecurity(&self.users.sec.module));
             g = try g.use(mw.tokenVersionGuard(self.users.sec, self.users.store));
             try g.post("/mfa/totp/enroll", enrollTotp, @ptrCast(@alignCast(self)));
             try g.post("/mfa/totp/verify", verifyTotp, @ptrCast(@alignCast(self)));

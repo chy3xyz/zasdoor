@@ -2,7 +2,7 @@
 //! generation, role resolution, session lifecycle. No HTTP/SQL leakage.
 
 const std = @import("std");
-const zigmodu = @import("zigmodu");
+const zmodu = @import("zmodu");
 const persist = @import("persistence.zig");
 
 pub const OrganizationRow = persist.OrganizationRow;
@@ -42,14 +42,14 @@ pub const IamService = struct {
     allocator: std.mem.Allocator,
     io: std.Io,
     store: *persist.IamStore,
-    sec: *zigmodu.security.AppSecurity,
+    sec: *zmodu.security.AppSecurity,
 
-    pub fn init(allocator: std.mem.Allocator, io: std.Io, store: *persist.IamStore, sec: *zigmodu.security.AppSecurity) IamService {
+    pub fn init(allocator: std.mem.Allocator, io: std.Io, store: *persist.IamStore, sec: *zmodu.security.AppSecurity) IamService {
         return .{ .allocator = allocator, .io = io, .store = store, .sec = sec };
     }
 
     fn now(self: *IamService) i64 {
-        return zigmodu.time.wallClockSeconds(self.io);
+        return zmodu.time.wallClockSeconds(self.io);
     }
 
     // ── Organization ─────────────────────────────────────────

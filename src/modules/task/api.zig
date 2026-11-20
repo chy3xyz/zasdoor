@@ -2,8 +2,8 @@
 //! a valid JWT and the `admin` role (checked against the DB).
 
 const std = @import("std");
-const zigmodu = @import("zigmodu");
-const http = zigmodu.http;
+const zmodu = @import("zmodu");
+const http = zmodu.http;
 const mw = @import("../../middleware/auth.zig");
 const user_svc = @import("../user/service.zig");
 const service = @import("service.zig");
@@ -54,8 +54,8 @@ pub fn TaskApi(comptime Service: type, comptime UserService: type) type {
             return .{ .svc = svc, .user_svc = users, .audit = audit };
         }
 
-        pub fn registerRoutes(self: *Self, group: *http.RouteGroup) !void {
-            var g = try group.use(zigmodu.http.http_middleware.jwtAuthWithSecurity(&self.user_svc.sec.module));
+        pub fn registerRoutes(self: *Self, group: anytype) !void {
+            var g = try group.use(zmodu.http.http_middleware.jwtAuthWithSecurity(&self.user_svc.sec.module));
             g = try g.use(mw.tokenVersionGuard(self.user_svc.sec, self.user_svc.store));
             try g.get("/tasks/stats", stats, @ptrCast(@alignCast(self)));
             try g.get("/tasks", list, @ptrCast(@alignCast(self)));
@@ -103,7 +103,7 @@ pub fn TaskApi(comptime Service: type, comptime UserService: type) type {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
             _ = (try requireAdmin(ctx, self)) orelse return;
 
-            const params = zigmodu.http.PageParams.parse(ctx, .{ .max_page_size = 100 });
+            const params = zmodu.http.PageParams.parse(ctx, .{ .max_page_size = 100 });
             const status = ctx.queryParam("status");
 
             var result = self.svc.list(params.page, params.page_size, status) catch |err| {
@@ -113,8 +113,8 @@ pub fn TaskApi(comptime Service: type, comptime UserService: type) type {
             };
             defer result.free(self.svc.store.allocator);
 
-            const dtos = try zigmodu.http.Extract.toDtoList(ctx.allocator, result.items, TaskDto, toDto);
-            try zigmodu.http.sendPaged(ctx, dtos, @intCast(result.total), params, .ruoyi);
+            const dtos = try zmodu.http.Extract.toDtoList(ctx.allocator, result.items, TaskDto, toDto);
+            try zmodu.http.sendPaged(ctx, dtos, @intCast(result.total), params, .ruoyi);
         }
 
         fn get(ctx: *http.Context) !void {
@@ -152,7 +152,7 @@ pub fn TaskApi(comptime Service: type, comptime UserService: type) type {
             };
             var d1: [96]u8 = undefined;
             const det1 = try std.fmt.bufPrint(&d1, "重试任务 #{d}", .{id});
-            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "task.retry", "task", id, det1, zigmodu.http.RequestUtil.getRealIp(ctx), true, 0);
+            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "task.retry", "task", id, det1, zmodu.http.RequestUtil.getRealIp(ctx), true, 0);
             try ctx.jsonStruct(200, .{ .code = 0, .msg = "任务已重新排队", .data = null });
         }
 
@@ -170,7 +170,7 @@ pub fn TaskApi(comptime Service: type, comptime UserService: type) type {
             };
             var d2: [96]u8 = undefined;
             const det2 = try std.fmt.bufPrint(&d2, "取消任务 #{d}", .{id});
-            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "task.cancel", "task", id, det2, zigmodu.http.RequestUtil.getRealIp(ctx), true, 0);
+            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "task.cancel", "task", id, det2, zmodu.http.RequestUtil.getRealIp(ctx), true, 0);
             try ctx.jsonStruct(200, .{ .code = 0, .msg = "任务已取消", .data = null });
         }
 
@@ -183,7 +183,7 @@ pub fn TaskApi(comptime Service: type, comptime UserService: type) type {
                 return;
             };
             const det3 = "清理已完成任务";
-            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "task.purge", "task", 0, det3, zigmodu.http.RequestUtil.getRealIp(ctx), true, 0);
+            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "task.purge", "task", 0, det3, zmodu.http.RequestUtil.getRealIp(ctx), true, 0);
             try ctx.jsonStruct(200, .{ .code = 0, .msg = "已完成任务已清理", .data = null });
         }
 
@@ -201,7 +201,7 @@ pub fn TaskApi(comptime Service: type, comptime UserService: type) type {
             };
             var d4: [96]u8 = undefined;
             const det4 = try std.fmt.bufPrint(&d4, "删除任务 #{d}", .{id});
-            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "task.delete", "task", id, det4, zigmodu.http.RequestUtil.getRealIp(ctx), true, 0);
+            self.audit.log(admin_id, ctx.getAttr("audit_actor") orelse "", "task.delete", "task", id, det4, zmodu.http.RequestUtil.getRealIp(ctx), true, 0);
             try ctx.jsonStruct(200, .{ .code = 0, .msg = "ok", .data = null });
         }
     };

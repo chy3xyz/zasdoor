@@ -1,8 +1,8 @@
 //! AI HTTP API — provider admin, chat sessions, approvals, runs, metrics.
 
 const std = @import("std");
-const zigmodu = @import("zigmodu");
-const http = zigmodu.http;
+const zmodu = @import("zmodu");
+const http = zmodu.http;
 const mw = @import("../../middleware/auth.zig");
 const url_guard = @import("../../http/url_guard.zig");
 const service = @import("service.zig");
@@ -151,9 +151,9 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
             return .{ .svc = svc, .user_svc = users };
         }
 
-        pub fn registerRoutes(self: *Self, group: *http.RouteGroup) !void {
+        pub fn registerRoutes(self: *Self, group: anytype) !void {
             // 认证用户可用 AI 助手。
-            var g = try group.use(zigmodu.http.http_middleware.jwtAuthWithSecurity(&self.user_svc.sec.module));
+            var g = try group.use(zmodu.http.http_middleware.jwtAuthWithSecurity(&self.user_svc.sec.module));
             g = try g.use(mw.tokenVersionGuard(self.user_svc.sec, self.user_svc.store));
             try g.get("/ai/sessions", listSessions, @ptrCast(@alignCast(self)));
             try g.post("/ai/sessions", createSession, @ptrCast(@alignCast(self)));
@@ -162,7 +162,7 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
             try g.delete("/ai/sessions/{id}", deleteSession, @ptrCast(@alignCast(self)));
 
             // 管理端点。
-            var a = try group.use(zigmodu.http.http_middleware.jwtAuthWithSecurity(&self.user_svc.sec.module));
+            var a = try group.use(zmodu.http.http_middleware.jwtAuthWithSecurity(&self.user_svc.sec.module));
             a = try a.use(mw.tokenVersionGuard(self.user_svc.sec, self.user_svc.store));
             try a.get("/ai/providers", listProviders, @ptrCast(@alignCast(self)));
             try a.post("/ai/providers", createProvider, @ptrCast(@alignCast(self)));
@@ -209,15 +209,15 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
         fn listProviders(ctx: *http.Context) !void {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
             _ = (try requireAdmin(ctx, self)) orelse return;
-            const params = zigmodu.http.PageParams.parse(ctx, .{ .max_page_size = 100 });
+            const params = zmodu.http.PageParams.parse(ctx, .{ .max_page_size = 100 });
             var result = self.svc.store.listProviders(params.page, params.page_size) catch |err| {
                 std.log.err("internal error: {s}", .{@errorName(err)});
                 try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
             defer result.free(self.svc.store.allocator);
-            const dtos = try zigmodu.http.Extract.toDtoList(ctx.allocator, result.items, ProviderDto, toProviderDto);
-            try zigmodu.http.sendPaged(ctx, dtos, @intCast(result.total), params, .ruoyi);
+            const dtos = try zmodu.http.Extract.toDtoList(ctx.allocator, result.items, ProviderDto, toProviderDto);
+            try zmodu.http.sendPaged(ctx, dtos, @intCast(result.total), params, .ruoyi);
         }
 
         fn createProvider(ctx: *http.Context) !void {
@@ -251,7 +251,7 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
                 },
             };
             defer ctx.allocator.free(encrypted);
-            const now = zigmodu.time.wallClockSeconds(self.svc.io);
+            const now = zmodu.time.wallClockSeconds(self.svc.io);
             const id = self.svc.store.createProvider(req.name, req.endpoint, encrypted, req.models, req.fallback_providers, req.enabled, now) catch |err| {
                 std.log.err("internal error: {s}", .{@errorName(err)});
                 try ctx.sendErrorResponse(500, 500, "服务器内部错误");
@@ -316,7 +316,7 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
                 }
             }
 
-            const now = zigmodu.time.wallClockSeconds(self.svc.io);
+            const now = zmodu.time.wallClockSeconds(self.svc.io);
             self.svc.store.updateProvider(
                 id,
                 req.name orelse cur.name,
@@ -357,15 +357,15 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
                 try ctx.sendErrorResponse(401, 401, "未登录或登录已过期");
                 return;
             };
-            const params = zigmodu.http.PageParams.parse(ctx, .{ .max_page_size = 100 });
+            const params = zmodu.http.PageParams.parse(ctx, .{ .max_page_size = 100 });
             var result = self.svc.store.listSessions(uid, params.page, params.page_size) catch |err| {
                 std.log.err("internal error: {s}", .{@errorName(err)});
                 try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
             defer result.free(self.svc.store.allocator);
-            const dtos = try zigmodu.http.Extract.toDtoList(ctx.allocator, result.items, SessionDto, toSessionDto);
-            try zigmodu.http.sendPaged(ctx, dtos, @intCast(result.total), params, .ruoyi);
+            const dtos = try zmodu.http.Extract.toDtoList(ctx.allocator, result.items, SessionDto, toSessionDto);
+            try zmodu.http.sendPaged(ctx, dtos, @intCast(result.total), params, .ruoyi);
         }
 
         fn createSession(ctx: *http.Context) !void {
@@ -380,7 +380,7 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
             };
             defer if (req.title.len > 0) ctx.allocator.free(req.title);
             const tenant_id = mw.authTenantId(ctx) orelse 1;
-            const now = zigmodu.time.wallClockSeconds(self.svc.io);
+            const now = zmodu.time.wallClockSeconds(self.svc.io);
             const id = try self.svc.store.createSession(uid, tenant_id, req.title, now);
             try ctx.jsonStruct(201, .{ .code = 0, .msg = "ok", .data = .{ .id = id } });
         }
@@ -406,7 +406,7 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
                 return;
             };
             defer result.free(self.svc.store.allocator);
-            const dtos = try zigmodu.http.Extract.toDtoList(ctx.allocator, result.items, MessageDto, toMessageDto);
+            const dtos = try zmodu.http.Extract.toDtoList(ctx.allocator, result.items, MessageDto, toMessageDto);
             try ctx.jsonStruct(200, .{ .code = 0, .msg = "", .data = .{ .list = dtos, .total = result.total } });
         }
 
@@ -437,7 +437,7 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
                 return;
             }
 
-            const now = zigmodu.time.wallClockSeconds(self.svc.io);
+            const now = zmodu.time.wallClockSeconds(self.svc.io);
             _ = self.svc.store.addMessage(sid, "user", content, "", now) catch |err| {
                 std.log.err("[ai] persist user message failed: {s}", .{@errorName(err)});
             };
@@ -445,13 +445,13 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
             // SSE 流式模式:Accept: text/event-stream → 旁路推送 reasoning/delta,结束发 done。
             const stream_req = std.mem.eql(u8, ctx.header("Accept") orelse "", "text/event-stream");
             var outcome = if (stream_req) blk: {
-                var sse = try zigmodu.http.SseWriter.init(ctx);
+                var sse = try zmodu.http.SseWriter.init(ctx);
                 const StreamState = struct {
-                    sse: *zigmodu.http.SseWriter,
+                    sse: *zmodu.http.SseWriter,
                 };
                 var st = StreamState{ .sse = &sse };
                 const on_delta = struct {
-                    fn cb(c: ?*anyopaque, d: zigmodu.ai.AiProvider.StreamDelta) anyerror!void {
+                    fn cb(c: ?*anyopaque, d: zmodu.ai.AiProvider.StreamDelta) anyerror!void {
                         const s: *StreamState = @ptrCast(@alignCast(c.?));
                         if (d.reasoning_delta) |rd| try s.sse.sendEvent("reasoning", rd);
                         if (d.content_delta) |cd| try s.sse.sendEvent("delta", cd);
@@ -486,7 +486,7 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
             defer outcome.free(self.svc.allocator);
 
             if (stream_req) {
-                var sse2 = try zigmodu.http.SseWriter.init(ctx);
+                var sse2 = try zmodu.http.SseWriter.init(ctx);
                 const done_json = try std.json.Stringify.valueAlloc(ctx.allocator, .{
                     .answer = outcome.answer,
                     .reasoning_content = outcome.reasoning,
@@ -570,7 +570,7 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
         fn listApprovals(ctx: *http.Context) !void {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
             _ = (try requireAdmin(ctx, self)) orelse return;
-            const params = zigmodu.http.PageParams.parse(ctx, .{ .max_page_size = 100 });
+            const params = zmodu.http.PageParams.parse(ctx, .{ .max_page_size = 100 });
             const status = ctx.queryParam("status");
             var result = self.svc.store.listApprovals(status, params.page, params.page_size) catch |err| {
                 std.log.err("internal error: {s}", .{@errorName(err)});
@@ -578,8 +578,8 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
                 return;
             };
             defer result.free(self.svc.store.allocator);
-            const dtos = try zigmodu.http.Extract.toDtoList(ctx.allocator, result.items, ApprovalDto, toApprovalDto);
-            try zigmodu.http.sendPaged(ctx, dtos, @intCast(result.total), params, .ruoyi);
+            const dtos = try zmodu.http.Extract.toDtoList(ctx.allocator, result.items, ApprovalDto, toApprovalDto);
+            try zmodu.http.sendPaged(ctx, dtos, @intCast(result.total), params, .ruoyi);
         }
 
         fn resolveApproval(ctx: *http.Context, approve: bool) !void {
@@ -612,7 +612,7 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
         fn listRuns(ctx: *http.Context) !void {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
             _ = (try requireAdmin(ctx, self)) orelse return;
-            const params = zigmodu.http.PageParams.parse(ctx, .{ .max_page_size = 100 });
+            const params = zmodu.http.PageParams.parse(ctx, .{ .max_page_size = 100 });
             const uid = ctx.queryInt(i64, "user_id", 0);
             var result = self.svc.store.listRuns(if (uid > 0) uid else null, params.page, params.page_size) catch |err| {
                 std.log.err("internal error: {s}", .{@errorName(err)});
@@ -620,8 +620,8 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
                 return;
             };
             defer result.free(self.svc.store.allocator);
-            const dtos = try zigmodu.http.Extract.toDtoList(ctx.allocator, result.items, RunDto, toRunDto);
-            try zigmodu.http.sendPaged(ctx, dtos, @intCast(result.total), params, .ruoyi);
+            const dtos = try zmodu.http.Extract.toDtoList(ctx.allocator, result.items, RunDto, toRunDto);
+            try zmodu.http.sendPaged(ctx, dtos, @intCast(result.total), params, .ruoyi);
         }
 
         fn runWorkflow(ctx: *http.Context) !void {
@@ -659,7 +659,7 @@ pub fn AiApi(comptime AiSvcT: type, comptime UserService: type) type {
             _ = (try requireAdmin(ctx, self)) orelse return;
             // 用逐字段 atomic load 组装的快照渲染,避免与并发 chat 写回 agent_metrics 竞争。
             var snapshot = self.svc.currentAgentMetrics();
-            var ai_metrics = zigmodu.ai.observability.AiMetrics{ .agent = &snapshot };
+            var ai_metrics = zmodu.ai.observability.AiMetrics{ .agent = &snapshot };
             const body = try ai_metrics.toPrometheusFormat(ctx.allocator);
             defer ctx.allocator.free(body);
             try ctx.text(200, body);

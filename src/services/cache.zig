@@ -1,4 +1,4 @@
-//! Cache service — thin wrapper over zigmodu's LRU CacheManager.
+//! Cache service — thin wrapper over zmodu's LRU CacheManager.
 //!
 //! Values are arbitrary bytes (JSON strings work well). Keys are namespaced by
 //! the caller, e.g. `user:42`, `kv:<key>`.
@@ -9,18 +9,18 @@
 //! slow loader cannot stall other requests.
 
 const std = @import("std");
-const zigmodu = @import("zigmodu");
+const zmodu = @import("zmodu");
 
 pub const CacheService = struct {
     allocator: std.mem.Allocator,
-    manager: zigmodu.data.CacheManager,
+    manager: zmodu.data.CacheManager,
     mutex: std.Io.Mutex,
     io: std.Io,
 
     pub fn init(allocator: std.mem.Allocator, io: std.Io, max_entries: usize, ttl_seconds: u64) CacheService {
         return .{
             .allocator = allocator,
-            .manager = zigmodu.data.CacheManager.init(allocator, max_entries, ttl_seconds, .LRU),
+            .manager = zmodu.data.CacheManager.init(allocator, max_entries, ttl_seconds, .LRU),
             .mutex = std.Io.Mutex.init,
             .io = io,
         };

@@ -1,10 +1,10 @@
 //! Lightweight interval scheduler for background housekeeping.
 //!
-//! zigmodu ships a full cron `Scheduler`, but zent's SQLite driver is a
+//! zmodu ships a full cron `Scheduler`, but zent's SQLite driver is a
 //! single connection, so all background DB work must stay on ONE thread —
 //! the task dispatcher's loop. `ScheduledRunner` is embedded in that loop
 //! and runs jobs at fixed intervals (cron semantics for our single-writer
-//! constraint). For CPU-only jobs, prefer `zigmodu.cron.Scheduler`.
+//! constraint). For CPU-only jobs, prefer `zmodu.cron.Scheduler`.
 
 const std = @import("std");
 

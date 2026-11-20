@@ -1,15 +1,15 @@
 //! AI service — provider management (encrypted keys), platform skills,
 //! agentic chat, human approvals and run/quota tracking.
 //!
-//! Reuses zigmodu.ai's in-memory facilities (KeyManager-style provider,
+//! Reuses zmodu.ai's in-memory facilities (KeyManager-style provider,
 //! SkillRegistry, Agent, Budget, metrics); persistence (providers, sessions,
 //! messages, approvals, runs) lives in zent tables.
 
 const std = @import("std");
-const zigmodu = @import("zigmodu");
+const zmodu = @import("zmodu");
 const persist = @import("persistence.zig");
 
-const ai = zigmodu.ai;
+const ai = zmodu.ai;
 const url_guard = @import("../../http/url_guard.zig");
 const user_persist = @import("../user/persistence.zig");
 const task_persist = @import("../task/persistence.zig");
@@ -93,12 +93,12 @@ pub const AiService = struct {
     io: std.Io,
     store: *persist.AiStore,
     cfg: AiConfig,
-    http: zigmodu.http.HttpClient,
+    http: zmodu.http.HttpClient,
     registry: ai.SkillRegistry,
     agent_metrics: ai.AgentMetrics,
-    bulkhead: zigmodu.Bulkhead,
+    bulkhead: zmodu.Bulkhead,
     /// AI provider 熔断:连续失败达到阈值后快速失败,避免拖垮上游。
-    breaker: zigmodu.CircuitBreaker,
+    breaker: zmodu.CircuitBreaker,
     refs: SkillsRefs,
 
     /// 读取当前累计值组装 AgentMetrics 快照(逐字段 atomic load,无锁;供
@@ -143,11 +143,11 @@ pub const AiService = struct {
             .io = io,
             .store = store,
             .cfg = cfg,
-            .http = zigmodu.http.HttpClient.init(allocator, io, 4, 30_000),
+            .http = zmodu.http.HttpClient.init(allocator, io, 4, 30_000),
             .registry = ai.SkillRegistry.init(allocator, io),
             .agent_metrics = .{},
-            .bulkhead = try zigmodu.Bulkhead.init(allocator, "ai-chat", 4, 16),
-            .breaker = try zigmodu.CircuitBreaker.init(allocator, "ai-provider", .{
+            .bulkhead = try zmodu.Bulkhead.init(allocator, "ai-chat", 4, 16),
+            .breaker = try zmodu.CircuitBreaker.init(allocator, "ai-provider", .{
                 .failure_threshold = 5,
                 .success_threshold = 2,
                 .timeout_seconds = 60,
@@ -444,7 +444,7 @@ pub const AiService = struct {
         errdefer ctx.allocator.free(args_json);
         const session_id = ctx.run_id orelse "0";
         const sid = std.fmt.parseInt(i64, session_id, 10) catch 0;
-        const now_sec = @divTrunc(zigmodu.time.monotonicNowMilliseconds(), 1000);
+        const now_sec = @divTrunc(zmodu.time.monotonicNowMilliseconds(), 1000);
         const approval_id = try refs.ai_store.createApproval(sid, ctx.user_id orelse 0, "zasdoor.notify.send", args_json, now_sec);
 
         var obj = std.json.ObjectMap{};
@@ -470,7 +470,7 @@ pub const AiService = struct {
         on_delta: ?*const fn (?*anyopaque, ai.AiProvider.StreamDelta) anyerror!void,
         delta_ctx: ?*anyopaque,
     ) !ChatOutcome {
-        const now = zigmodu.time.wallClockSeconds(self.io);
+        const now = zmodu.time.wallClockSeconds(self.io);
         const used = try self.store.runCountForUser(user_id, now - 24 * 3600);
         if (used >= self.cfg.daily_run_limit) return error.QuotaExceeded;
 
@@ -516,7 +516,7 @@ pub const AiService = struct {
         };
         defer allocator.free(skill_ctx.run_id.?);
 
-        // zigmodu v0.15.17:AgentMetrics.toStats() 运行前累计快照——与运行后快照
+        // zmodu v0.15.17:AgentMetrics.toStats() 运行前累计快照——与运行后快照
         // 相减得到本次 run 的用量增量(避免逐字段 .load(.monotonic) 与 {d} 传 atomic 的编译错误)。
         // run 起点与 before 用同一次快照,消除并发写回下的不一致窗口。
         const start_metrics = self.currentAgentMetrics();
@@ -649,7 +649,7 @@ pub const AiService = struct {
     // ── Quota / approvals ──────────────────────────────────────────────────
 
     pub fn runCountToday(self: *AiService, user_id: i64) !i64 {
-        const now = zigmodu.time.wallClockSeconds(self.io);
+        const now = zmodu.time.wallClockSeconds(self.io);
         return self.store.runCountForUser(user_id, now - 24 * 3600);
     }
 
@@ -661,13 +661,13 @@ pub const AiService = struct {
         defer row.free(allocator);
         if (!std.mem.eql(u8, row.status, "pending")) return false;
 
-        const now = zigmodu.time.wallClockSeconds(self.io);
+        const now = zmodu.time.wallClockSeconds(self.io);
         const new_status: []const u8 = if (do_approve) "approved" else "rejected";
         const affected = try self.store.resolveApproval(id, new_status, approved_by, now);
         if (affected == 0) return false; // 并发下已被他人处理
 
         // 审批处置写入平台审计日志(合规)。
-        const now_s = zigmodu.time.wallClockSeconds(self.io);
+        const now_s = zmodu.time.wallClockSeconds(self.io);
         var detail_buf: [160]u8 = undefined;
         const detail = try std.fmt.bufPrint(&detail_buf, "AI 审批 {s}: {s} #{d}", .{ if (do_approve) "批准" else "拒绝", row.skill_name, id });
         _ = self.refs.audit_store.create(approved_by, "", "ai.approval", "ai_approval", id, detail, "", true, 0, now_s) catch {};
@@ -691,7 +691,7 @@ pub const AiService = struct {
 };
 
 /// ChaCha20-based CSPRNG bytes (std.crypto.random is gone in Zig 0.17;
-/// seeded from timestamps + addresses like zigmodu's SecurityModule).
+/// seeded from timestamps + addresses like zmodu's SecurityModule).
 fn fillRandom(io: std.Io, buf: []u8) void {
     var seed: [32]u8 = undefined;
     @memset(&seed, 0);
@@ -704,7 +704,7 @@ fn fillRandom(io: std.Io, buf: []u8) void {
         } else |_| {}
     } else |_| {}
 
-    const t = zigmodu.time.monotonicNowMilliseconds();
+    const t = zmodu.time.monotonicNowMilliseconds();
     std.mem.writeInt(u64, seed[0..8], @as(u64, @intCast(t)), .little);
     std.mem.writeInt(u64, seed[8..16], @intFromPtr(buf.ptr), .little);
     std.mem.writeInt(u64, seed[16..24], @intCast(t *% 31 +% 17), .little);

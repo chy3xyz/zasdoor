@@ -5,7 +5,7 @@
 //! registered handler and finalizes them (done / failed / scheduled retry).
 
 const std = @import("std");
-const zigmodu = @import("zigmodu");
+const zmodu = @import("zmodu");
 const persist = @import("persistence.zig");
 const scheduled = @import("../../scheduled.zig");
 
@@ -61,7 +61,7 @@ pub const TaskService = struct {
     }
 
     fn nowSeconds(self: *TaskService) i64 {
-        return zigmodu.time.wallClockSeconds(self.io);
+        return zmodu.time.wallClockSeconds(self.io);
     }
 };
 
@@ -144,7 +144,7 @@ pub const Dispatcher = struct {
     /// One scheduling pass: requeue stale claims, then run every due task
     /// (sequentially; SQLite favours a single writer).
     pub fn tick(self: *Dispatcher) void {
-        const now = @import("zigmodu").time.wallClockSeconds(self.io);
+        const now = @import("zmodu").time.wallClockSeconds(self.io);
         _ = self.store.requeueStale(now, self.stale_after_seconds) catch |err| {
             std.log.err("[task] requeueStale failed: {s}", .{@errorName(err)});
         };
@@ -204,6 +204,6 @@ pub const Dispatcher = struct {
     }
 
     fn wallNow(self: *Dispatcher) i64 {
-        return @import("zigmodu").time.wallClockSeconds(self.io);
+        return @import("zmodu").time.wallClockSeconds(self.io);
     }
 };

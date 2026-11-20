@@ -1,8 +1,8 @@
 //! Admin diagnostics API — real runtime state, no hardcoded counters.
 
 const std = @import("std");
-const zigmodu = @import("zigmodu");
-const http = zigmodu.http;
+const zmodu = @import("zmodu");
+const http = zmodu.http;
 const mw = @import("../../middleware/auth.zig");
 const user_svc = @import("../user/service.zig");
 const user_persist = @import("../user/persistence.zig");
@@ -60,8 +60,8 @@ pub fn SystemApi(comptime CacheT: type, comptime TaskSvcT: type) type {
             };
         }
 
-        pub fn registerRoutes(self: *Self, group: *http.RouteGroup) !void {
-            var g = try group.use(zigmodu.http.http_middleware.jwtAuthWithSecurity(&self.users_svc.sec.module));
+        pub fn registerRoutes(self: *Self, group: anytype) !void {
+            var g = try group.use(zmodu.http.http_middleware.jwtAuthWithSecurity(&self.users_svc.sec.module));
             g = try g.use(mw.tokenVersionGuard(self.users_svc.sec, self.users_svc.store));
             try g.get("/system/info", info, @ptrCast(@alignCast(self)));
             try g.get("/system/dashboard", dashboard, @ptrCast(@alignCast(self)));
@@ -93,7 +93,7 @@ pub fn SystemApi(comptime CacheT: type, comptime TaskSvcT: type) type {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
             _ = (try requireAdmin(ctx, self)) orelse return;
 
-            const now = zigmodu.time.wallClockSeconds(self.io);
+            const now = zmodu.time.wallClockSeconds(self.io);
             const task_counts = self.tasks.counts() catch task_persist.StatusCounts{};
             try ctx.jsonStruct(200, .{
                 .code = 0,
@@ -115,7 +115,7 @@ pub fn SystemApi(comptime CacheT: type, comptime TaskSvcT: type) type {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
             _ = (try requireAdmin(ctx, self)) orelse return;
 
-            const now = zigmodu.time.wallClockSeconds(self.io);
+            const now = zmodu.time.wallClockSeconds(self.io);
             const day: i64 = 24 * 3600;
 
             // Last 7 days of registrations, oldest day first.

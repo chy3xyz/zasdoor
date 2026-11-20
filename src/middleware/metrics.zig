@@ -1,9 +1,9 @@
 //! Prometheus HTTP metrics — request counter, status buckets, latency and
-//! uptime, collected by zigmodu's HttpMetricsCollector middleware.
+//! uptime, collected by zmodu's HttpMetricsCollector middleware.
 
 const std = @import("std");
-const zigmodu = @import("zigmodu");
-const http = zigmodu.http;
+const zmodu = @import("zmodu");
+const http = zmodu.http;
 
 pub const Metrics = struct {
     collector: http.HttpMetricsCollector,
@@ -12,7 +12,7 @@ pub const Metrics = struct {
     pub fn init(io: std.Io) Metrics {
         return .{
             .collector = .init(),
-            .started_at = zigmodu.time.wallClockSeconds(io),
+            .started_at = zmodu.time.wallClockSeconds(io),
         };
     }
 

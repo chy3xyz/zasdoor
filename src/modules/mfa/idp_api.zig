@@ -1,8 +1,8 @@
 //! IdP (social login) HTTP API - manage providers and build login links.
 
 const std = @import("std");
-const zigmodu = @import("zigmodu");
-const http = zigmodu.http;
+const zmodu = @import("zmodu");
+const http = zmodu.http;
 const mw = @import("../../middleware/auth.zig");
 const user_svc = @import("../user/service.zig");
 
@@ -40,7 +40,7 @@ pub fn IdpApi(comptime Service: type, comptime UserService: type) type {
             return true;
         }
 
-        pub fn registerRoutes(self: *Self, group: *http.RouteGroup) !void {
+        pub fn registerRoutes(self: *Self, group: anytype) !void {
             // Public social-login entry point + provider callback. The
             // callback is guarded by the persisted single-use state, not a
             // JWT: the browser arrives from the provider without one. All
@@ -48,7 +48,7 @@ pub fn IdpApi(comptime Service: type, comptime UserService: type) type {
             try group.post("/mfa/idps/{id}/start", start, @ptrCast(@alignCast(self)));
             try group.get("/mfa/idps/{id}/callback", callback, @ptrCast(@alignCast(self)));
 
-            var g = try group.use(zigmodu.http.http_middleware.jwtAuthWithSecurity(&self.users.sec.module));
+            var g = try group.use(zmodu.http.http_middleware.jwtAuthWithSecurity(&self.users.sec.module));
             g = try g.use(mw.tokenVersionGuard(self.users.sec, self.users.store));
             try g.get("/mfa/idps", list, @ptrCast(@alignCast(self)));
             try g.post("/mfa/idps", create, @ptrCast(@alignCast(self)));
@@ -138,7 +138,7 @@ pub fn IdpApi(comptime Service: type, comptime UserService: type) type {
             }
             defer if (redir_owned) |r| ctx.allocator.free(r);
 
-            const now = zigmodu.time.wallClockSeconds(self.users.io);
+            const now = zmodu.time.wallClockSeconds(self.users.io);
             const out = self.svc.startLogin(self.users.io, self.default_tenant_id, provider_id, redirect_to, now, 600) catch |err| switch (err) {
                 error.NotFound => {
                     try ctx.sendErrorResponse(404, 404, "IdP 不存在");
@@ -172,7 +172,7 @@ pub fn IdpApi(comptime Service: type, comptime UserService: type) type {
                 try ctx.sendErrorResponse(400, 400, "缺少 state");
                 return;
             };
-            const now = zigmodu.time.wallClockSeconds(self.users.io);
+            const now = zmodu.time.wallClockSeconds(self.users.io);
             const user_id = self.svc.completeCallback(self.users.io, provider_id, code, state, now) catch |err| {
                 switch (err) {
                     error.UnknownState => try ctx.sendErrorResponse(400, 400, "state 无效"),

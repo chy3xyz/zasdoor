@@ -1,7 +1,7 @@
 # Zasdoor 二次开发最佳实践
 
 本文面向在 zasdoor 全栈管理框架上扩展业务模块的开发者。它记录本仓库
-沉淀下来的架构约定、zent/zigmodu 用法、安全与性能规范,以及踩过的坑。
+沉淀下来的架构约定、zent/zmodu 用法、安全与性能规范,以及踩过的坑。
 
 配套阅读:`docs/streaming.md`(AI 流式契约)、`docs/backup.md`(备份剧本)、
 zent 仓库 `docs/BEST_PRACTICES.md`(ORM 层通用规范)。
@@ -14,7 +14,7 @@ zent 仓库 `docs/BEST_PRACTICES.md`(ORM 层通用规范)。
 HTTP 请求
   │
   ▼
-api.zig(HTTP 路由/鉴权/参数绑定/DTO)   ← zigmodu.http
+api.zig(HTTP 路由/鉴权/参数绑定/DTO)   ← zmodu.http
   │
   ▼
 service.zig(领域逻辑/校验/编排)          ← 无 HTTP、无 SQL
@@ -45,7 +45,7 @@ src/modules/order/
   persistence.zig  OrderStore + DTO(OrderRow / OrderListResult)+ 本模块 infos
   service.zig      领域服务(校验、编排),无 HTTP/SQL
   api.zig          pub fn OrderApi(comptime Service: type) type + registerRoutes
-  module.zig       zigmodu.api.Module 元数据(生命周期钩子为 no-op)
+  module.zig       zmodu.api.Module 元数据(生命周期钩子为 no-op)
   root.zig         barrel:pub const model/persistence/service/api/module
 ```
 
@@ -124,7 +124,7 @@ main.zig:158-168);不要在模块内直接 `@import` 其他模块的 store 单�
 
 ### 2.5 注册模块元数据
 
-`module.zig` 导出 `zigmodu.api.Module` 元数据并在 `main.zig` 传入
+`module.zig` 导出 `zmodu.api.Module` 元数据并在 `main.zig` 传入
 `Application.init`;HTTP 路由不进模块生命周期,由 main.zig 手工挂载
 (这是本项目的既定模式)。
 
@@ -243,7 +243,7 @@ try tx.commit();
 - **JSON 入参**:写接口统一用 `ctx.bindJsonLoose`(snake_case/camelCase 与
   `null` 容错,缺省字段回落声明默认值);必填校验仍在 service 层,不能只
   依赖绑定。
-- **文件上传**:一律走 zigmodu `UploadGuard.check`——**按字节嗅探**而非
+- **文件上传**:一律走 zmodu `UploadGuard.check`——**按字节嗅探**而非
   只看扩展名(HTML/SVG 改名 `.txt` 也拒),扩展名白名单与大小上限同一次
   调用完成;失败映射 4xx(见 `file/service.zig`);入库名先过
   `sanitizeFilename`,存储键扩展名只允许字母数字。
@@ -269,7 +269,7 @@ try tx.commit();
    `findByIds` 再内存分组。
 4. **分页**:`audit_log`/`ai_run`/`notification` 这类增长表,深分页换
    `cursorPage`。
-5. **编译期**:zig 本地 path 依赖缓存以 fingerprint 为键,升级 zigmodu/
+5. **编译期**:zig 本地 path 依赖缓存以 fingerprint 为键,升级 zmodu/
    zent 后如遇「改了没生效」,用 `zig build --summary all` 确认是否
    重编译,必要时 `ZIG_GLOBAL_CACHE_DIR=/tmp/x` 强制全量。
 
@@ -290,7 +290,7 @@ try tx.commit();
   }
   ```
 
-- HTTP 层用 `zigmodu.http.Testkit.dispatch` 不开 socket,同套
+- HTTP 层用 `zmodu.http.Testkit.dispatch` 不开 socket,同套
   store/svc 装配后 `registerRoutes` 再 dispatch,断言状态码与响应体。
 - 约定:
   - 新增持久化方法务必配往返断言(写入 → 读回 → 释放);
@@ -326,7 +326,7 @@ try tx.commit();
 - 三个构建产物:服务 `zig build run`、管理 CLI `zig build admin`
   (`create-admin --email ...`)、测试 `zig build test`。
 - CI(.github/workflows/ci.yml)在 push main 时按
-  `zig_ws/{zigmodu,zent}` 兄弟布局重建依赖后跑 fmt + build + test,
+  `zig_ws/{zmodu,zent}` 兄弟布局重建依赖后跑 fmt + build + test,
   以及前端 typecheck + build;发版前保证 CI 绿。
 - 发版流程:更新 `CHANGELOG.md` → bump `build.zig.zon` version →
   `chore(release): vX.Y.Z` 提交 → `git tag vX.Y.Z` → push → 

@@ -146,7 +146,7 @@ about defaults.
   `server.group("/api/v1")` (`main.zig:428`). Path params use
   `ctx.paramInt(i64, "id")` (`idp_api.zig:100`). Redirects are
   `ctx.setHeader("Location", url)` + `ctx.text(302, "")` (`oauth/api.zig:239`).
-- **HTTP helpers**: `ctx.formValue` (`zigmodu Server.zig:592`),
+- **HTTP helpers**: `ctx.formValue` (`zmodu Server.zig:592`),
   `ctx.formValues` (`:1160`, needed to reject duplicate fields),
   `ctx.bindForm` (`:1204`), body cap `Server.Config.max_body_size`
   (`:2496`, set to `upload_max_bytes + 64 KiB` in `main.zig:407`).
@@ -155,7 +155,7 @@ about defaults.
   (`config.zig:25`).
 - **Tests**: module test files wired via `_ = @import("modules/<mod>/tests.zig")`
   (`src/tests.zig:2142`), HTTP dispatch through
-  `zigmodu.http.Testkit.dispatch/dispatchOpts` (`src/tests.zig:416,943`),
+  `zmodu.http.Testkit.dispatch/dispatchOpts` (`src/tests.zig:416,943`),
   in-memory zent store helpers (`mfa/tests.zig:16`).
 
 ### 2.2 Gaps in the current code that SAML must fix
@@ -719,8 +719,8 @@ Findings below are verified against that tree, not assumed.
 | ISO-8601 / SAML DateTime | **none** (`std.time` has no ISO parser) | **custom**, ~60 LOC |
 | JSON config | `std.json` | std |
 | Constant-time compare | `std.crypto.timing_safe.eql` | available; not required for cert pinning (public data), use for any future secret comparisons |
-| HTTP server/redirect/form | zigmodu (not std) — `ctx.formValue(s)`, `setHeader`, `text(302, "")` | reuse |
-| JWT/session | zigmodu `AppSecurity` / `generateTokenWithTenantAndVersion` | reuse |
+| HTTP server/redirect/form | zmodu (not std) — `ctx.formValue(s)`, `setHeader`, `text(302, "")` | reuse |
+| JWT/session | zmodu `AppSecurity` / `generateTokenWithTenantAndVersion` | reuse |
 
 The RSA "custom code" assumption is worth correcting: **verification does not
 need a hand-written big-integer implementation** — Zig 0.17 ships the RSA
@@ -1213,7 +1213,7 @@ Index notes:
 | Parser + c14n golden vectors | `saml/tests.zig` + `testdata/c14n/` | byte-for-byte comparison |
 | DSig + assertion validation (positive/negative) | `saml/tests.zig` + `testdata/` | canned signed XML |
 | Persistence/CAS/replay | in-memory `StoreEnv` (pattern `mfa/tests.zig:16`) | `db_mod.StoreEnv(..., .sqlite, ":memory:")` |
-| HTTP layer (routes, status, headers, redirects) | `saml/tests.zig` | `zigmodu.http.Testkit.dispatchOpts` (`src/tests.zig:943`) |
+| HTTP layer (routes, status, headers, redirects) | `saml/tests.zig` | `zmodu.http.Testkit.dispatchOpts` (`src/tests.zig:943`) |
 | Full flow (login → ACS → exchange) | `saml/tests.zig` | Testkit + canned fixture |
 | fuzz/robustness | `saml/tests.zig` | `std.testing.checkAllAllocationFailures` |
 

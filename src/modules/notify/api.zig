@@ -1,8 +1,8 @@
 //! Notification HTTP API — any authenticated user manages their own inbox.
 
 const std = @import("std");
-const zigmodu = @import("zigmodu");
-const http = zigmodu.http;
+const zmodu = @import("zmodu");
+const http = zmodu.http;
 const mw = @import("../../middleware/auth.zig");
 const user_svc = @import("../user/service.zig");
 const service = @import("service.zig");
@@ -37,8 +37,8 @@ pub fn NotificationApi(comptime Service: type, comptime UserService: type) type 
             return .{ .svc = svc, .user_svc = users };
         }
 
-        pub fn registerRoutes(self: *Self, group: *http.RouteGroup) !void {
-            var g = try group.use(zigmodu.http.http_middleware.jwtAuthWithSecurity(&self.user_svc.sec.module));
+        pub fn registerRoutes(self: *Self, group: anytype) !void {
+            var g = try group.use(zmodu.http.http_middleware.jwtAuthWithSecurity(&self.user_svc.sec.module));
             g = try g.use(mw.tokenVersionGuard(self.user_svc.sec, self.user_svc.store));
             try g.get("/notifications/unread-count", unreadCount, @ptrCast(@alignCast(self)));
             try g.get("/notifications", list, @ptrCast(@alignCast(self)));
@@ -57,7 +57,7 @@ pub fn NotificationApi(comptime Service: type, comptime UserService: type) type 
                 try ctx.sendErrorResponse(401, 401, "未登录或登录已过期");
                 return;
             };
-            const params = zigmodu.http.PageParams.parse(ctx, .{ .max_page_size = 100 });
+            const params = zmodu.http.PageParams.parse(ctx, .{ .max_page_size = 100 });
             const unread = ctx.queryInt(usize, "unread", 0) == 1;
 
             var result = self.svc.list(uid, params.page, params.page_size, unread) catch |err| {
@@ -67,8 +67,8 @@ pub fn NotificationApi(comptime Service: type, comptime UserService: type) type 
             };
             defer result.free(self.svc.allocator);
 
-            const dtos = try zigmodu.http.Extract.toDtoList(ctx.allocator, result.items, NotificationDto, toDto);
-            try zigmodu.http.sendPaged(ctx, dtos, @intCast(result.total), params, .ruoyi);
+            const dtos = try zmodu.http.Extract.toDtoList(ctx.allocator, result.items, NotificationDto, toDto);
+            try zmodu.http.sendPaged(ctx, dtos, @intCast(result.total), params, .ruoyi);
         }
 
         fn unreadCount(ctx: *http.Context) !void {

@@ -11,7 +11,7 @@
 //! ZASDOOR_SQLITE_PATH, ZASDOOR_PG_CONNINFO).
 
 const std = @import("std");
-const zigmodu = @import("zigmodu");
+const zmodu = @import("zmodu");
 const config_mod = @import("config.zig");
 const db_mod = @import("db.zig");
 const schema = @import("schema.zig");
@@ -51,7 +51,7 @@ pub fn main(init: std.process.Init) !void {
     defer store_env.deinit();
 
     var store = user.persistence.UserStore.init(allocator, store_env.client);
-    var sec = zigmodu.security.AppSecurity.init(allocator, io, .{
+    var sec = zmodu.security.AppSecurity.init(allocator, io, .{
         .jwt_secret = cfg.jwt_secret,
         .token_expiry_seconds = cfg.token_expiry_seconds,
     });

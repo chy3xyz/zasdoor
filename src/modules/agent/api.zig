@@ -1,8 +1,8 @@
 //! Agent HTTP API - create/inspect/deactivate agents, issue + verify agent tokens.
 
 const std = @import("std");
-const zigmodu = @import("zigmodu");
-const http = zigmodu.http;
+const zmodu = @import("zmodu");
+const http = zmodu.http;
 const mw = @import("../../middleware/auth.zig");
 const user_svc = @import("../user/service.zig");
 const service = @import("service.zig");
@@ -19,8 +19,8 @@ pub fn AgentApi(comptime Service: type, comptime UserService: type) type {
             return .{ .svc = svc, .users = users, .default_tenant_id = default_tenant_id };
         }
 
-        pub fn registerRoutes(self: *Self, group: *http.RouteGroup) !void {
-            var g = try group.use(zigmodu.http.http_middleware.jwtAuthWithSecurity(&self.users.sec.module));
+        pub fn registerRoutes(self: *Self, group: anytype) !void {
+            var g = try group.use(zmodu.http.http_middleware.jwtAuthWithSecurity(&self.users.sec.module));
             g = try g.use(mw.tokenVersionGuard(self.users.sec, self.users.store));
             try g.get("/agents", list, @ptrCast(@alignCast(self)));
             try g.post("/agents", create, @ptrCast(@alignCast(self)));
@@ -62,15 +62,15 @@ pub fn AgentApi(comptime Service: type, comptime UserService: type) type {
                 try ctx.sendErrorResponse(401, 401, "未登录或登录已过期");
                 return;
             };
-            const params = zigmodu.http.PageParams.parse(ctx, .{ .max_page_size = 100 });
+            const params = zmodu.http.PageParams.parse(ctx, .{ .max_page_size = 100 });
             var result = self.svc.listAgents(params.page, params.page_size, null) catch |err| {
                 std.log.err("internal error: {s}", .{@errorName(err)});
                 try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };
             defer result.free(self.svc.allocator);
-            const dtos = try zigmodu.http.Extract.toDtoList(ctx.allocator, result.items, AgentDto, agentToDto);
-            try zigmodu.http.sendPaged(ctx, dtos, @intCast(result.total), params, .ruoyi);
+            const dtos = try zmodu.http.Extract.toDtoList(ctx.allocator, result.items, AgentDto, agentToDto);
+            try zmodu.http.sendPaged(ctx, dtos, @intCast(result.total), params, .ruoyi);
         }
 
         const CreateAgentReq = struct {

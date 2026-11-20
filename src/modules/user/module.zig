@@ -1,9 +1,9 @@
 //! ZigModu module `user` (zent-backed) — lifecycle hooks are no-ops
 //! because the zent driver is owned by `main.zig` and shared through the
 //! `UserStore` / `UserService` pointers.
-const zigmodu = @import("zigmodu");
+const zmodu = @import("zmodu");
 
-pub const info = zigmodu.api.Module{
+pub const info = zmodu.api.Module{
     .name = "user",
     .description = "user domain (users + password reset tokens)",
     .dependencies = &.{},

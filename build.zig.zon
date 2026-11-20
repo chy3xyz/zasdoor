@@ -4,14 +4,14 @@
     .fingerprint = 0x30f9dca48906a2c,
     .minimum_zig_version = "0.17.0",
     .dependencies = .{
-        // Upstream: w4_proj/zig_ws/{zent,zigmodu} · zasdoor/zasdoor under w4_proj/dev_machine
+        // Upstream: w4_proj/zig_ws/{zent,zmodu} · zasdoor/zasdoor under w4_proj/dev_machine
         .zent = .{
-            .url = "https://github.com/chy3xyz/zent/archive/refs/tags/v0.91.0.tar.gz",
-            .hash = "zent-0.91.0-oiur-0mvKQAAo-IlAXWN4F2-hfwDhayID6T6J49YM36y",
+            .url = "https://github.com/chy3xyz/zent/archive/refs/tags/v0.97.3.tar.gz",
+            .hash = "zent-0.97.3-oiur-xBQMADOdhUHhd9wdui5Yi-4slINY0JfnM2DxedU",
         },
-        .zigmodu = .{
-            .url = "https://github.com/chy3xyz/zigmodu/archive/refs/tags/v0.39.11.tar.gz",
-            .hash = "zigmodu-0.39.11-U40vs_bwtQAmvUQWcwQKOCsWEuDfqfMSr9xGU10hOSQM",
+        .zmodu = .{
+            .url = "https://github.com/chy3xyz/zmodu/archive/refs/tags/v0.43.8.tar.gz",
+            .hash = "zmodu-0.43.8-gBUSK8GItgB7NYIrQsd194Ci08oQcU4E_JpJMkkHpUbP",
         },
     },
     .paths = .{

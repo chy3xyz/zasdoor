@@ -1,7 +1,7 @@
 //! Notification service — flash-style per-user messages.
 
 const std = @import("std");
-const zigmodu = @import("zigmodu");
+const zmodu = @import("zmodu");
 const persist = @import("persistence.zig");
 
 pub const NotificationRow = persist.NotificationRow;
@@ -18,7 +18,7 @@ pub const NotificationService = struct {
 
     /// Create a notification for a user (e.g. task finished, system alert).
     pub fn notify(self: *NotificationService, user_id: i64, title: []const u8, body: []const u8, kind: []const u8) !i64 {
-        return self.store.create(user_id, title, body, kind, zigmodu.time.wallClockSeconds(self.io));
+        return self.store.create(user_id, title, body, kind, zmodu.time.wallClockSeconds(self.io));
     }
 
     pub fn list(self: *NotificationService, user_id: i64, page: usize, page_size: usize, unread_only: bool) !NotificationListResult {

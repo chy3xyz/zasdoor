@@ -1,7 +1,7 @@
 //! ZigModu module `task` — durable background task queue.
-const zigmodu = @import("zigmodu");
+const zmodu = @import("zmodu");
 
-pub const info = zigmodu.api.Module{
+pub const info = zmodu.api.Module{
     .name = "task",
     .description = "durable background task queue (enqueue/claim/retry)",
     .dependencies = &.{},

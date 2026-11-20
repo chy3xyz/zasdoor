@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.5.0] - 2026-10-18
 
+### Changed
+
+- **Upstream dependency upgrade**: zmodu v0.39.11 -> v0.43.8 and zent v0.91.0
+  -> v0.97.3. zmodu renamed ZigModu -> zmodu in v0.41 (dependency key, module
+  name, imports, env prefix and tarball hash prefix), so every `@import("zigmodu")`
+  is now `@import("zmodu")`. v0.40 removed `http.RouteGroup` /
+  `Server.group`: modules take `anytype` route groups and main/tests
+  mount via `Router(void).init(io, allocator, &server, &state).scope(prefix)`.
+  zent v0.97 is an internal layer/DAG refactor with unchanged export paths;
+  its pool no longer holds a mutex across connection handshakes and reports
+  the oldest borrow age for leak diagnosis.
+
 ### Added
 
 - **OAuth 2.0 Device Authorization Grant (RFC 8628)**: `POST
@@ -43,7 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CI/release**: `mlugg/setup-zig` upgraded from v1 to v2 — the v1 action no
   longer runs on GitHub-hosted runners, which had broken every backend CI and
   release build (frontend jobs were unaffected).
-- **Dependencies fetched from git instead of sibling checkouts** — zigmodu
+- **Dependencies fetched from git instead of sibling checkouts** — zmodu
   **v0.39.11** and zent **v0.91.0** are now `.url` + `.hash` entries in
   `build.zig.zon` (tagged tarballs), replacing `.path` entries that pointed at
   `../../../zig_ws/*`. `zig build` clones and unpacks them into `zig-pkg/`, so
@@ -52,19 +64,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dependency layout" steps and their `ZIGMODU_SHA` / `ZENT_SHA` pins, which
   were still naming v0.39.6 / v0.83.0 and are now redundant with the manifest
   hashes; `zig-pkg/` is gitignored and was already in `.dockerignore`.
-- **Adapt to Zig 0.17.0 stable** (deps were then zigmodu
+- **Adapt to Zig 0.17.0 stable** (deps were then zmodu
   **v0.39.6** and zent **v0.83.0**). Breakages addressed:
   - `std.Io.net.Stream.read` destructures its `net_read` result as a tuple,
     but Zig 0.17.0's `Io.Operation.net_read` yields a `Stream.ReadResult`
     struct, so the helper fails to compile when instantiated. The SMTP
     `readLine` path now calls `readWithControl` (same single-byte, unbuffered
     syscall) and reads `data_len`.
-  - zigmodu middleware factories that allocate per-instance state are now
+  - zmodu middleware factories that allocate per-instance state are now
     fallible (`error{OutOfMemory}!Middleware`): `http_middleware.cors`,
     `http_middleware.securityHeaders` and
     `tracing_middleware.rateLimitPerClient`; call sites propagate with `try`.
   - `SecurityModule.verifyPassword` returns `PasswordError!bool`
-    (zigmodu v0.33.4+): login, password-reset, email-verification and
+    (zmodu v0.33.4+): login, password-reset, email-verification and
     change-password now surface an undecodable stored hash (or a decode-time
     allocation failure) as `error.Unexpected` → HTTP 500 instead of
     answering "wrong password". The OAuth client-credentials path logs it and
@@ -73,8 +85,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     new API reports as corrupt; it now stores a real PBKDF2 hash and checks a
     genuinely wrong password.
 - **Sync with upstream `chy3xyz/zenaipa` v0.2.3** (this fork diverged at
-  v0.2.2). Upstream's dependency bumps (zent v0.67 / zigmodu v0.20.1) are
-  already superseded here (zent v0.83 / zigmodu v0.39.6), so only the
+  v0.2.2). Upstream's dependency bumps (zent v0.67 / zmodu v0.20.1) are
+  already superseded here (zent v0.83 / zmodu v0.39.6), so only the
   dependency-independent patterns were ported:
   - `src/schema.zig`: all tables in **one** `buildGraph` (zent raised the
     comptime branch quota in v0.29.4; the split was stale guidance and blocked
@@ -87,7 +99,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `code` (atomic, keeps row id / `created_at`) instead of exists-then-write.
   - `task.requeueStale` re-queues within-budget claims with one
     `UPDATE ... WHERE id IN (...)` (`zent.sql.In`).
-  - File uploads run through zigmodu `UploadGuard.check`: bytes are sniffed so
+  - File uploads run through zmodu `UploadGuard.check`: bytes are sniffed so
     active content (SVG/HTML) renamed to `.txt` is refused; extension + size
     checks share one call. `FileTypeNotAllowed` maps to **400**, not 500.
   - Ported the matching upstream tests (quota empty window, batch requeue +
@@ -221,9 +233,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Adapt to zigmodu v0.15.44 + zent v0.45.0** (path deps via
-  `zig_ws/zigmodu` and `zig_ws/zent`). The sibling checkouts were bumped
-  past the previous baseline (zigmodu v0.15.22 / zent v0.29.7) and the
+- **Adapt to zmodu v0.15.44 + zent v0.45.0** (path deps via
+  `zig_ws/zmodu` and `zig_ws/zent`). The sibling checkouts were bumped
+  past the previous baseline (zmodu v0.15.22 / zent v0.29.7) and the
   project rebuilt from a cleared `.zig-cache` + `.zig-global-cache`.
   `zig build` succeeds, all 79 unit tests pass (`zig build test`),
   (CI/Docker clone these exact pinned commits — see below),
@@ -251,7 +263,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in `StoreEnv`), so the pool parking semantics don't change runtime
   behaviour here. `ConnPool.deinit` caller contract — N/A, no
   ConnPool.
-- **zigmodu surface area**: `jwtAuthWithSecurity` (the middleware
+- **zmodu surface area**: `jwtAuthWithSecurity` (the middleware
   `AppSecurity.jwtMiddleware` returns) still exists and still writes
   `user_id` / `tenant_id` attrs that `middleware/auth.zig` reads — no
   `sendErrorResponse` / `bindJson` / `setAttr` callsite changed.
@@ -260,7 +272,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Extract.toDtoList`, `HttpMetricsCollector`, `Server.initWithConfig`
   all still exported. `withName` / `builder(...)` not used here
   (legacy `Server` + `RouteGroup` setup preserved). The DO/DON'T
-  table in zigmodu AGENTS.md recommends `http.productionProfile()` /
+  table in zmodu AGENTS.md recommends `http.productionProfile()` /
   `PrometheusMetrics` / Auth Path A
   (`jwtAuthFromCatalogWithPermissions` + `permissionGateWith(.rbac)`)
   for new apps; this is a legacy application and the v0.14.x baseline
@@ -268,7 +280,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Dependencies
 
-- zigmodu v0.15.37 (`HttpMetricsCollector` thread-safe counters,
+- zmodu v0.15.37 (`HttpMetricsCollector` thread-safe counters,
   OOM-safe WS accept loop, linux shutdown-listener-before-close fix;
   `OutboxOps.requeueStale` example, `Preflight`, `productionProfile`,
   `PrometheusMetrics`, `JwksKeyRing`, `DistributedLock` available but
@@ -344,7 +356,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Dependencies
 
-- zigmodu v0.15.22+ (sqlx Threaded-Io, HttpMetrics/AccessLogger thread-safety)
+- zmodu v0.15.22+ (sqlx Threaded-Io, HttpMetrics/AccessLogger thread-safety)
 - zent v0.29.7 (dynamic Where slices, crud_helpers: latest/paginatedWithOptions/
   increment, Sum → f64, comptime quota fix)
 
@@ -359,7 +371,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Dependencies
 
-- zigmodu v0.15.22 (sqlx Threaded-Io + HttpMetrics/AccessLogger thread-safety
+- zmodu v0.15.22 (sqlx Threaded-Io + HttpMetrics/AccessLogger thread-safety
   fixes, no API change)
 - zent v0.29.4 (Sum → f64, Rows pool UAF fix, From-edge FK dedup)
 
@@ -381,10 +393,10 @@ assistant, streaming chat, governance and security hardening.
   keys), platform skills (user/task/audit/tenant search + `notify.send`),
   human approval queue for write actions, workflow orchestration, rolling 24h
   quota, 4-way concurrency bulkhead, provider health check
-- **Streaming chat** — `chatStream` + `on_delta` (zigmodu v0.15.16); SSE
+- **Streaming chat** — `chatStream` + `on_delta` (zmodu v0.15.16); SSE
   reasoning/delta/done feed with typing effect and JSON fallback
 - **Run usage audit** — per-run tokens/steps/tool-call snapshot via
-  `AgentMetrics.toStats()` (zigmodu v0.15.17); actual model recorded
+  `AgentMetrics.toStats()` (zmodu v0.15.17); actual model recorded
 - **Resilience** — circuit breaker on provider calls (5-failure → 60s OPEN +
   half-open probe), fail-closed JWT, session revocation (JWT credential
   version)
@@ -395,12 +407,12 @@ assistant, streaming chat, governance and security hardening.
 ### Fixed
 
 - Streaming tool schemas rejected by DeepSeek/OpenAI (HTTP 400 →
-  `ProviderError`): upstream zigmodu v0.15.18 `tools_json` brace fix; zasdoor
+  `ProviderError`): upstream zmodu v0.15.18 `tools_json` brace fix; zasdoor
   consumes it via `SkillRegistry`
 - zent `migrate.zig` comptime branch-quota overflow on 15+ table schemas
   (upstream `10ab9ce`); schemas now compile on zent v0.29.2+
 
 ### Dependencies
 
-- zigmodu v0.15.21 (HTTP, security, AI, resilience, Application lifecycle)
+- zmodu v0.15.21 (HTTP, security, AI, resilience, Application lifecycle)
 - zent v0.29.3 (ORM, schema-as-code, migrations)

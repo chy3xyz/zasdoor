@@ -1,8 +1,8 @@
 //! ZigModu module `iam` (zent-backed) - lifecycle hooks are no-ops because
 //! the zent driver is owned by main.zig and shared via IamService pointers.
-const zigmodu = @import("zigmodu");
+const zmodu = @import("zmodu");
 
-pub const info = zigmodu.api.Module{
+pub const info = zmodu.api.Module{
     .name = "iam",
     .description = "ZenaIAM kernel (projects, applications, roles, sessions, OAuth tokens)",
     .dependencies = &.{},

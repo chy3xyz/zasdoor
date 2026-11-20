@@ -1,7 +1,7 @@
 //! MFA / account-security service: TOTP, recovery codes, IdP and MFA policy.
 
 const std = @import("std");
-const zigmodu = @import("zigmodu");
+const zmodu = @import("zmodu");
 const totp = @import("totp.zig");
 const persist = @import("persistence.zig");
 
@@ -16,10 +16,10 @@ pub const MfaService = struct {
     allocator: std.mem.Allocator,
     io: std.Io,
     store: *persist.MfaStore,
-    sec: *zigmodu.security.AppSecurity,
+    sec: *zmodu.security.AppSecurity,
     time_step_seconds: i64,
 
-    pub fn init(allocator: std.mem.Allocator, io: std.Io, store: *persist.MfaStore, sec: *zigmodu.security.AppSecurity) MfaService {
+    pub fn init(allocator: std.mem.Allocator, io: std.Io, store: *persist.MfaStore, sec: *zmodu.security.AppSecurity) MfaService {
         return .{
             .allocator = allocator,
             .io = io,
@@ -30,7 +30,7 @@ pub const MfaService = struct {
     }
 
     pub fn now(self: *MfaService) i64 {
-        return zigmodu.time.wallClockSeconds(self.io);
+        return zmodu.time.wallClockSeconds(self.io);
     }
 
     /// Start TOTP enrollment: generate a fresh secret and persist it (disabled).

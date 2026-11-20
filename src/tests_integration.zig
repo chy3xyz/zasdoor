@@ -1,4 +1,4 @@
-//! Cross-module HTTP integration tests (zigmodu Testkit dispatch, no socket).
+//! Cross-module HTTP integration tests (zmodu Testkit dispatch, no socket).
 //!
 //! These drive the real HTTP stack for the IAM / OAuth / MFA / web3 / agent /
 //! health routes: an in-memory SQLite store with every schema group migrated,
@@ -6,7 +6,7 @@
 //! assertion checks both the HTTP status code and the {code,msg,data} envelope.
 
 const std = @import("std");
-const zigmodu = @import("zigmodu");
+const zmodu = @import("zmodu");
 const db_mod = @import("db.zig");
 const schema = @import("schema.zig");
 const tenant = @import("modules/tenant/root.zig");
@@ -24,7 +24,7 @@ const mfa = @import("modules/mfa/root.zig");
 const web3 = @import("modules/web3/root.zig");
 const agent = @import("modules/agent/root.zig");
 
-const Testkit = zigmodu.http.Testkit;
+const Testkit = zmodu.http.Testkit;
 const Pair = Testkit.AttrPair;
 
 /// In-memory SQLite store with every schema group migrated. Duplicated from
@@ -83,7 +83,7 @@ const Harness = struct {
     server_arena: std.heap.ArenaAllocator = undefined,
     server_allocator: std.mem.Allocator = undefined,
     io: std.Io,
-    sec: zigmodu.security.AppSecurity,
+    sec: zmodu.security.AppSecurity,
     user_store: user.persistence.UserStore,
     audit_store: audit.persistence.AuditStore,
     iam_store: iam.persistence.IamStore,
@@ -102,7 +102,9 @@ const Harness = struct {
     mfa_api: mfa.api.MfaApi(mfa.service.MfaService, user.service.UserService),
     web3_api: web3.api.Web3Api(web3.service.Web3Service, user.service.UserService),
     agent_api: agent.api.AgentApi(agent.service.AgentService, user.service.UserService),
-    server: zigmodu.http.Server,
+    server: zmodu.http.Server,
+    router_state: void = {},
+    router: zmodu.http.Router(void) = undefined,
     admin_id: i64 = 0,
     user_id: i64 = 0,
     admin_token: []const u8 = "",
@@ -122,7 +124,7 @@ const Harness = struct {
         h.wallet_store = web3.persistence.WalletStore.init(allocator, client);
         h.agent_store = agent.persistence.AgentStore.init(allocator, client);
 
-        h.sec = zigmodu.security.AppSecurity.init(allocator, io, .{ .jwt_secret = "integration-secret" });
+        h.sec = zmodu.security.AppSecurity.init(allocator, io, .{ .jwt_secret = "integration-secret" });
         h.user_svc = user.service.UserService.init(&h.user_store, &h.sec, io, 3600, 86400);
         h.audit_svc = audit.service.AuditService.init(allocator, io, &h.audit_store);
         h.iam_svc = iam.service.IamService.init(allocator, io, &h.iam_store, &h.sec);
@@ -137,11 +139,12 @@ const Harness = struct {
         h.web3_api = web3.api.Web3Api(web3.service.Web3Service, user.service.UserService).init(&h.web3_svc, &h.user_svc, 1);
         h.agent_api = agent.api.AgentApi(agent.service.AgentService, user.service.UserService).init(&h.agent_svc, &h.user_svc, 1);
 
-        h.server = zigmodu.http.Server.init(io, h.server_allocator, 0);
+        h.server = zmodu.http.Server.init(io, h.server_allocator, 0);
         ReadyProbe.user_store = &h.user_store;
         // OAuth / OIDC protocol endpoints live at the server root.
         try h.oauth_api.registerRoutes(&h.server);
-        var g = h.server.group("/api/v1");
+        h.router = zmodu.http.Router(void).init(io, h.server_allocator, &h.server, &h.router_state);
+        var g = h.router.scope("/api/v1");
         try h.iam_api.registerRoutes(&g);
         try h.mfa_api.registerRoutes(&g);
         try h.web3_api.registerRoutes(&g);
@@ -150,7 +153,7 @@ const Harness = struct {
             .method = .GET,
             .path = "api/v1/health/ready",
             .handler = struct {
-                fn handle(ctx: *zigmodu.http.Context) !void {
+                fn handle(ctx: *zmodu.http.Context) !void {
                     var probe = ReadyProbe.user_store.listUsers(1, 1, null, null, null, false) catch {
                         try ctx.sendErrorResponse(503, 503, "database unavailable");
                         return;
@@ -180,6 +183,7 @@ const Harness = struct {
     }
 
     fn deinit(h: *Harness) void {
+        h.router.deinit();
         h.server.deinit();
         h.server_arena.deinit();
         if (h.admin_token.len > 0) h.allocator.free(h.admin_token);
@@ -193,13 +197,13 @@ const Harness = struct {
 /// "?query" suffix would fail to match. Build the Context exactly as Testkit
 /// does, inject the query params, then dispatch through the server (no socket).
 fn dispatchGetQuery(
-    server: *zigmodu.http.Server,
+    server: *zmodu.http.Server,
     allocator: std.mem.Allocator,
     path: []const u8,
     query: []const Pair,
     auth_header: []const u8,
 ) !Testkit.TestResponse {
-    var ctx = try zigmodu.http.Context.init(allocator, .GET, path);
+    var ctx = try zmodu.http.Context.init(allocator, .GET, path);
     errdefer ctx.deinit();
     for (query) |pair| try ctx.query.put(pair[0], pair[1]);
     if (auth_header.len > 0) {

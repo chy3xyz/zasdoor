@@ -2,7 +2,7 @@
 //! JWT issue, password-reset token lifecycle. No HTTP/SQL leakage.
 
 const std = @import("std");
-const zigmodu = @import("zigmodu");
+const zmodu = @import("zmodu");
 const persist = @import("persistence.zig");
 
 pub const UserRow = persist.UserRow;
@@ -286,7 +286,7 @@ pub fn resetLoginLockout(io: std.Io) void {
 
 pub const UserService = struct {
     store: *persist.UserStore,
-    sec: *zigmodu.security.AppSecurity,
+    sec: *zmodu.security.AppSecurity,
     io: std.Io,
     password_token_expiration_seconds: i64,
     verification_token_expiration_seconds: i64,
@@ -297,7 +297,7 @@ pub const UserService = struct {
 
     pub fn init(
         store: *persist.UserStore,
-        sec: *zigmodu.security.AppSecurity,
+        sec: *zmodu.security.AppSecurity,
         io: std.Io,
         password_token_expiration_seconds: i64,
         verification_token_expiration_seconds: i64,
@@ -351,7 +351,7 @@ pub const UserService = struct {
         const hash = self.sec.module.hashPassword(password) catch return error.InvalidPassword;
         defer self.sec.module.allocator.free(hash);
 
-        const now = zigmodu.time.wallClockSeconds(self.io);
+        const now = zmodu.time.wallClockSeconds(self.io);
         // A prior `getUserByEmail` guard makes a create failure most likely
         // a unique-constraint race; re-check before blaming the DB.
         _ = self.store.createUser(trimmed_name, norm_email, hash, false, admin, tenant_id, now) catch {
@@ -369,7 +369,7 @@ pub const UserService = struct {
     /// Authenticate email+password. Returns null on wrong credentials and
     /// error.AccountLocked while the per-process lockout is active.
     pub fn login(self: *UserService, allocator: std.mem.Allocator, email: []const u8, password: []const u8) LoginError!?Session {
-        return self.loginAt(allocator, email, password, zigmodu.time.wallClockSeconds(self.io));
+        return self.loginAt(allocator, email, password, zmodu.time.wallClockSeconds(self.io));
     }
 
     /// login with an injected clock: keeps the lockout window/cooldown logic
@@ -404,7 +404,7 @@ pub const UserService = struct {
         // The hash is duped by the store's allocator, not the request arena.
         defer self.store.allocator.free(hash);
 
-        // zigmodu v0.33.4+ returns `PasswordError!bool`: a stored hash we
+        // zmodu v0.33.4+ returns `PasswordError!bool`: a stored hash we
         // cannot decode (or an allocation failure while decoding it) is a
         // server-side fault, not a wrong password. Surface it as 500 so the
         // failed-login counter is not fed a lie.
@@ -480,7 +480,7 @@ pub const UserService = struct {
         const row_opt = self.store.getUserById(id) catch return error.Unexpected;
         const row = row_opt orelse return error.UserNotFound;
         row.free(self.store.allocator);
-        self.store.updateContact(id, phone, address, zigmodu.time.wallClockSeconds(self.io)) catch return error.Unexpected;
+        self.store.updateContact(id, phone, address, zmodu.time.wallClockSeconds(self.io)) catch return error.Unexpected;
     }
 
     /// Free a session, returning each allocation to its producer (see Session).
@@ -522,7 +522,7 @@ pub const UserService = struct {
         const norm_email = normalizeEmail(allocator, email) catch return error.InvalidEmail;
         defer allocator.free(norm_email);
         if (!validateEmail(norm_email)) return error.InvalidEmail;
-        const now = zigmodu.time.wallClockSeconds(self.io);
+        const now = zmodu.time.wallClockSeconds(self.io);
         try self.store.updateProfile(id, name, norm_email, now);
     }
 
@@ -537,12 +537,12 @@ pub const UserService = struct {
     }
 
     pub fn setVerified(self: *UserService, id: i64, verified: bool) !void {
-        const now = zigmodu.time.wallClockSeconds(self.io);
+        const now = zmodu.time.wallClockSeconds(self.io);
         try self.store.setVerified(id, verified, now);
     }
 
     pub fn setAdmin(self: *UserService, id: i64, admin: bool) !void {
-        const now = zigmodu.time.wallClockSeconds(self.io);
+        const now = zmodu.time.wallClockSeconds(self.io);
         try self.store.setAdmin(id, admin, now);
     }
 
@@ -556,7 +556,7 @@ pub const UserService = struct {
         try self.policy.validate(password, row.email, row.name);
         const hash = self.sec.module.hashPassword(password) catch return error.Unexpected;
         defer self.sec.module.allocator.free(hash);
-        const now = zigmodu.time.wallClockSeconds(self.io);
+        const now = zmodu.time.wallClockSeconds(self.io);
         self.store.setPasswordHash(id, hash, now) catch return error.Unexpected;
     }
 
@@ -586,7 +586,7 @@ pub const UserService = struct {
         errdefer allocator.free(raw);
         const hash = try self.sec.module.hashPassword(raw);
         defer self.sec.module.allocator.free(hash);
-        const now = zigmodu.time.wallClockSeconds(self.io);
+        const now = zmodu.time.wallClockSeconds(self.io);
         // Housekeeping: drop this user's stale tokens before inserting a new
         // one so the table does not grow without bound.
         self.store.deleteExpiredPasswordTokens(row.id, now, self.password_token_expiration_seconds) catch |err| {
@@ -603,7 +603,7 @@ pub const UserService = struct {
         const tok = tok_opt orelse return error.InvalidToken;
         defer tok.free(self.store.allocator);
 
-        const now = zigmodu.time.wallClockSeconds(self.io);
+        const now = zmodu.time.wallClockSeconds(self.io);
         if (now - tok.created_at > self.password_token_expiration_seconds) {
             // The token is dead — purge it (and any older siblings) now.
             self.store.deleteTokensForUser(user_id) catch |err| {
@@ -647,7 +647,7 @@ pub const UserService = struct {
 
         const hash = self.sec.module.hashPassword(new_password) catch return error.Unexpected;
         defer self.sec.module.allocator.free(hash);
-        const now = zigmodu.time.wallClockSeconds(self.io);
+        const now = zmodu.time.wallClockSeconds(self.io);
         // Hash update + token clear commit in one transaction: no window where
         // the old reset link still replays against the new password.
         self.store.resetPasswordAtomic(user_id, hash, now) catch |err| switch (err) {
@@ -670,7 +670,7 @@ pub const UserService = struct {
         errdefer allocator.free(raw);
         const hash = try self.sec.module.hashPassword(raw);
         defer self.sec.module.allocator.free(hash);
-        const now = zigmodu.time.wallClockSeconds(self.io);
+        const now = zmodu.time.wallClockSeconds(self.io);
         // Housekeeping: drop this user's stale tokens before inserting a new one.
         self.store.deleteExpiredEmailVerifications(user_id, now, self.verification_token_expiration_seconds) catch |err| {
             std.log.warn("[user] expired verification cleanup failed (user {d}): {s}", .{ user_id, @errorName(err) });
@@ -685,7 +685,7 @@ pub const UserService = struct {
         const tok = tok_opt orelse return error.InvalidToken;
         defer tok.free(self.store.allocator);
 
-        const now = zigmodu.time.wallClockSeconds(self.io);
+        const now = zmodu.time.wallClockSeconds(self.io);
         if (now - tok.created_at > self.verification_token_expiration_seconds) {
             self.store.deleteEmailVerificationsForUser(user_id) catch |err| {
                 std.log.warn("[user] expired verification delete failed (user {d}); tokens.cleanup will sweep: {s}", .{ user_id, @errorName(err) });
@@ -732,7 +732,7 @@ pub const UserService = struct {
             error.PasswordContainsIdentity => return error.PasswordContainsIdentity,
             error.UserNotFound, error.Unexpected => return error.InvalidPassword,
         };
-        const now_s = zigmodu.time.wallClockSeconds(self.io);
+        const now_s = zmodu.time.wallClockSeconds(self.io);
         // 改密后必须 bump 凭证版本使旧 JWT 失效;失败不能静默吞掉。
         self.store.bumpTokenVersion(id, now_s) catch return error.TokenInvalidationFailed;
     }

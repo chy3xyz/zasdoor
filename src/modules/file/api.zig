@@ -2,8 +2,8 @@
 //! authenticated user; admins see all files, users see their own.
 
 const std = @import("std");
-const zigmodu = @import("zigmodu");
-const http = zigmodu.http;
+const zmodu = @import("zmodu");
+const http = zmodu.http;
 const mw = @import("../../middleware/auth.zig");
 const user_svc = @import("../user/service.zig");
 const audit_svc = @import("../audit/service.zig");
@@ -43,8 +43,8 @@ pub fn FileApi(comptime Service: type, comptime UserService: type) type {
             return .{ .svc = svc, .user_svc = users, .audit = audit, .default_tenant_id = default_tenant_id };
         }
 
-        pub fn registerRoutes(self: *Self, group: *http.RouteGroup) !void {
-            var g = try group.use(zigmodu.http.http_middleware.jwtAuthWithSecurity(&self.user_svc.sec.module));
+        pub fn registerRoutes(self: *Self, group: anytype) !void {
+            var g = try group.use(zmodu.http.http_middleware.jwtAuthWithSecurity(&self.user_svc.sec.module));
             g = try g.use(mw.tokenVersionGuard(self.user_svc.sec, self.user_svc.store));
             try g.post("/files", upload, @ptrCast(@alignCast(self)));
             try g.get("/files", list, @ptrCast(@alignCast(self)));
@@ -113,14 +113,14 @@ pub fn FileApi(comptime Service: type, comptime UserService: type) type {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
             const actor = (try authUser(ctx, self)) orelse return;
 
-            const params = zigmodu.http.PageParams.parse(ctx, .{ .max_page_size = 100 });
+            const params = zmodu.http.PageParams.parse(ctx, .{ .max_page_size = 100 });
             const current_tenant = mw.authTenantId(ctx) orelse self.default_tenant_id;
             const owner: ?i64 = if (actor.admin) null else actor.id;
             const tenant_filter: ?i64 = if (actor.admin) blk: {
                 const tid = ctx.queryInt(i64, "tenant_id", 0);
                 break :blk if (tid > 0) tid else null;
             } else current_tenant;
-            const sort = zigmodu.http.page.parseSort(ctx, &.{ "name", "size_bytes", "created_at" });
+            const sort = zmodu.http.page.parseSort(ctx, &.{ "name", "size_bytes", "created_at" });
             const sort_col: ?[]const u8 = if (sort) |s| s.column else null;
             const sort_desc = if (sort) |s| s.desc else false;
 
@@ -131,8 +131,8 @@ pub fn FileApi(comptime Service: type, comptime UserService: type) type {
             };
             defer result.free(self.svc.allocator);
 
-            const dtos = try zigmodu.http.Extract.toDtoList(ctx.allocator, result.items, FileDto, toDto);
-            try zigmodu.http.sendPaged(ctx, dtos, @intCast(result.total), params, .ruoyi);
+            const dtos = try zmodu.http.Extract.toDtoList(ctx.allocator, result.items, FileDto, toDto);
+            try zmodu.http.sendPaged(ctx, dtos, @intCast(result.total), params, .ruoyi);
         }
 
         fn download(ctx: *http.Context) !void {
@@ -199,7 +199,7 @@ pub fn FileApi(comptime Service: type, comptime UserService: type) type {
             };
             var d5: [96]u8 = undefined;
             const det5 = try std.fmt.bufPrint(&d5, "删除文件 #{d}", .{id});
-            self.audit.log(actor.id, ctx.getAttr("audit_actor") orelse "", "file.delete", "file", id, det5, zigmodu.http.RequestUtil.getRealIp(ctx), true, row.tenant_id);
+            self.audit.log(actor.id, ctx.getAttr("audit_actor") orelse "", "file.delete", "file", id, det5, zmodu.http.RequestUtil.getRealIp(ctx), true, row.tenant_id);
             try ctx.jsonStruct(200, .{ .code = 0, .msg = "ok", .data = null });
         }
     };

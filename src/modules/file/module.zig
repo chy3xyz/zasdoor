@@ -1,7 +1,7 @@
 //! ZigModu module `file` — uploads & static file serving.
-const zigmodu = @import("zigmodu");
+const zmodu = @import("zmodu");
 
-pub const info = zigmodu.api.Module{
+pub const info = zmodu.api.Module{
     .name = "file",
     .description = "file uploads with local-disk storage",
     .dependencies = &.{},

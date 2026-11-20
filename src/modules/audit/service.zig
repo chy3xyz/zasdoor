@@ -1,7 +1,7 @@
 //! Audit service — record and query the admin audit trail.
 
 const std = @import("std");
-const zigmodu = @import("zigmodu");
+const zmodu = @import("zmodu");
 const persist = @import("persistence.zig");
 
 pub const AuditRow = persist.AuditRow;
@@ -31,7 +31,7 @@ pub const AuditService = struct {
         success: bool,
         tenant_id: i64,
     ) void {
-        const now = zigmodu.time.wallClockSeconds(self.io);
+        const now = zmodu.time.wallClockSeconds(self.io);
         _ = self.store.create(actor_user_id, actor_name, action, target_type, target_id, detail, ip, success, tenant_id, now) catch |err| {
             std.log.err("[audit] write failed for action {s}: {s}", .{ action, @errorName(err) });
         };

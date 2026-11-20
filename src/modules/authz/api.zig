@@ -2,8 +2,8 @@
 //! policies), policy management and the decision log.
 
 const std = @import("std");
-const zigmodu = @import("zigmodu");
-const http = zigmodu.http;
+const zmodu = @import("zmodu");
+const http = zmodu.http;
 const mw = @import("../../middleware/auth.zig");
 const user_svc = @import("../user/service.zig");
 const service = @import("service.zig");
@@ -18,8 +18,8 @@ pub fn AuthzApi(comptime Service: type, comptime UserService: type) type {
             return .{ .svc = svc, .user_svc = users };
         }
 
-        pub fn registerRoutes(self: *Self, group: *http.RouteGroup) !void {
-            var g = try group.use(zigmodu.http.http_middleware.jwtAuthWithSecurity(&self.user_svc.sec.module));
+        pub fn registerRoutes(self: *Self, group: anytype) !void {
+            var g = try group.use(zmodu.http.http_middleware.jwtAuthWithSecurity(&self.user_svc.sec.module));
             g = try g.use(mw.tokenVersionGuard(self.user_svc.sec, self.user_svc.store));
             try g.post("/iam/authz/check", check, @ptrCast(@alignCast(self)));
             try g.get("/iam/authz/policies", listPolicies, @ptrCast(@alignCast(self)));
@@ -94,7 +94,7 @@ pub fn AuthzApi(comptime Service: type, comptime UserService: type) type {
                 .project_id = req.project_id,
                 .resource_id = req.resource_id,
                 .tenant_id = req.tenant_id,
-                .now = zigmodu.time.wallClockSeconds(self.user_svc.io),
+                .now = zmodu.time.wallClockSeconds(self.user_svc.io),
             };
             const info = self.svc.authorizeDetailed(req.subject_id, req.resource, req.action, context) catch {
                 try ctx.sendErrorResponse(500, 500, "服务器内部错误");
@@ -248,7 +248,7 @@ pub fn AuthzApi(comptime Service: type, comptime UserService: type) type {
                 req.condition,
                 req.priority orelse 0,
                 req.enabled orelse true,
-                zigmodu.time.wallClockSeconds(self.user_svc.io),
+                zmodu.time.wallClockSeconds(self.user_svc.io),
             ) catch {
                 try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
@@ -294,7 +294,7 @@ pub fn AuthzApi(comptime Service: type, comptime UserService: type) type {
                 .condition = req.condition,
                 .priority = req.priority,
                 .enabled = req.enabled,
-            }, zigmodu.time.wallClockSeconds(self.user_svc.io)) catch {
+            }, zmodu.time.wallClockSeconds(self.user_svc.io)) catch {
                 try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
             };

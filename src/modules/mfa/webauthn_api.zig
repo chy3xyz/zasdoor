@@ -4,8 +4,8 @@
 //! session JWT). Registration and credential management require a session.
 
 const std = @import("std");
-const zigmodu = @import("zigmodu");
-const http = zigmodu.http;
+const zmodu = @import("zmodu");
+const http = zmodu.http;
 const mw = @import("../../middleware/auth.zig");
 const service = @import("webauthn.zig");
 
@@ -14,21 +14,21 @@ pub fn WebauthnApi(comptime Service: type, comptime UserService: type) type {
         const Self = @This();
         svc: *Service,
         users: *UserService,
-        registry: *zigmodu.RateLimiterRegistry,
+        registry: *zmodu.RateLimiterRegistry,
         default_tenant_id: i64,
 
-        pub fn init(svc: *Service, users: *UserService, registry: *zigmodu.RateLimiterRegistry, default_tenant_id: i64) Self {
+        pub fn init(svc: *Service, users: *UserService, registry: *zmodu.RateLimiterRegistry, default_tenant_id: i64) Self {
             return .{ .svc = svc, .users = users, .registry = registry, .default_tenant_id = default_tenant_id };
         }
 
-        pub fn registerRoutes(self: *Self, group: *http.RouteGroup) !void {
+        pub fn registerRoutes(self: *Self, group: anytype) !void {
             // Public: passkey login (challenge + assertion). Rate-limited per
             // client IP so challenge rows cannot be farmed without bound.
-            var public_group = try group.use(try zigmodu.http.tracing_middleware.rateLimitPerClient(self.registry, clientIpKey));
+            var public_group = try group.use(try zmodu.http.tracing_middleware.rateLimitPerClient(self.registry, clientIpKey));
             try public_group.post("/mfa/webauthn/login/begin", loginBegin, @ptrCast(@alignCast(self)));
             try public_group.post("/mfa/webauthn/login/finish", loginFinish, @ptrCast(@alignCast(self)));
 
-            var g = try group.use(zigmodu.http.http_middleware.jwtAuthWithSecurity(&self.users.sec.module));
+            var g = try group.use(zmodu.http.http_middleware.jwtAuthWithSecurity(&self.users.sec.module));
             g = try g.use(mw.tokenVersionGuard(self.users.sec, self.users.store));
             try g.post("/mfa/webauthn/register/begin", registerBegin, @ptrCast(@alignCast(self)));
             try g.post("/mfa/webauthn/register/finish", registerFinish, @ptrCast(@alignCast(self)));
@@ -230,5 +230,5 @@ pub fn WebauthnApi(comptime Service: type, comptime UserService: type) type {
 }
 
 fn clientIpKey(ctx: *http.Context) []const u8 {
-    return zigmodu.http.RequestUtil.getRealIp(ctx);
+    return zmodu.http.RequestUtil.getRealIp(ctx);
 }
