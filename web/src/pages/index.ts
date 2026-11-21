@@ -10,3 +10,7 @@ export { default as AuditLogs } from './AuditLogs';
 export { default as MailTemplates } from './MailTemplates';
 export { default as AiChat } from './AiChat';
 export { default as AiAdmin } from './AiAdmin';
+export { default as Sessions } from './Sessions';
+export { default as Roles } from './Roles';
+export { default as Groups } from './Groups';
+export { default as Domains } from './Domains';

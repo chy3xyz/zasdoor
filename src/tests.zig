@@ -2178,6 +2178,38 @@ test "web3: personalSignDigest uses the 0x19 EIP-191 prefix byte" {
     try std.testing.expectEqualSlices(u8, &expect, &digest);
 }
 
+test "web3: DID derivation and multi-chain address validation" {
+    const a = std.testing.allocator;
+    var env = try openMemory(a);
+    defer env.deinit();
+    var wallet_store = web3.persistence.WalletStore.init(a, env.client);
+    var user_store = user.persistence.UserStore.init(a, env.client);
+    var sec = zmodu.security.AppSecurity.init(a, std.testing.io, .{ .jwt_secret = "did-secret" });
+    var user_svc = user.service.UserService.init(&user_store, &sec, std.testing.io, 3600, 86400);
+    var w3 = web3.service.Web3Service.init(a, std.testing.io, &wallet_store, &user_svc, &sec);
+
+    const evm = "0x1234567890abcdef1234567890abcdef12345678";
+    try std.testing.expect(web3.service.Web3Service.validAddress("evm", evm));
+    try std.testing.expect(!web3.service.Web3Service.validAddress("evm", "0xzz"));
+    try std.testing.expect(web3.service.Web3Service.validAddress("solana", "So11111111111111111111111111111111111111112"));
+    try std.testing.expect(!web3.service.Web3Service.validAddress("solana", "0OIl"));
+    try std.testing.expect(web3.service.Web3Service.validAddress("btc", "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh"));
+
+    const did = try w3.didForWallet("evm", evm);
+    defer a.free(did);
+    try std.testing.expectEqualStrings("did:zasdoor:evm:0x1234567890abcdef1234567890abcdef12345678", did);
+
+    const uid = try user_store.createUser("DidUser", "did@x.com", "hash", false, false, 1, 100);
+    const bound = (try w3.bindWallet(1, uid, "evm", evm)).?;
+    defer bound.free(a);
+    const wallets = try wallet_store.listForUser(uid);
+    defer {
+        for (wallets) |r| r.free(a);
+        a.free(wallets);
+    }
+    try std.testing.expectEqual(@as(usize, 1), wallets.len);
+}
+
 test "web3: siweLogin binds wallet then issues JWT (full flow)" {
     const a = std.testing.allocator;
     var env = try openMemory(a);

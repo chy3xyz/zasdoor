@@ -9,6 +9,7 @@ export * from './system';
 export * from './mailTemplate';
 export * from './ai';
 export * from './iam';
+export * from './orgstruct';
 export * from './mfa';
 export * from './webauthn';
 export * from './agent';

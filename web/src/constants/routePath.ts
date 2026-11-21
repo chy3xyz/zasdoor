@@ -21,5 +21,9 @@ export const ROUTE_PATH = {
   agents: '/agents',
   mfaSettings: '/security/mfa',
   idpSettings: '/security/idp',
+  sessions: '/iam/sessions',
+  roles: '/iam/roles',
+  groups: '/iam/groups',
+  domains: '/iam/domains',
   notFound: '/404',
 } as const;

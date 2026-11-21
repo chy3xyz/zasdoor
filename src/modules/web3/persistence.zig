@@ -93,6 +93,23 @@ pub const WalletStore = struct {
         return try self.dup(e);
     }
 
+    pub fn listForUser(self: *WalletStore, user_id: i64) ![]WalletRow {
+        const preds = self.client.wallet.predicates;
+        const rows = try crud.all(self.client.wallet, .{preds.user_idEQ(.{ .int = user_id })});
+        defer zent.crud_helpers.deinitRows(infos, WalletInfo, rows, self.allocator);
+        var out = try self.allocator.alloc(WalletRow, rows.items.len);
+        var i: usize = 0;
+        errdefer {
+            for (out[0..i]) |r| r.free(self.allocator);
+            self.allocator.free(out);
+        }
+        for (rows.items) |e| {
+            out[i] = try self.dup(e);
+            i += 1;
+        }
+        return out;
+    }
+
     pub fn bindUser(self: *WalletStore, id: i64, user_id: i64, now: i64) !void {
         const preds = self.client.wallet.predicates;
         var u = self.client.wallet.Update();

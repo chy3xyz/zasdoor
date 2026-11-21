@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Web3 multi-chain + DID**: wallets support `evm`, `solana`, `btc` and
+  custom chains with per-chain address validation; deterministic
+  `did:zasdoor:<chain>:<address>` identifiers are exposed via
+  `GET /web3/wallets` and `GET /web3/did/resolve`.
+- **Admin console pages**: sessions (revoke one/all), roles, groups/membership
+  and domains (one-time verification token + verify form), with 79 new i18n
+  keys per locale (508 total, exact parity).
+
+### Added
+
 - **P2 developer experience**: zh/en i18n for the SolidJS console (429 keys,
   95%+ coverage, persisted locale + switcher), SDK/API developer docs
   (`docs/sdk.md`, `docs/api-examples.md` with 13 curl flows), and keyset
@@ -212,7 +222,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Verified
 
-- `zig build`, `zig build test` (118/118) and `zig build -Doptimize=ReleaseSafe`
+- `zig build`, `zig build test` (119/119) and `zig build -Doptimize=ReleaseSafe`
   pass on Zig 0.17.0; `zig fmt --check` and `scripts/run_e2e.sh` (boot ->
   probes -> admin/login/info -> graceful shutdown, no panic/leak) are green,
   with the web typecheck/vitest/rsbuild also passing.

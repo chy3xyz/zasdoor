@@ -257,6 +257,36 @@ function MainLayout(props: { children?: JSX.Element }) {
               {t('nav.idpSettings')}
             </A>
           </Show>
+          <Show when={auth.user?.admin}>
+            <A
+              href={ROUTE_PATH.sessions}
+              class="block rounded-lg px-3 py-2 text-sm hover:bg-base-300 [&.active]:bg-primary [&.active]:text-primary-content"
+              activeClass="active"
+            >
+              {t('nav.sessions')}
+            </A>
+            <A
+              href={ROUTE_PATH.roles}
+              class="block rounded-lg px-3 py-2 text-sm hover:bg-base-300 [&.active]:bg-primary [&.active]:text-primary-content"
+              activeClass="active"
+            >
+              {t('nav.roles')}
+            </A>
+            <A
+              href={ROUTE_PATH.groups}
+              class="block rounded-lg px-3 py-2 text-sm hover:bg-base-300 [&.active]:bg-primary [&.active]:text-primary-content"
+              activeClass="active"
+            >
+              {t('nav.groups')}
+            </A>
+            <A
+              href={ROUTE_PATH.domains}
+              class="block rounded-lg px-3 py-2 text-sm hover:bg-base-300 [&.active]:bg-primary [&.active]:text-primary-content"
+              activeClass="active"
+            >
+              {t('nav.domains')}
+            </A>
+          </Show>
           <A
             href={ROUTE_PATH.files}
             class="block rounded-lg px-3 py-2 text-sm hover:bg-base-300 [&.active]:bg-primary [&.active]:text-primary-content"

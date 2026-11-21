@@ -165,6 +165,40 @@ pub const Web3Service = struct {
         return .{ .token = token, .user_id = wallet_user };
     }
 
+    /// DID for a chain-scoped wallet address. This is a deterministic
+    /// identifier, not proof of control — binding still requires SIWE.
+    pub fn didForWallet(self: *Web3Service, chain: []const u8, address: []const u8) ![]const u8 {
+        return std.fmt.allocPrint(self.allocator, "did:zasdoor:{s}:{s}", .{ chain, address });
+    }
+
+    /// Validate an address shape per chain family. Rejects obvious garbage
+    /// before it reaches the unique address index.
+    pub fn validAddress(chain: []const u8, address: []const u8) bool {
+        if (address.len < 8 or address.len > 128) return false;
+        if (std.mem.eql(u8, chain, "evm")) {
+            if (address.len != 42 or !std.mem.startsWith(u8, address, "0x")) return false;
+            for (address[2..]) |c| if (!std.ascii.isHex(c)) return false;
+            return true;
+        }
+        if (std.mem.eql(u8, chain, "solana")) {
+            // Base58, no 0/O/I/l.
+            for (address) |c| {
+                if (std.mem.indexOfScalar(u8, "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz", c) == null) return false;
+            }
+            return true;
+        }
+        if (std.mem.eql(u8, chain, "btc")) {
+            // Bech32 or base58check; basic charset/length guard.
+            for (address) |c| {
+                if (!std.ascii.isAlphanumeric(c)) return false;
+            }
+            return true;
+        }
+        // Unknown chain families are allowed but must be printable.
+        for (address) |c| if (c < 0x21 or c > 0x7e) return false;
+        return true;
+    }
+
     /// Bind a wallet address to a user (creating the wallet if needed).
     pub fn bindWallet(
         self: *Web3Service,

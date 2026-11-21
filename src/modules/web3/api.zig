@@ -28,6 +28,8 @@ pub fn Web3Api(comptime Service: type, comptime UserService: type) type {
             g = try g.use(authorize_mw.enforce());
             g = try g.use(mw.tokenVersionGuard(self.users.sec, self.users.store));
             try g.post("/web3/wallet/bind", bindWallet, @ptrCast(@alignCast(self)));
+            try g.get("/web3/wallets", listWallets, @ptrCast(@alignCast(self)));
+            try g.get("/web3/did/resolve", resolveDid, @ptrCast(@alignCast(self)));
         }
 
         const SiweNonceReq = struct { address: []const u8, domain: []const u8 };
@@ -122,6 +124,74 @@ pub fn Web3Api(comptime Service: type, comptime UserService: type) type {
             address: []const u8,
         };
 
+        fn listWallets(ctx: *http.Context) !void {
+            const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
+            const uid = mw.authUserId(ctx) orelse {
+                try ctx.sendErrorResponse(401, 401, "未登录或登录已过期");
+                return;
+            };
+            const rows = self.svc.store.listForUser(uid) catch {
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
+                return;
+            };
+            defer {
+                for (rows) |r| r.free(self.svc.allocator);
+                self.svc.allocator.free(rows);
+            }
+            const Dto = struct { chain: []const u8, address: []const u8, did: []const u8, verified: bool };
+            const dtos = try ctx.allocator.alloc(Dto, rows.len);
+            defer {
+                for (dtos) |d| {
+                    ctx.allocator.free(d.did);
+                }
+                ctx.allocator.free(dtos);
+            }
+            for (rows, 0..) |r, i| {
+                dtos[i] = .{
+                    .chain = r.chain,
+                    .address = r.address,
+                    .did = try self.svc.didForWallet(r.chain, r.address),
+                    .verified = r.verified,
+                };
+            }
+            try ctx.jsonStruct(200, .{ .code = 0, .msg = "", .data = dtos });
+        }
+
+        fn resolveDid(ctx: *http.Context) !void {
+            const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
+            const did = ctx.queryParam("did") orelse {
+                try ctx.sendErrorResponse(400, 400, "缺少 did 参数");
+                return;
+            };
+            const prefix = "did:zasdoor:";
+            if (!std.mem.startsWith(u8, did, prefix)) {
+                try ctx.sendErrorResponse(400, 400, "不支持的 DID 方法");
+                return;
+            }
+            var it = std.mem.splitScalar(u8, did[prefix.len..], ':');
+            const chain = it.next() orelse {
+                try ctx.sendErrorResponse(400, 400, "DID 格式错误");
+                return;
+            };
+            const address = it.next() orelse {
+                try ctx.sendErrorResponse(400, 400, "DID 格式错误");
+                return;
+            };
+            if (it.next() != null or !service.Web3Service.validAddress(chain, address)) {
+                try ctx.sendErrorResponse(400, 400, "DID 格式错误");
+                return;
+            }
+            const row_opt = self.svc.findWallet(chain, address) catch {
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
+                return;
+            };
+            if (row_opt) |row| {
+                defer row.free(self.svc.allocator);
+                try ctx.jsonStruct(200, .{ .code = 0, .msg = "", .data = .{ .chain = row.chain, .address = row.address, .user_id = row.user_id, .verified = row.verified } });
+            } else {
+                try ctx.jsonStruct(200, .{ .code = 0, .msg = "", .data = .{ .chain = chain, .address = address, .user_id = 0, .verified = false } });
+            }
+        }
         fn bindWallet(ctx: *http.Context) !void {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
             const uid = mw.authUserId(ctx) orelse {
@@ -134,6 +204,10 @@ pub fn Web3Api(comptime Service: type, comptime UserService: type) type {
             };
             defer ctx.allocator.free(req.chain);
             defer ctx.allocator.free(req.address);
+            if (!service.Web3Service.validAddress(req.chain, req.address)) {
+                try ctx.sendErrorResponse(400, 400, "地址格式无效");
+                return;
+            }
             const row_opt = self.svc.bindWallet(self.default_tenant_id, uid, req.chain, req.address) catch {
                 try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;

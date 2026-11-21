@@ -17,6 +17,20 @@ export interface ProjectItem {
   created_at: number;
 }
 
+/** A login session returned by GET /iam/users/{id}/sessions. */
+export interface SessionItem {
+  id: number;
+  user_id: number;
+  client_id: number;
+  device_id: string;
+  ip: string;
+  user_agent: string;
+  auth_method: string;
+  last_seen_at: number;
+  expires_at: number;
+  revoked_at: number;
+}
+
 export interface PagedResult<T> {
   list: T[];
   total: number;
@@ -81,4 +95,9 @@ export interface CreateRoleRequest {
   key: string;
   name: string;
   permissions?: string;
+}
+
+export interface AssignRoleRequest {
+  user_id: number;
+  project_id?: number;
 }

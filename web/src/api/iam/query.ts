@@ -3,15 +3,21 @@ import { unwrapEnvelope } from '#ui/api/envelope';
 
 import {
   IAM_PATH,
+  assignRole,
   organizationDetail,
   organizationsQuery,
   projectApplications,
   projectDetail,
   projectRoles,
   projectsQuery,
+  roleDetail,
+  sessionRevoke,
+  userSessions,
+  userSessionsRevoke,
 } from './path';
 import type {
   ApplicationItem,
+  AssignRoleRequest,
   ClientCredentials,
   CreateApplicationRequest,
   CreateOrganizationRequest,
@@ -21,6 +27,7 @@ import type {
   PagedResult,
   ProjectItem,
   RoleItem,
+  SessionItem,
 } from './types';
 
 async function getEnvelope<T>(path: string): Promise<T> {
@@ -83,5 +90,25 @@ export async function createRole(projectId: number, body: CreateRoleRequest): Pr
 }
 
 export async function deleteRole(id: number): Promise<void> {
-  await deleteEnvelope<null>(`${IAM_PATH.projects}/../roles/${id}`);
+  await deleteEnvelope<null>(roleDetail(id));
+}
+
+/** Assign a role to a user on a project (POST /iam/roles/{id}/assign). */
+export async function assignRoleToUser(id: number, body: AssignRoleRequest): Promise<{ id: number }> {
+  return postEnvelope<{ id: number }>(assignRole(id), body);
+}
+
+/** List active login sessions for a user. */
+export async function listSessions(userId: number): Promise<SessionItem[]> {
+  return getEnvelope<SessionItem[]>(userSessions(userId));
+}
+
+/** Revoke a single session by ID. */
+export async function revokeSession(id: number): Promise<void> {
+  await postEnvelope<null>(sessionRevoke(id), {});
+}
+
+/** Revoke all sessions belonging to a user. */
+export async function revokeAllUserSessions(userId: number): Promise<void> {
+  await postEnvelope<null>(userSessionsRevoke(userId), {});
 }

@@ -44,6 +44,10 @@ const Projects = lazy(() => import('#ui/pages/Projects'));
 const Agents = lazy(() => import('#ui/pages/Agents'));
 const MfaSettings = lazy(() => import('#ui/pages/MfaSettings'));
 const IdpSettings = lazy(() => import('#ui/pages/IdpSettings'));
+const Sessions = lazy(() => import('#ui/pages/Sessions'));
+const Roles = lazy(() => import('#ui/pages/Roles'));
+const Groups = lazy(() => import('#ui/pages/Groups'));
+const Domains = lazy(() => import('#ui/pages/Domains'));
 const NotFound = lazy(() => import('#ui/pages/NotFound'));
 
 function BootFallback() {
@@ -260,6 +264,38 @@ if (root) {
             component={() => (
               <AdminGate>
                 <IdpSettings />
+              </AdminGate>
+            )}
+          />
+          <Route
+            path={ROUTE_PATH.sessions}
+            component={() => (
+              <AdminGate>
+                <Sessions />
+              </AdminGate>
+            )}
+          />
+          <Route
+            path={ROUTE_PATH.roles}
+            component={() => (
+              <AdminGate>
+                <Roles />
+              </AdminGate>
+            )}
+          />
+          <Route
+            path={ROUTE_PATH.groups}
+            component={() => (
+              <AdminGate>
+                <Groups />
+              </AdminGate>
+            )}
+          />
+          <Route
+            path={ROUTE_PATH.domains}
+            component={() => (
+              <AdminGate>
+                <Domains />
               </AdminGate>
             )}
           />

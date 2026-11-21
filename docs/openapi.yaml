@@ -8142,4 +8142,24 @@ paths:
         '200': {description: Cursor page, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/web3/wallets:
+    get:
+      tags: [Web3]
+      summary: List the authenticated user wallets with DIDs
+      operationId: GET_api_v1_web3_wallets
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Wallet list, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+  /api/v1/web3/did/resolve:
+    get:
+      tags: [Web3]
+      summary: Resolve a did:zasdoor identifier to chain/address/user
+      operationId: GET_api_v1_web3_did_resolve
+      parameters: [{name: did, in: query, required: true, schema: {type: string}}]
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Resolved DID, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
 
