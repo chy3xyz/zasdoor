@@ -20,6 +20,7 @@ const mfa_model = @import("modules/mfa/model.zig");
 const web3_model = @import("modules/web3/model.zig");
 const agent_model = @import("modules/agent/model.zig");
 const authz_model = @import("modules/authz/model.zig");
+const orgstruct_model = @import("modules/orgstruct/model.zig");
 
 // One graph for every table. zent raised `buildGraph`'s comptime branch quota
 // with v0.29.4 (1M branches; ~400 tables measured per call — zent
@@ -69,6 +70,10 @@ const graph = zent.codegen.graph.buildGraph(&.{
     agent_model.AgentUsage,
     authz_model.Policy,
     authz_model.AuthzDecision,
+    orgstruct_model.Instance,
+    orgstruct_model.Group,
+    orgstruct_model.GroupMember,
+    orgstruct_model.Domain,
 });
 
 pub const infos = graph.types;

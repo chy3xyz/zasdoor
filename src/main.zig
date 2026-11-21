@@ -44,6 +44,7 @@ const authz = @import("modules/authz/root.zig");
 const mfa = @import("modules/mfa/root.zig");
 const web3 = @import("modules/web3/root.zig");
 const agent = @import("modules/agent/root.zig");
+const orgstruct = @import("modules/orgstruct/root.zig");
 
 /// Set by SIGINT/SIGTERM so the main thread can stop the server gracefully.
 const ShutdownFlag = struct {
@@ -185,6 +186,7 @@ pub fn main(init: std.process.Init) !void {
         web3.persistence.infos,
         agent.persistence.infos,
         authz.persistence.infos,
+        orgstruct.persistence.infos,
     }).open(allocator, kind, dsn);
     defer store_env.deinit();
     std.log.info("[zent] migrated schema via {s} ({s})", .{ @tagName(kind), dsn });
@@ -255,11 +257,16 @@ pub fn main(init: std.process.Init) !void {
     var oauth_svc = oauth.service.OAuthService.initWithExtraKeys(allocator, io, &iam_svc, &user_svc, &sec, cfg.app_host, cfg.oidc_key_secrets);
 
     var event_store = eventstore.persistence.EventStore.init(allocator, store_env.client);
-    var event_svc = eventstore.service.EventService.init(allocator, io, &event_store, &.{}); // projections added below
+    const user_projection = eventstore.service.Projection{
+        .name = "users_activity",
+        .run = eventstore.user_projection.project,
+    };
+    var event_svc = eventstore.service.EventService.init(allocator, io, &event_store, &.{user_projection});
     var authz_store = authz.persistence.AuthzStore.init(allocator, store_env.client);
     var authz_svc = authz.service.AuthzService.initWithStore(allocator, &iam_svc, &authz_store);
     authorize_mw.install(&authz_svc);
     ProjectionCtx.svc = &event_svc;
+    user_svc.bindEventService(&event_svc);
     var authz_api = authz.api.AuthzApi(@TypeOf(authz_svc), @TypeOf(user_svc)).init(&authz_svc, &user_svc);
     var mfa_store = mfa.persistence.MfaStore.init(allocator, store_env.client);
     var mfa_svc = mfa.service.MfaService.init(allocator, io, &mfa_store, &sec);
@@ -275,6 +282,8 @@ pub fn main(init: std.process.Init) !void {
     var agent_store = agent.persistence.AgentStore.init(allocator, store_env.client);
     var agent_svc = agent.service.AgentService.init(allocator, io, &agent_store, &user_svc, &sec, cfg.app_host);
     var agent_api = agent.api.AgentApi(@TypeOf(agent_svc), @TypeOf(user_svc)).init(&agent_svc, &user_svc, default_tenant_id);
+    var orgstruct_store = orgstruct.persistence.OrgStructStore.init(allocator, store_env.client);
+    var orgstruct_svc = orgstruct.service.OrgStructService.init(allocator, io, &orgstruct_store, &sec);
 
     // ── ZigModu module lifecycle (Application API: scan + validate + start/stop) ──
     var app = try zmodu.Application.init(io, allocator, "zasdoor", .{
@@ -295,6 +304,7 @@ pub fn main(init: std.process.Init) !void {
         mfa.module,
         web3.module,
         agent.module,
+        orgstruct.module,
     }, .{});
     defer app.deinit();
     try app.start();
@@ -387,6 +397,7 @@ pub fn main(init: std.process.Init) !void {
     var oauth_api = oauth.api.OAuthApi(@TypeOf(oauth_svc), @TypeOf(user_svc)).init(&oauth_svc, &user_svc);
     var mfa_api = mfa.api.MfaApi(@TypeOf(mfa_svc), @TypeOf(user_svc)).init(&mfa_svc, &user_svc, default_tenant_id);
     var webauthn_api = mfa.webauthn_api.WebauthnApi(@TypeOf(webauthn_svc), @TypeOf(user_svc)).init(&webauthn_svc, &user_svc, &login_registry, default_tenant_id);
+    var orgstruct_api = orgstruct.api.OrgStructApi(@TypeOf(orgstruct_svc), @TypeOf(user_svc)).init(&orgstruct_svc, &user_svc, &audit_svc, default_tenant_id);
     var web3_api = web3.api.Web3Api(@TypeOf(web3_svc), @TypeOf(user_svc)).init(&web3_svc, &user_svc, default_tenant_id);
     var idp_api = mfa.idp_api.IdpApi(@TypeOf(idp_svc), @TypeOf(user_svc)).init(&idp_svc, &user_svc, default_tenant_id);
     var system_api = system.api.SystemApi(@TypeOf(cache), @TypeOf(task_svc)).init(
@@ -446,6 +457,7 @@ pub fn main(init: std.process.Init) !void {
     try mail_template_api.registerRoutes(&v1);
     try ai_api.registerRoutes(&v1);
     try iam_api.registerRoutes(&v1);
+    try orgstruct_api.registerRoutes(&v1);
     try authz_api.registerRoutes(&v1);
     try mfa_api.registerRoutes(&v1);
     try webauthn_api.registerRoutes(&v1);

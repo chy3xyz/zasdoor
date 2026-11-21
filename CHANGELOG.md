@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.5.0] - 2026-10-18
 
+### Added
+
+- **P1 domain layer**: Instance, Group/GroupMember and Domain with verification
+  token (hash-only storage), admin CRUD under `/iam/instances`, `/iam/groups`
+  and `/iam/domains`. All store lookups are tenant-scoped.
+- **Event sourcing activation**: user domain writes append immutable facts
+  (`user.registered`, `user.contact.updated`) to the Event Store; a
+  `users_activity` projection builds an independent read model and is advanced
+  by the scheduled projection worker.
+- **Agent capability/budget enforcement**: `POST /agents/{id}/invoke` enforces
+  the agent's capability allow-list and atomically charges its period budget;
+  token issuance and deactivation are capability-gated as well. Rejections
+  map to 403 (capability/expired) and 429 (budget). Fixed agent JWT payloads to
+  be valid JSON.
+
 ### Security
 
 - **P0 IAM hardening**: authorization policies are now enforced on all
@@ -190,7 +205,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Verified
 
-- `zig build`, `zig build test` (109/109) and `zig build -Doptimize=ReleaseSafe`
+- `zig build`, `zig build test` (117/117) and `zig build -Doptimize=ReleaseSafe`
   pass on Zig 0.17.0; `zig fmt --check` and `scripts/run_e2e.sh` (boot ->
   probes -> admin/login/info -> graceful shutdown, no panic/leak) are green,
   with the web typecheck/vitest/rsbuild also passing.

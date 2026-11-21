@@ -5,6 +5,7 @@ const std = @import("std");
 const zmodu = @import("zmodu");
 const persist = @import("persistence.zig");
 const iam_svc_mod = @import("../iam/service.zig");
+const event_svc_mod = @import("../eventstore/service.zig");
 
 pub const UserRow = persist.UserRow;
 
@@ -312,6 +313,9 @@ pub const UserService = struct {
     /// Request metadata recorded on created sessions. Populated by the HTTP
     /// layer via `setSessionContext`; empty values are allowed (e.g. unit tests).
     session_context: SessionContext = .{},
+    /// Optional event store: domain writes are also appended as immutable
+    /// facts so projections can build independent query models.
+    event_svc: ?*event_svc_mod.EventService = null,
 
     pub fn init(
         store: *persist.UserStore,
@@ -331,6 +335,22 @@ pub const UserService = struct {
 
     /// Bind the IAM service used to persist Session rows. Called once at
     /// startup; every later successful authentication records a session.
+    /// Bind the event store used to record domain facts. Called once at startup.
+    pub fn bindEventService(self: *UserService, svc: *event_svc_mod.EventService) void {
+        self.event_svc = svc;
+    }
+
+    /// Best-effort domain event append; a store fault never fails the write.
+    fn emit(self: *UserService, tenant_id: i64, aggregate_id: i64, event_type: []const u8, payload: []const u8, actor_id: i64) void {
+        if (self.event_svc) |svc| {
+            var buf: [64]u8 = undefined;
+            const id = std.fmt.bufPrint(&buf, "{d}", .{aggregate_id}) catch return;
+            _ = svc.append(tenant_id, "user", id, 0, event_type, payload, actor_id) catch {
+                std.log.warn("[user] event append failed ({s}) for user {d}", .{ event_type, aggregate_id });
+            };
+        }
+    }
+
     pub fn bindIamService(self: *UserService, iam_svc: *iam_svc_mod.IamService) void {
         self.iam_svc = iam_svc;
     }
@@ -406,7 +426,7 @@ pub const UserService = struct {
         const now = zmodu.time.wallClockSeconds(self.io);
         // A prior `getUserByEmail` guard makes a create failure most likely
         // a unique-constraint race; re-check before blaming the DB.
-        _ = self.store.createUser(trimmed_name, norm_email, hash, false, admin, tenant_id, now) catch {
+        const user_id = self.store.createUser(trimmed_name, norm_email, hash, false, admin, tenant_id, now) catch {
             const raced_opt = self.store.getUserByEmail(norm_email) catch return error.Unexpected;
             if (raced_opt) |existing| {
                 existing.free(self.store.allocator);
@@ -415,6 +435,7 @@ pub const UserService = struct {
             return error.Unexpected;
         };
 
+        self.emit(tenant_id, user_id, "user.registered", "{\"source\":\"password\"}", 0);
         return self.issueSession(allocator, norm_email, admin, tenant_id) catch return error.Unexpected;
     }
 
@@ -535,8 +556,11 @@ pub const UserService = struct {
         }
         const row_opt = self.store.getUserById(id) catch return error.Unexpected;
         const row = row_opt orelse return error.UserNotFound;
-        row.free(self.store.allocator);
+        defer row.free(self.store.allocator);
         self.store.updateContact(id, phone, address, zmodu.time.wallClockSeconds(self.io)) catch return error.Unexpected;
+        const payload = std.fmt.allocPrint(self.store.allocator, "{{\"phone\":\"{s}\",\"address\":\"{s}\"}}", .{ phone, address }) catch return;
+        defer self.store.allocator.free(payload);
+        self.emit(row.tenant_id, id, "user.contact.updated", payload, 0);
     }
 
     /// Free a session, returning each allocation to its producer (see Session).

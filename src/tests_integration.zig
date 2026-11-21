@@ -23,6 +23,7 @@ const oauth = @import("modules/oauth/root.zig");
 const mfa = @import("modules/mfa/root.zig");
 const web3 = @import("modules/web3/root.zig");
 const agent = @import("modules/agent/root.zig");
+const orgstruct = @import("modules/orgstruct/root.zig");
 
 const Testkit = zmodu.http.Testkit;
 const Pair = Testkit.AttrPair;
@@ -47,6 +48,7 @@ fn openMemory(allocator: std.mem.Allocator) !db_mod.StoreEnv(schema.infos, .{
     mfa.persistence.infos,
     web3.persistence.infos,
     agent.persistence.infos,
+    orgstruct.persistence.infos,
 }) {
     return db_mod.StoreEnv(schema.infos, .{
         tenant.persistence.infos,
@@ -66,6 +68,7 @@ fn openMemory(allocator: std.mem.Allocator) !db_mod.StoreEnv(schema.infos, .{
         mfa.persistence.infos,
         web3.persistence.infos,
         agent.persistence.infos,
+        orgstruct.persistence.infos,
     }).open(allocator, .sqlite, ":memory:");
 }
 

@@ -23,6 +23,7 @@ const authzm = @import("modules/authz/root.zig");
 const mfa = @import("modules/mfa/root.zig");
 const web3 = @import("modules/web3/root.zig");
 const agent = @import("modules/agent/root.zig");
+const orgstruct = @import("modules/orgstruct/root.zig");
 const cache_svc = @import("services/cache.zig");
 const mail = @import("services/mail.zig");
 
@@ -51,6 +52,7 @@ fn openMemory(allocator: std.mem.Allocator) !db_mod.StoreEnv(schema.infos, .{
     web3.persistence.infos,
     agent.persistence.infos,
     authzm.persistence.infos,
+    orgstruct.persistence.infos,
 }) {
     return db_mod.StoreEnv(schema.infos, .{
         tenant.persistence.infos,
@@ -71,6 +73,7 @@ fn openMemory(allocator: std.mem.Allocator) !db_mod.StoreEnv(schema.infos, .{
         web3.persistence.infos,
         agent.persistence.infos,
         authzm.persistence.infos,
+        orgstruct.persistence.infos,
     }).open(allocator, .sqlite, ":memory:");
 }
 
@@ -106,6 +109,7 @@ test "sqlite store query prepares and runs standalone" {
         web3.persistence.infos,
         agent.persistence.infos,
         authzm.persistence.infos,
+        orgstruct.persistence.infos,
     }).open(allocator, .sqlite, ":memory:");
     defer env.deinit();
     var store = user.persistence.UserStore.init(allocator, env.client);
@@ -1706,6 +1710,37 @@ test "user: federated accounts cannot reset or receive a password reset token" {
     defer sec.module.allocator.free(hash);
     _ = try store.createPasswordToken(uid, hash, zmodu.time.wallClockSeconds(std.testing.io));
     try std.testing.expectError(error.FederatedAccount, svc.resetPassword(uid, raw, "Str0ng-pass-123"));
+}
+
+test "eventstore: user facts append and projection produces read model" {
+    const allocator = std.testing.allocator;
+    var env = try openMemory(allocator);
+    defer env.deinit();
+    var store = user.persistence.UserStore.init(allocator, env.client);
+    var event_store = eventstore.persistence.EventStore.init(allocator, env.client);
+    var sec = zmodu.security.AppSecurity.init(allocator, std.testing.io, .{ .jwt_secret = "event-test" });
+    var svc = user.service.UserService.init(&store, &sec, std.testing.io, 3600, 86400);
+    const projs = [_]eventstore.service.Projection{.{
+        .name = "users_activity",
+        .run = eventstore.user_projection.project,
+    }};
+    var event_svc = eventstore.service.EventService.init(allocator, std.testing.io, &event_store, &projs);
+    svc.bindEventService(&event_svc);
+
+    const session = try svc.register(allocator, "Evt", "evt@example.com", "Str0ng-Passw0rd!23", false, 1);
+    defer svc.freeSession(session);
+    try std.testing.expectEqual(@as(i64, 1), try event_store.allCount());
+
+    try event_svc.project();
+    const pos = try event_store.getPosition("users_activity");
+    try std.testing.expect(pos >= 1);
+    const stream = try event_store.streamOf("user", "1");
+    defer {
+        for (stream) |r| r.free(allocator);
+        allocator.free(stream);
+    }
+    try std.testing.expectEqual(@as(usize, 1), stream.len);
+    try std.testing.expectEqualStrings("user.registered", stream[0].event_type);
 }
 
 test "authz: middleware maps HTTP methods to actions" {

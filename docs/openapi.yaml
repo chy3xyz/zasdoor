@@ -82,6 +82,7 @@ tags:
   description: AI provider administration, chat sessions, approvals, runs, metrics and skills.
 - name: OAuth2 / OIDC
   description: OAuth2/OIDC protocol endpoints served at the server root.
+
 components:
   securitySchemes:
     bearerAuth:
@@ -7943,3 +7944,185 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/iam/instances:
+    get:
+      tags: [Authorization]
+      summary: List instances (admin)
+      operationId: GET_api_v1_iam_instances
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Instance list, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+    post:
+      tags: [Authorization]
+      summary: Create instance (admin)
+      operationId: POST_api_v1_iam_instances
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Instance created, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/iam/instances/{id}:
+    parameters: [{name: id, in: path, required: true, schema: {type: integer, format: int64}}]
+    get:
+      tags: [Authorization]
+      summary: Get instance (admin)
+      operationId: GET_api_v1_iam_instances_id
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Instance, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    put:
+      tags: [Authorization]
+      summary: Update instance (admin)
+      operationId: PUT_api_v1_iam_instances_id
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Updated, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+    delete:
+      tags: [Authorization]
+      summary: Delete instance (admin)
+      operationId: DELETE_api_v1_iam_instances_id
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Deleted, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/iam/groups:
+    get:
+      tags: [Authorization]
+      summary: List groups (admin)
+      operationId: GET_api_v1_iam_groups
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Group list, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+    post:
+      tags: [Authorization]
+      summary: Create group (admin)
+      operationId: POST_api_v1_iam_groups
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Group created, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/iam/groups/{id}:
+    parameters: [{name: id, in: path, required: true, schema: {type: integer, format: int64}}]
+    get:
+      tags: [Authorization]
+      summary: Get group (admin)
+      operationId: GET_api_v1_iam_groups_id
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Group, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    put:
+      tags: [Authorization]
+      summary: Update group (admin)
+      operationId: PUT_api_v1_iam_groups_id
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Updated, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+    delete:
+      tags: [Authorization]
+      summary: Delete group (admin)
+      operationId: DELETE_api_v1_iam_groups_id
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Deleted, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/iam/groups/{id}/members:
+    parameters: [{name: id, in: path, required: true, schema: {type: integer, format: int64}}]
+    get:
+      tags: [Authorization]
+      summary: List group members (admin)
+      operationId: GET_api_v1_iam_groups_id_members
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Members, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+    post:
+      tags: [Authorization]
+      summary: Add group member (admin)
+      operationId: POST_api_v1_iam_groups_id_members
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Added, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/iam/groups/{id}/members/{user_id}:
+    parameters:
+    - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+    - {name: user_id, in: path, required: true, schema: {type: integer, format: int64}}
+    delete:
+      tags: [Authorization]
+      summary: Remove group member (admin)
+      operationId: DELETE_api_v1_iam_groups_id_members_user_id
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Removed, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/iam/domains:
+    get:
+      tags: [Authorization]
+      summary: List domains (admin)
+      operationId: GET_api_v1_iam_domains
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Domains, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+    post:
+      tags: [Authorization]
+      summary: Create domain and verification token (admin)
+      operationId: POST_api_v1_iam_domains
+      description: Returns the plaintext verification_token once; only its hash is stored.
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Domain created, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/iam/domains/{id}:
+    parameters: [{name: id, in: path, required: true, schema: {type: integer, format: int64}}]
+    get:
+      tags: [Authorization]
+      summary: Get domain (admin)
+      operationId: GET_api_v1_iam_domains_id
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Domain, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    delete:
+      tags: [Authorization]
+      summary: Delete domain (admin)
+      operationId: DELETE_api_v1_iam_domains_id
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Deleted, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/iam/domains/{id}/verify:
+    parameters: [{name: id, in: path, required: true, schema: {type: integer, format: int64}}]
+    post:
+      tags: [Authorization]
+      summary: Verify a domain with its token (admin)
+      operationId: POST_api_v1_iam_domains_id_verify
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Verified, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/agents/{id}/invoke:
+    parameters: [{name: id, in: path, required: true, schema: {type: integer, format: int64}}]
+    post:
+      tags: [Agents]
+      summary: Invoke an agent operation with capability and budget enforcement
+      operationId: POST_api_v1_agents_id_invoke
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Operation result and remaining budget, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+

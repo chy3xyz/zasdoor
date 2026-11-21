@@ -30,10 +30,23 @@ pub fn AgentApi(comptime Service: type, comptime UserService: type) type {
             try g.get("/agents/{id}", get, @ptrCast(@alignCast(self)));
             try g.post("/agents/{id}/deactivate", deactivate, @ptrCast(@alignCast(self)));
             try g.post("/agents/{id}/token", issueToken, @ptrCast(@alignCast(self)));
+            try g.post("/agents/{id}/invoke", invoke, @ptrCast(@alignCast(self)));
         }
 
         fn requireUser(ctx: *http.Context) ?i64 {
             return mw.authUserId(ctx);
+        }
+
+        /// Map an agent-authorization failure to the documented HTTP status:
+        /// 403 for missing capability / expired / unusable identity,
+        /// 429 for exhausted budget, 500 for unexpected store failures.
+        fn sendAgentError(ctx: *http.Context, err: service.AgentError) !void {
+            switch (err) {
+                error.MissingCapability => try ctx.sendErrorResponse(403, 403, "Agent 无此操作能力"),
+                error.Expired, error.NotUsable => try ctx.sendErrorResponse(403, 403, "Agent 已失效或未授权"),
+                error.BudgetExceeded, error.InsufficientBudget => try ctx.sendErrorResponse(429, 429, "Agent 预算不足"),
+                error.Unexpected => try ctx.sendErrorResponse(500, 500, "服务器内部错误"),
+            }
         }
 
         const AgentDto = struct {
@@ -163,7 +176,13 @@ pub fn AgentApi(comptime Service: type, comptime UserService: type) type {
             try ctx.jsonStruct(200, .{ .code = 0, .msg = "Agent 已停用", .data = null });
         }
 
-        const IssueTokenReq = struct { ttl: ?i64 = null };
+        const IssueTokenReq = struct {
+            ttl: ?i64 = null,
+            /// When present, issuance is gated on this capability from the
+            /// agent's allow-list. `agent.token.issue` is the conventional
+            /// value for self-service minting. Omitted = trusted admin path.
+            capability: ?[]const u8 = null,
+        };
 
         fn issueToken(ctx: *http.Context) !void {
             const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
@@ -175,8 +194,22 @@ pub fn AgentApi(comptime Service: type, comptime UserService: type) type {
                 try ctx.sendErrorResponse(400, 400, "无效的 Agent ID");
                 return;
             };
-            const req = ctx.bindJsonLoose(IssueTokenReq) catch IssueTokenReq{ .ttl = null };
+            const req = ctx.bindJsonLoose(IssueTokenReq) catch IssueTokenReq{ .ttl = null, .capability = null };
+            defer if (req.capability) |v| ctx.allocator.free(v);
             const ttl = req.ttl orelse 3600;
+
+            // Explicit capability-gated path: the target agent must hold the
+            // requested capability before a token is minted.
+            if (req.capability) |cap| {
+                const minted = self.svc.issueAgentTokenFor(id, ttl, cap) catch |err| {
+                    try sendAgentError(ctx, err);
+                    return;
+                };
+                defer self.svc.allocator.free(minted);
+                try ctx.jsonStruct(200, .{ .code = 0, .msg = "", .data = .{ .access_token = minted, .token_type = "Bearer" } });
+                return;
+            }
+
             const tok_opt = self.svc.issueAgentToken(id, ttl) catch {
                 try ctx.sendErrorResponse(500, 500, "服务器内部错误");
                 return;
@@ -187,6 +220,48 @@ pub fn AgentApi(comptime Service: type, comptime UserService: type) type {
             };
             defer self.svc.allocator.free(tok);
             try ctx.jsonStruct(200, .{ .code = 0, .msg = "", .data = .{ .access_token = tok, .token_type = "Bearer" } });
+        }
+
+        /// Mediated execution entry point. The authenticated caller mediates
+        /// an operation on agent `{id}`; the service enforces that agent's
+        /// declared capability allow-list and atomically charges the cost
+        /// from its per-period budget before returning 200.
+        const InvokeReq = struct {
+            capability: []const u8,
+            cost: ?i64 = null,
+        };
+
+        fn invoke(ctx: *http.Context) !void {
+            const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
+            _ = requireUser(ctx) orelse {
+                try ctx.sendErrorResponse(401, 401, "未登录或登录已过期");
+                return;
+            };
+            const id = ctx.paramInt(i64, "id") catch {
+                try ctx.sendErrorResponse(400, 400, "无效的 Agent ID");
+                return;
+            };
+            const req = ctx.bindJsonLoose(InvokeReq) catch {
+                try ctx.sendErrorResponse(400, 400, "请求体格式错误");
+                return;
+            };
+            defer ctx.allocator.free(req.capability);
+            if (req.capability.len == 0) {
+                try ctx.sendErrorResponse(400, 400, "capability 不能为空");
+                return;
+            }
+            const cost = req.cost orelse 1;
+            if (cost < 0) {
+                try ctx.sendErrorResponse(400, 400, "cost 不能为负数");
+                return;
+            }
+            // Enforcement happens on the target agent's delegated authority,
+            // independent of which authenticated caller mediates the invoke.
+            const remaining = self.svc.invoke(id, req.capability, cost) catch |err| {
+                try sendAgentError(ctx, err);
+                return;
+            };
+            try ctx.jsonStruct(200, .{ .code = 0, .msg = "", .data = .{ .remaining_budget = remaining } });
         }
 
         const VerifyTokenReq = struct { token: []const u8 };

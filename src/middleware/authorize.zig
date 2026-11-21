@@ -41,7 +41,7 @@ pub fn enforce() http.Middleware {
                     action,
                     .{
                         .tenant_id = mw.authTenantId(ctx),
-                        .now = zmodu.time.wallClockSeconds(ctx.io orelse std.testing.io),
+                        .now = if (ctx.io) |io| zmodu.time.wallClockSeconds(io) else 0,
                     },
                 ) catch {
                     try ctx.sendErrorResponse(500, 500, "服务器内部错误");

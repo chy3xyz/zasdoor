@@ -11,6 +11,7 @@ Start with the [project README](../README.md). These documents go deeper on indi
 | [auth.md](auth.md) | Password policy and per-account login lockout |
 | [web3.md](web3.md) | Sign-In With Ethereum: EIP-4361 messages, nonces, wallet binding |
 | [agent.md](agent.md) | Machine identities: capabilities, scopes, and the per-period budget ledger |
+| [orgstruct.md](orgstruct.md) | Instance, groups and domain verification (P1 domain layer) |
 | [authz.md](authz.md) | Authorization kernel: policies, conditions, decision audit, role fallback, deny-by-default |
 | [saml.md](saml.md) | SAML 2.0 SP design: endpoints, assertion validation, XML/c14n plan, phased delivery |
 | [eventstore.md](eventstore.md) | Append-only domain events |
