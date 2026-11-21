@@ -12,9 +12,11 @@ import {
 } from '#ui/api';
 import { useAuth } from '#ui/hooks';
 import { ROUTE_PATH } from '#ui/constants';
+import { useI18n } from '#ui/i18n';
 import { formatDateTime } from '#ui/utils';
 
 function NotificationBell() {
+  const { t } = useI18n();
   const [open, setOpen] = createSignal(false);
   const [unread, setUnread] = createSignal(0);
   const [items, setItems] = createSignal<NotificationItem[]>([]);
@@ -71,7 +73,7 @@ function NotificationBell() {
           setOpen(!open());
           if (!open()) void refresh();
         }}
-        aria-label="通知"
+        aria-label={t('nav.notifications')}
       >
         <span class="text-base">🔔</span>
         <Show when={unread() > 0}>
@@ -84,15 +86,15 @@ function NotificationBell() {
       <Show when={open()}>
         <div class="absolute right-0 z-50 mt-2 w-80 rounded-lg border border-base-300 bg-base-100 shadow-xl">
           <div class="flex items-center justify-between border-b border-base-300 px-3 py-2">
-            <span class="text-sm font-semibold">通知</span>
+            <span class="text-sm font-semibold">{t('nav.notifications')}</span>
             <button type="button" class="btn btn-ghost btn-xs" onClick={onMarkAll}>
-              全部已读
+              {t('nav.markAllRead')}
             </button>
           </div>
           <div class="max-h-80 overflow-y-auto">
             <Show
               when={items().length > 0}
-              fallback={<p class="px-3 py-6 text-center text-sm text-base-content/50">暂无通知</p>}
+              fallback={<p class="px-3 py-6 text-center text-sm text-base-content/50">{t('nav.noNotifications')}</p>}
             >
               <For each={items()}>
                 {(item) => (
@@ -106,11 +108,11 @@ function NotificationBell() {
                       <div class="flex shrink-0 gap-1">
                         <Show when={!item.read}>
                           <button type="button" class="btn btn-ghost btn-xs" onClick={() => onMarkRead(item.id)}>
-                            已读
+                            {t('nav.markRead')}
                           </button>
                         </Show>
                         <button type="button" class="btn btn-ghost btn-xs text-error" onClick={() => onDelete(item.id)}>
-                          删除
+                          {t('common.delete')}
                         </button>
                       </div>
                     </div>
@@ -127,6 +129,7 @@ function NotificationBell() {
 
 function MainLayout(props: { children?: JSX.Element }) {
   const [auth, actions] = useAuth();
+  const { locale, setLocale, t } = useI18n();
   const [dark, setDark] = createSignal(localStorage.getItem('zasdoor.theme') === 'dark');
   createEffect(() => {
     document.documentElement.setAttribute('data-theme', dark() ? 'dark' : 'light');
@@ -147,7 +150,7 @@ function MainLayout(props: { children?: JSX.Element }) {
               class="block rounded-lg px-3 py-2 text-sm hover:bg-base-300 [&.active]:bg-primary [&.active]:text-primary-content"
               activeClass="active"
             >
-              概览
+              {t('nav.dashboard')}
             </A>
           </Show>
           <Show when={auth.user?.admin}>
@@ -156,7 +159,7 @@ function MainLayout(props: { children?: JSX.Element }) {
               class="block rounded-lg px-3 py-2 text-sm hover:bg-base-300 [&.active]:bg-primary [&.active]:text-primary-content"
               activeClass="active"
             >
-              用户管理
+              {t('nav.users')}
             </A>
           </Show>
           <A
@@ -164,7 +167,7 @@ function MainLayout(props: { children?: JSX.Element }) {
             class="block rounded-lg px-3 py-2 text-sm hover:bg-base-300 [&.active]:bg-primary [&.active]:text-primary-content"
             activeClass="active"
           >
-            AI 助手
+            {t('nav.aiChat')}
           </A>
           <Show when={auth.user?.admin}>
             <A
@@ -172,7 +175,7 @@ function MainLayout(props: { children?: JSX.Element }) {
               class="block rounded-lg px-3 py-2 text-sm hover:bg-base-300 [&.active]:bg-primary [&.active]:text-primary-content"
               activeClass="active"
             >
-              AI 管理
+              {t('nav.aiAdmin')}
             </A>
           </Show>
           <Show when={auth.user?.admin}>
@@ -181,7 +184,7 @@ function MainLayout(props: { children?: JSX.Element }) {
               class="block rounded-lg px-3 py-2 text-sm hover:bg-base-300 [&.active]:bg-primary [&.active]:text-primary-content"
               activeClass="active"
             >
-              审计日志
+              {t('nav.auditLogs')}
             </A>
           </Show>
           <Show when={auth.user?.admin}>
@@ -190,7 +193,7 @@ function MainLayout(props: { children?: JSX.Element }) {
               class="block rounded-lg px-3 py-2 text-sm hover:bg-base-300 [&.active]:bg-primary [&.active]:text-primary-content"
               activeClass="active"
             >
-              邮件模板
+              {t('nav.mailTemplates')}
             </A>
           </Show>
           <Show when={auth.user?.admin}>
@@ -199,7 +202,7 @@ function MainLayout(props: { children?: JSX.Element }) {
               class="block rounded-lg px-3 py-2 text-sm hover:bg-base-300 [&.active]:bg-primary [&.active]:text-primary-content"
               activeClass="active"
             >
-              任务中心
+              {t('nav.tasks')}
             </A>
           </Show>
           <Show when={auth.user?.admin}>
@@ -208,7 +211,7 @@ function MainLayout(props: { children?: JSX.Element }) {
               class="block rounded-lg px-3 py-2 text-sm hover:bg-base-300 [&.active]:bg-primary [&.active]:text-primary-content"
               activeClass="active"
             >
-              租户管理
+              {t('nav.tenants')}
             </A>
           </Show>
           <Show when={auth.user?.admin}>
@@ -217,7 +220,7 @@ function MainLayout(props: { children?: JSX.Element }) {
               class="block rounded-lg px-3 py-2 text-sm hover:bg-base-300 [&.active]:bg-primary [&.active]:text-primary-content"
               activeClass="active"
             >
-              组织管理
+              {t('nav.organizations')}
             </A>
           </Show>
           <Show when={auth.user?.admin}>
@@ -226,7 +229,7 @@ function MainLayout(props: { children?: JSX.Element }) {
               class="block rounded-lg px-3 py-2 text-sm hover:bg-base-300 [&.active]:bg-primary [&.active]:text-primary-content"
               activeClass="active"
             >
-              项目 / 应用
+              {t('nav.projects')}
             </A>
           </Show>
           <Show when={auth.user?.admin}>
@@ -235,7 +238,7 @@ function MainLayout(props: { children?: JSX.Element }) {
               class="block rounded-lg px-3 py-2 text-sm hover:bg-base-300 [&.active]:bg-primary [&.active]:text-primary-content"
               activeClass="active"
             >
-              AI Agent
+              {t('nav.agents')}
             </A>
           </Show>
           <Show when={auth.user?.admin}>
@@ -244,14 +247,14 @@ function MainLayout(props: { children?: JSX.Element }) {
               class="block rounded-lg px-3 py-2 text-sm hover:bg-base-300 [&.active]:bg-primary [&.active]:text-primary-content"
               activeClass="active"
             >
-              MFA 安全
+              {t('nav.mfaSettings')}
             </A>
             <A
               href={ROUTE_PATH.idpSettings}
               class="block rounded-lg px-3 py-2 text-sm hover:bg-base-300 [&.active]:bg-primary [&.active]:text-primary-content"
               activeClass="active"
             >
-              身份提供方
+              {t('nav.idpSettings')}
             </A>
           </Show>
           <A
@@ -259,33 +262,36 @@ function MainLayout(props: { children?: JSX.Element }) {
             class="block rounded-lg px-3 py-2 text-sm hover:bg-base-300 [&.active]:bg-primary [&.active]:text-primary-content"
             activeClass="active"
           >
-            文件管理
+            {t('nav.files')}
           </A>
           <A
             href={ROUTE_PATH.profile}
             class="block rounded-lg px-3 py-2 text-sm hover:bg-base-300 [&.active]:bg-primary [&.active]:text-primary-content"
             activeClass="active"
           >
-            个人资料
+            {t('nav.profile')}
           </A>
         </nav>
         <div class="border-t border-base-300 p-3">
           <button type="button" class="btn btn-outline btn-sm w-full" onClick={() => actions.logout()}>
-            退出登录
+            {t('nav.logout')}
           </button>
         </div>
       </aside>
 
       <div class="flex flex-1 flex-col overflow-hidden">
         <header class="flex h-16 items-center justify-between border-b border-base-300 px-6">
-          <h1 class="text-base font-semibold">管理后台</h1>
+          <h1 class="text-base font-semibold">{t('app.adminConsole')}</h1>
           <div class="flex items-center gap-3 text-sm text-base-content/70">
             <NotificationBell />
-            <button type="button" class="btn btn-ghost btn-xs" onClick={toggleTheme} aria-label="切换主题">
+            <button type="button" class="btn btn-ghost btn-xs" onClick={() => setLocale(locale() === 'zh' ? 'en' : 'zh')} aria-label={t('nav.language')}>
+              {locale() === 'zh' ? 'EN' : '中文'}
+            </button>
+            <button type="button" class="btn btn-ghost btn-xs" onClick={toggleTheme} aria-label={t('nav.toggleTheme')}>
               {dark() ? '🌙' : '☀️'}
             </button>
             <span class="badge badge-ghost">{auth.user?.name ?? '-'}</span>
-            <span class="badge badge-outline">{auth.user?.admin ? '管理员' : '用户'}</span>
+            <span class="badge badge-outline">{auth.user?.admin ? t('nav.admin') : t('nav.user')}</span>
           </div>
         </header>
         <main class="flex-1 overflow-y-auto p-6">{props.children}</main>

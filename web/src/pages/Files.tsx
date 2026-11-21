@@ -3,6 +3,7 @@ import { useToast } from '#ui/components';
 
 import { deleteFile, downloadFile, listFiles, toApiError, uploadFile, type FileItem } from '#ui/api';
 import DataTable, { type Column } from '#ui/components/DataTable';
+import { useI18n } from '#ui/i18n';
 import { usePaged } from '#ui/hooks/usePaged';
 import { formatDateTime } from '#ui/utils';
 
@@ -15,6 +16,7 @@ function formatSize(bytes: number): string {
 }
 
 function Files() {
+  const { t } = useI18n();
   const toast = useToast();
   const [uploading, setUploading] = createSignal(false);
   const [success, setSuccess] = createSignal<string | null>(null);
@@ -29,7 +31,7 @@ function Files() {
     setSuccess(null);
     try {
       await uploadFile(file);
-      setSuccess(`「${file.name}」上传成功`);
+      setSuccess(t('files.uploaded', { name: file.name }));
       input.value = '';
       void paged.reload(1);
     } catch (err) {
@@ -40,7 +42,7 @@ function Files() {
   };
 
   const onDelete = async (file: FileItem) => {
-    if (!window.confirm(`确定删除「${file.name}」吗？此操作不可恢复。`)) return;
+    if (!window.confirm(t('files.confirmDelete', { name: file.name }))) return;
     try {
       await deleteFile(file.id);
       void paged.reload();
@@ -51,12 +53,12 @@ function Files() {
 
   const columns: Column<FileItem>[] = [
     { key: 'id', title: 'ID', render: (f) => <span class="font-mono text-xs">{f.id}</span> },
-    { key: 'name', title: '文件名', render: (f) => <span class="max-w-xs truncate">{f.name}</span> },
-    { key: 'mime', title: '类型', render: (f) => <span class="font-mono text-xs">{f.mime}</span> },
-    { key: 'size_bytes', title: '大小', render: (f) => <span class="text-sm">{formatSize(f.size_bytes)}</span> },
+    { key: 'name', title: t('files.column.fileName'), render: (f) => <span class="max-w-xs truncate">{f.name}</span> },
+    { key: 'mime', title: t('common.type'), render: (f) => <span class="font-mono text-xs">{f.mime}</span> },
+    { key: 'size_bytes', title: t('files.column.size'), render: (f) => <span class="text-sm">{formatSize(f.size_bytes)}</span> },
     {
       key: 'created_at',
-      title: '上传时间',
+      title: t('files.column.uploadedAt'),
       render: (f) => <span class="text-sm text-base-content/70">{formatDateTime(f.created_at)}</span>,
     },
   ];
@@ -65,11 +67,11 @@ function Files() {
     <div class="space-y-4">
       <div class="flex items-center justify-between">
         <div>
-          <h2 class="text-xl font-semibold">文件管理</h2>
-          <p class="text-sm text-base-content/60">共 {paged.total()} 个文件</p>
+          <h2 class="text-xl font-semibold">{t('files.title')}</h2>
+          <p class="text-sm text-base-content/60">{t('files.count', { count: paged.total() })}</p>
         </div>
         <label class="btn btn-primary btn-sm">
-          {uploading() ? '上传中…' : '上传文件'}
+          {uploading() ? t('files.uploading') : t('files.upload')}
           <input type="file" class="hidden" disabled={uploading()} onChange={onUpload} />
         </label>
       </div>
@@ -89,7 +91,7 @@ function Files() {
         totalPages={paged.totalPages()}
         loading={paged.loading()}
         error={paged.error()}
-        emptyText="暂无文件"
+        emptyText={t('files.empty')}
         onPageChange={(p) => void paged.reload(p)}
         actions={(file) => (
           <>
@@ -100,10 +102,10 @@ function Files() {
                 downloadFile(file.id, file.name).catch((err) => toast.show(toApiError(err).message));
               }}
             >
-              下载
+              {t('files.download')}
             </button>
             <button type="button" class="btn btn-ghost btn-xs text-error" onClick={() => onDelete(file)}>
-              删除
+              {t('common.delete')}
             </button>
           </>
         )}

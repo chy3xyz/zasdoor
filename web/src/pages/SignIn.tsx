@@ -4,6 +4,7 @@ import { createSignal, Show } from 'solid-js';
 import { beginPasskeyLogin, getSiweNonce } from '#ui/api';
 import { ROUTE_PATH } from '#ui/constants';
 import { useAuth } from '#ui/hooks';
+import { useI18n } from '#ui/i18n';
 import { decodeRequestOptions, isWebAuthnSupported, passkeyErrorMessage } from '#ui/utils';
 
 interface EthereumProvider {
@@ -17,6 +18,7 @@ declare global {
 }
 
 function SignIn() {
+  const { t } = useI18n();
   const [auth, actions] = useAuth();
   const [email, setEmail] = createSignal('');
   const [password, setPassword] = createSignal('');
@@ -43,7 +45,7 @@ function SignIn() {
     setWalletError(null);
     const provider = window.ethereum;
     if (!provider) {
-      setWalletError('未检测到钱包扩展（如 MetaMask），请先安装后重试。');
+      setWalletError(t('auth.signIn.wallet.notFound'));
       return;
     }
     setWalletBusy(true);
@@ -51,7 +53,7 @@ function SignIn() {
       // 1. Address from the injected provider.
       const accounts = (await provider.request({ method: 'eth_requestAccounts' })) as string[];
       const address = accounts[0] ?? '';
-      if (!address) throw new Error('钱包未返回地址');
+      if (!address) throw new Error(t('auth.signIn.wallet.noAddress'));
       // 2. Server-issued single-use nonce.
       const domain = window.location.hostname || 'localhost';
       const { nonce } = await getSiweNonce({ address, domain });
@@ -70,7 +72,7 @@ function SignIn() {
       // 5. Verify server-side; binds session or reports unbound wallet.
       await actions.siweLogin(message, signature, domain);
     } catch (err) {
-      setWalletError(err instanceof Error ? err.message : '钱包登录失败，请重试');
+      setWalletError(err instanceof Error ? err.message : t('auth.signIn.wallet.failed'));
     } finally {
       setWalletBusy(false);
     }
@@ -81,11 +83,11 @@ function SignIn() {
     setPasskeyError(null);
     const mail = email().trim();
     if (!mail) {
-      setPasskeyError('请先输入邮箱。');
+      setPasskeyError(t('auth.signIn.passkey.emailRequired'));
       return;
     }
     if (!isWebAuthnSupported()) {
-      setPasskeyError('当前浏览器或页面环境不支持通行密钥。');
+      setPasskeyError(t('auth.signIn.passkey.unsupported'));
       return;
     }
     setPasskeyBusy(true);
@@ -97,7 +99,7 @@ function SignIn() {
       credential = (await navigator.credentials.get({
         publicKey: decodeRequestOptions(options),
       })) as PublicKeyCredential | null;
-      if (!credential) throw new Error('未获取到通行密钥');
+      if (!credential) throw new Error(t('auth.signIn.passkey.noCredential'));
     } catch (err) {
       setPasskeyError(passkeyErrorMessage(err));
       setPasskeyBusy(false);
@@ -117,8 +119,8 @@ function SignIn() {
   return (
     <div class="card bg-base-100 shadow-xl">
       <div class="card-body">
-        <h2 class="card-title text-2xl">登录</h2>
-        <p class="text-sm text-base-content/60">使用你的邮箱和密码登录管理后台</p>
+        <h2 class="card-title text-2xl">{t('auth.signIn.title')}</h2>
+        <p class="text-sm text-base-content/60">{t('auth.signIn.subtitle')}</p>
 
         <Show when={auth.error}>
           <div role="alert" class="alert alert-error py-2 text-sm">
@@ -128,7 +130,7 @@ function SignIn() {
 
         <form onSubmit={onSubmit} class="mt-2 space-y-4">
           <label class="form-control w-full">
-            <span class="label-text mb-1">邮箱</span>
+            <span class="label-text mb-1">{t('auth.signIn.email')}</span>
             <input
               type="email"
               class="input input-bordered w-full"
@@ -139,7 +141,7 @@ function SignIn() {
             />
           </label>
           <label class="form-control w-full">
-            <span class="label-text mb-1">密码</span>
+            <span class="label-text mb-1">{t('auth.signIn.password')}</span>
             <input
               type="password"
               class="input input-bordered w-full"
@@ -154,11 +156,11 @@ function SignIn() {
             class="btn btn-primary w-full"
             disabled={submitting()}
           >
-            {submitting() ? '登录中…' : '登录'}
+            {submitting() ? t('auth.signIn.submitting') : t('auth.signIn.submit')}
           </button>
         </form>
 
-        <div class="divider my-2 text-xs text-base-content/50">或</div>
+        <div class="divider my-2 text-xs text-base-content/50">{t('auth.signIn.or')}</div>
 
         <Show when={passkeyError()}>
           <div role="alert" class="alert alert-error py-2 text-sm">
@@ -171,10 +173,10 @@ function SignIn() {
           disabled={passkeyBusy()}
           onClick={onPasskeySignIn}
         >
-          {passkeyBusy() ? '正在验证通行密钥…' : '使用通行密钥登录 / Sign in with passkey'}
+          {passkeyBusy() ? t('auth.signIn.passkey.submitting') : t('auth.signIn.passkey.submit')}
         </button>
         <p class="mt-1 text-xs text-base-content/50">
-          需先在「MFA 安全」中注册通行密钥；浏览器会要求指纹、面容或设备 PIN。
+          {t('auth.signIn.passkey.hint')}
         </p>
 
         <Show when={walletError()}>
@@ -188,17 +190,17 @@ function SignIn() {
           disabled={walletBusy()}
           onClick={onWalletSignIn}
         >
-          {walletBusy() ? '钱包签名中…' : '使用钱包登录 (SIWE)'}
+          {walletBusy() ? t('auth.signIn.wallet.submitting') : t('auth.signIn.wallet.submit')}
         </button>
 
         <div class="mt-4 flex items-center justify-between text-sm">
           <A href={ROUTE_PATH.forgotPassword} class="link link-primary">
-            忘记密码？
+            {t('auth.signIn.forgotPassword')}
           </A>
           <span class="text-base-content/60">
-            还没有账号？{' '}
+            {t('auth.signIn.noAccount')}{' '}
             <A href={ROUTE_PATH.signUp} class="link link-primary">
-              注册
+              {t('auth.signIn.signUp')}
             </A>
           </span>
         </div>

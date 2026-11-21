@@ -1,6 +1,7 @@
 import { createEffect, createSignal, Show } from 'solid-js';
 
 import { type AuthUser, createUser, updateUser } from '#ui/api';
+import { useI18n } from '#ui/i18n';
 
 export type UserFormTarget = 'create' | 'edit';
 
@@ -13,6 +14,7 @@ interface Props {
 }
 
 function UserFormModal(props: Props) {
+  const { t } = useI18n();
   const [name, setName] = createSignal('');
   const [email, setEmail] = createSignal('');
   const [password, setPassword] = createSignal('');
@@ -59,7 +61,7 @@ function UserFormModal(props: Props) {
       props.onSaved();
       props.onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : '保存失败，请稍后重试');
+      setError(err instanceof Error ? err.message : t('common.saveFailed'));
     } finally {
       setSubmitting(false);
     }
@@ -70,7 +72,7 @@ function UserFormModal(props: Props) {
       <div class="modal modal-open">
         <div class="modal-box">
           <h3 class="text-lg font-bold">
-            {props.mode === 'create' ? '新建用户' : `编辑用户 #${props.user?.id ?? ''}`}
+            {props.mode === 'create' ? t('users.form.create') : t('users.form.edit', { id: props.user?.id ?? '' })}
           </h3>
 
           <Show when={error()}>
@@ -81,7 +83,7 @@ function UserFormModal(props: Props) {
 
           <form onSubmit={onSubmit} class="mt-4 space-y-4">
             <label class="form-control w-full">
-              <span class="label-text mb-1">姓名</span>
+              <span class="label-text mb-1">{t('auth.signUp.name')}</span>
               <input
                 type="text"
                 class="input input-bordered w-full"
@@ -91,7 +93,7 @@ function UserFormModal(props: Props) {
               />
             </label>
             <label class="form-control w-full">
-              <span class="label-text mb-1">邮箱</span>
+              <span class="label-text mb-1">{t('common.email')}</span>
               <input
                 type="email"
                 class="input input-bordered w-full"
@@ -102,11 +104,11 @@ function UserFormModal(props: Props) {
             </label>
             <Show when={props.mode === 'create'}>
               <label class="form-control w-full">
-                <span class="label-text mb-1">初始密码</span>
+                <span class="label-text mb-1">{t('users.form.initialPassword')}</span>
                 <input
                   type="password"
                   class="input input-bordered w-full"
-                  placeholder="至少 8 位"
+                  placeholder={t('common.passwordMin')}
                   value={password()}
                   onInput={(e) => setPassword(e.currentTarget.value)}
                   minlength={8}
@@ -116,7 +118,7 @@ function UserFormModal(props: Props) {
             </Show>
             <Show when={props.mode === 'create'}>
               <label class="form-control w-full">
-                <span class="label-text mb-1">租户 ID</span>
+                <span class="label-text mb-1">{t('users.form.tenantId')}</span>
                 <input
                   type="number"
                   class="input input-bordered input-sm"
@@ -135,7 +137,7 @@ function UserFormModal(props: Props) {
                   checked={admin()}
                   onChange={(e) => setAdmin(e.currentTarget.checked)}
                 />
-                <span class="label-text">管理员</span>
+                <span class="label-text">{t('common.admin')}</span>
               </label>
               <Show when={props.mode === 'edit'}>
                 <label class="flex cursor-pointer items-center gap-2">
@@ -145,21 +147,21 @@ function UserFormModal(props: Props) {
                     checked={verified()}
                     onChange={(e) => setVerified(e.currentTarget.checked)}
                   />
-                  <span class="label-text">已验证</span>
+                  <span class="label-text">{t('common.verified')}</span>
                 </label>
               </Show>
             </div>
 
             <div class="modal-action">
               <button type="button" class="btn" onClick={props.onClose}>
-                取消
+                {t('common.cancel')}
               </button>
               <button
                 type="submit"
                 class="btn btn-primary"
                 disabled={submitting()}
               >
-                {submitting() ? '保存中…' : '保存'}
+                {submitting() ? t('common.saving') : t('common.save')}
               </button>
             </div>
           </form>

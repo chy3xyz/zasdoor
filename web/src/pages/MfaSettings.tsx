@@ -1,5 +1,6 @@
 import { For, Show, createSignal, onMount } from 'solid-js';
 import { useToast } from '#ui/components';
+import { useI18n } from '#ui/i18n';
 
 import {
   beginPasskeyRegistration,
@@ -28,6 +29,7 @@ function credentialIdPreview(id: string): string {
 }
 
 function MfaSettings() {
+  const { t } = useI18n();
   const toast = useToast();
   const [secret, setSecret] = createSignal<string | null>(null);
   const [code, setCode] = createSignal('');
@@ -79,7 +81,7 @@ function MfaSettings() {
       await verifyTotp({ code: code().trim() });
       setEnabled(true);
       setSecret(null);
-      toast.show('TOTP 已启用', 'success');
+      toast.show(t('mfa.totpEnabledToast'), 'success');
     } catch (err) {
       toast.show(toApiError(err).message, 'error');
     }
@@ -98,7 +100,7 @@ function MfaSettings() {
     try {
       await setMfaPolicy(patch);
       await loadPolicy();
-      toast.show('策略已更新', 'success');
+      toast.show(t('mfa.policyUpdated'), 'success');
     } catch (err) {
       toast.show(toApiError(err).message, 'error');
     }
@@ -106,7 +108,7 @@ function MfaSettings() {
 
   const onRegisterPasskey = async () => {
     if (!isWebAuthnSupported()) {
-      toast.show('当前浏览器或页面环境不支持通行密钥', 'error');
+      toast.show(t('auth.signIn.passkey.unsupported'), 'error');
       return;
     }
     if (passkeyBusy()) return;
@@ -118,12 +120,12 @@ function MfaSettings() {
       const credential = (await navigator.credentials.create({
         publicKey: decodeCreationOptions(options),
       })) as PublicKeyCredential | null;
-      if (!credential) throw new Error('未获取到通行密钥');
+      if (!credential) throw new Error(t('auth.signIn.passkey.noCredential'));
       // 3. Persist the attestation; the server derives the credential id.
       await finishPasskeyRegistration(
         serializeRegistrationCredential(credential, passkeyName().trim()),
       );
-      toast.show('通行密钥已注册', 'success');
+      toast.show(t('mfa.registered'), 'success');
       setPasskeyName('');
       await loadPasskeys();
     } catch (err) {
@@ -134,13 +136,13 @@ function MfaSettings() {
   };
 
   const onDeletePasskey = async (credential: PasskeyCredential) => {
-    if (!window.confirm(`确定删除通行密钥「${credential.name || '未命名'}」吗？删除后将无法再使用它登录。`)) {
+    if (!window.confirm(t('mfa.confirmDelete', { name: credential.name || t('mfa.unnamed') }))) {
       return;
     }
     setDeletingPasskeyId(credential.id);
     try {
       await deletePasskey(credential.id);
-      toast.show('通行密钥已删除', 'success');
+      toast.show(t('mfa.deleted'), 'success');
       await loadPasskeys();
     } catch (err) {
       toast.show(toApiError(err).message, 'error');
@@ -152,30 +154,30 @@ function MfaSettings() {
   return (
     <div class="space-y-6">
       <div>
-        <h2 class="text-xl font-semibold">账号安全 / MFA</h2>
-        <p class="text-sm text-base-content/60">TOTP 双因素、通行密钥、恢复码与租户 MFA 策略</p>
+        <h2 class="text-xl font-semibold">{t('mfa.title')}</h2>
+        <p class="text-sm text-base-content/60">{t('mfa.subtitle')}</p>
       </div>
 
       <section class="space-y-2 rounded-lg border border-base-300 p-4">
-        <h3 class="font-semibold">TOTP 双因素</h3>
-        <p class="text-sm text-base-content/60">{enabled() ? '已启用' : '未启用'}</p>
+        <h3 class="font-semibold">{t('mfa.totp')}</h3>
+        <p class="text-sm text-base-content/60">{enabled() ? t('mfa.totpEnabled') : t('mfa.totpDisabled')}</p>
         <div class="flex items-center gap-2">
           <button type="button" class="btn btn-primary btn-sm" onClick={onEnroll} disabled={enabled()}>
-            注册 TOTP
+            {t('mfa.enrollTotp')}
           </button>
           <Show when={secret()}>
             {(s) => (
               <>
                 <span class="font-mono text-xs break-all">{s()}</span>
-                <span class="text-xs text-base-content/60">（请扫描到身份验证器）</span>
+                <span class="text-xs text-base-content/60">{t('mfa.scanHint')}</span>
               </>
             )}
           </Show>
         </div>
         <Show when={secret()}>
           <div class="flex items-center gap-2">
-            <input type="text" class="input input-bordered input-sm" placeholder="输入 6 位验证码" value={code()} onInput={(e) => setCode(e.currentTarget.value)} />
-            <button type="button" class="btn btn-sm" onClick={onVerify}>验证并启用</button>
+            <input type="text" class="input input-bordered input-sm" placeholder={t('mfa.codePlaceholder')} value={code()} onInput={(e) => setCode(e.currentTarget.value)} />
+            <button type="button" class="btn btn-sm" onClick={onVerify}>{t('mfa.verifyEnable')}</button>
           </div>
         </Show>
       </section>
@@ -183,17 +185,17 @@ function MfaSettings() {
       <section class="space-y-3 rounded-lg border border-base-300 p-4">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <h3 class="font-semibold">通行密钥 / Passkey</h3>
-            <p class="text-sm text-base-content/60">使用指纹、面容或设备 PIN 免密码登录</p>
+            <h3 class="font-semibold">{t('mfa.passkey')}</h3>
+            <p class="text-sm text-base-content/60">{t('mfa.passkeySubtitle')}</p>
           </div>
-          <span class="badge badge-ghost">{passkeys().length} 个已注册</span>
+          <span class="badge badge-ghost">{t('mfa.passkeyCount', { count: passkeys().length })}</span>
         </div>
 
         <div class="flex flex-wrap items-center gap-2">
           <input
             type="text"
             class="input input-bordered input-sm"
-            placeholder="通行密钥名称（可选，如 MacBook）"
+            placeholder={t('mfa.passkeyNamePlaceholder')}
             value={passkeyName()}
             onInput={(e) => setPasskeyName(e.currentTarget.value)}
             disabled={passkeyBusy()}
@@ -204,33 +206,33 @@ function MfaSettings() {
             onClick={onRegisterPasskey}
             disabled={passkeyBusy() || !isWebAuthnSupported()}
           >
-            {passkeyBusy() ? '注册中…' : '注册通行密钥'}
+            {passkeyBusy() ? t('mfa.registering') : t('mfa.register')}
           </button>
         </div>
         <Show when={!isWebAuthnSupported()}>
           <p class="text-xs text-warning">
-            当前浏览器或页面环境不支持 WebAuthn，无法注册或使用通行密钥。
+            {t('mfa.unsupported')}
           </p>
         </Show>
 
         <Show when={passkeysLoading()}>
-          <p class="text-sm text-base-content/50">加载中…</p>
+          <p class="text-sm text-base-content/50">{t('mfa.loading')}</p>
         </Show>
         <Show when={!passkeysLoading() && passkeys().length === 0}>
-          <p class="text-sm text-base-content/50">暂无通行密钥</p>
+          <p class="text-sm text-base-content/50">{t('mfa.noPasskeys')}</p>
         </Show>
         <For each={passkeys()}>
           {(credential) => (
             <div class="flex items-center gap-3 rounded-lg border border-base-200 p-2">
               <div class="min-w-0 flex-1">
                 <div class="truncate text-sm font-medium">
-                  {credential.name || '未命名通行密钥'}
+                  {credential.name || t('mfa.unnamed')}
                 </div>
                 <div class="truncate font-mono text-xs text-base-content/50">
                   {credentialIdPreview(credential.credential_id)}
                 </div>
                 <div class="text-xs text-base-content/40">
-                  最近使用：{credential.last_used_at ? formatDateTime(credential.last_used_at) : '从未使用'}
+                  {t('mfa.lastUsed')}{credential.last_used_at ? formatDateTime(credential.last_used_at) : t('mfa.neverUsed')}
                 </div>
               </div>
               <button
@@ -239,7 +241,7 @@ function MfaSettings() {
                 disabled={deletingPasskeyId() === credential.id}
                 onClick={() => onDeletePasskey(credential)}
               >
-                {deletingPasskeyId() === credential.id ? '删除中…' : '删除'}
+                {deletingPasskeyId() === credential.id ? t('common.deleting') : t('common.delete')}
               </button>
             </div>
           )}
@@ -247,20 +249,20 @@ function MfaSettings() {
       </section>
 
       <section class="space-y-2 rounded-lg border border-base-300 p-4">
-        <h3 class="font-semibold">恢复码</h3>
-        <button type="button" class="btn btn-ghost btn-sm" onClick={onRecovery}>生成恢复码</button>
+        <h3 class="font-semibold">{t('mfa.recovery')}</h3>
+        <button type="button" class="btn btn-ghost btn-sm" onClick={onRecovery}>{t('mfa.generateRecovery')}</button>
         <Show when={recoveryCodes().length > 0}>
           <div class="grid grid-cols-2 gap-1 md:grid-cols-3">
             {recoveryCodes().map((c) => (
               <span class="rounded bg-base-200 px-2 py-1 font-mono text-xs">{c}</span>
             ))}
           </div>
-          <p class="text-xs text-base-content/60">一次性使用，请安全保存</p>
+          <p class="text-xs text-base-content/60">{t('mfa.oneTimeHint')}</p>
         </Show>
       </section>
 
       <section class="space-y-2 rounded-lg border border-base-300 p-4">
-        <h3 class="font-semibold">MFA 策略（租户级）</h3>
+        <h3 class="font-semibold">{t('mfa.policy')}</h3>
         <Show when={policy()}>
           {(p) => (
             <div class="flex flex-wrap gap-2">
@@ -269,21 +271,21 @@ function MfaSettings() {
                 class={'btn btn-sm ' + (p().require_mfa ? 'btn-primary' : 'btn-outline')}
                 onClick={() => onPolicy({ require_mfa: !p().require_mfa })}
               >
-                强制 MFA：{p().require_mfa ? '开' : '关'}
+                {t('mfa.requireMfa')}: {p().require_mfa ? t('common.on') : t('common.off')}
               </button>
               <button
                 type="button"
                 class={'btn btn-sm ' + (p().allow_totp ? 'btn-primary' : 'btn-outline')}
                 onClick={() => onPolicy({ allow_totp: !p().allow_totp })}
               >
-                TOTP：{p().allow_totp ? '允许' : '禁止'}
+                {t('mfa.allowTotp')}: {p().allow_totp ? t('common.allowed') : t('common.forbidden')}
               </button>
               <button
                 type="button"
                 class={'btn btn-sm ' + (p().allow_recovery_codes ? 'btn-primary' : 'btn-outline')}
                 onClick={() => onPolicy({ allow_recovery_codes: !p().allow_recovery_codes })}
               >
-                恢复码：{p().allow_recovery_codes ? '允许' : '禁止'}
+                {t('mfa.allowRecovery')}: {p().allow_recovery_codes ? t('common.allowed') : t('common.forbidden')}
               </button>
             </div>
           )}

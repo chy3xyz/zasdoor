@@ -15,12 +15,14 @@ import {
   type RoleItem,
 } from '#ui/api';
 import DataTable, { type Column } from '#ui/components/DataTable';
+import { useI18n } from '#ui/i18n';
 import { usePaged } from '#ui/hooks/usePaged';
 import { formatDateTime } from '#ui/utils';
 
 const PAGE_SIZE = 20;
 
 function Projects() {
+  const { t } = useI18n();
   const toast = useToast();
   const [creating, setCreating] = createSignal(false);
   const [success, setSuccess] = createSignal<string | null>(null);
@@ -47,7 +49,7 @@ function Projects() {
       await createProject({ name: nameInput().trim(), org_id: Number.isFinite(orgId) && orgId > 0 ? orgId : undefined });
       setNameInput('');
       setOrgInput('');
-      setSuccess('项目已创建');
+      setSuccess(t('projects.created'));
       void paged.reload(1);
     } catch (err) {
       toast.show(toApiError(err).message, 'error');
@@ -96,11 +98,11 @@ function Projects() {
   };
 
   const onDelete = async (proj: ProjectItem) => {
-    if (!window.confirm('确定删除项目「' + proj.name + '」吗？')) return;
+    if (!window.confirm(t('projects.confirmDelete', { name: proj.name }))) return;
     try {
       await deleteProject(proj.id);
       if (selected()?.id === proj.id) setSelected(null);
-      setSuccess('项目已删除');
+      setSuccess(t('projects.deleted'));
       void paged.reload();
     } catch (err) {
       toast.show(toApiError(err).message, 'error');
@@ -109,46 +111,46 @@ function Projects() {
 
   const columns: Column<ProjectItem>[] = [
     { key: 'id', title: 'ID', render: (p) => <span class="font-mono text-xs">{p.id}</span> },
-    { key: 'name', title: '名称', render: (p) => <span class="font-medium">{p.name}</span> },
-    { key: 'org_id', title: '组织', render: (p) => <span class="text-sm">{p.org_id || '-'}</span> },
+    { key: 'name', title: t('common.name'), render: (p) => <span class="font-medium">{p.name}</span> },
+    { key: 'org_id', title: t('common.tenant'), render: (p) => <span class="text-sm">{p.org_id || '-'}</span> },
     {
       key: 'created_at',
-      title: '创建时间',
+      title: t('common.createdAt'),
       render: (p) => <span class="text-sm text-base-content/70">{formatDateTime(p.created_at)}</span>,
     },
   ];
 
   const appColumns: Column<ApplicationItem>[] = [
-    { key: 'name', title: '应用', render: (a) => <span class="font-medium">{a.name}</span> },
-    { key: 'type', title: '类型', render: (a) => <span class="text-sm">{a.type}</span> },
+    { key: 'name', title: t('projects.apps'), render: (a) => <span class="font-medium">{a.name}</span> },
+    { key: 'type', title: t('common.type'), render: (a) => <span class="text-sm">{a.type}</span> },
     { key: 'client_id', title: 'Client ID', render: (a) => <span class="font-mono text-xs">{a.client_id}</span> },
-    { key: 'active', title: '状态', render: (a) => <span class={'badge badge-sm ' + (a.active ? 'badge-success' : 'badge-outline')}>{a.active ? '启用' : '停用'}</span> },
+    { key: 'active', title: t('common.status'), render: (a) => <span class={'badge badge-sm ' + (a.active ? 'badge-success' : 'badge-outline')}>{a.active ? t('common.enabled') : t('common.disabled')}</span> },
   ];
 
   const roleColumns: Column<RoleItem>[] = [
-    { key: 'key', title: 'Key', render: (r) => <span class="font-mono text-xs">{r.key}</span> },
-    { key: 'name', title: '名称', render: (r) => <span class="font-medium">{r.name}</span> },
-    { key: 'permissions', title: '权限', render: (r) => <span class="text-xs text-base-content/60">{r.permissions}</span> },
+    { key: 'key', title: t('common.key'), render: (r) => <span class="font-mono text-xs">{r.key}</span> },
+    { key: 'name', title: t('common.name'), render: (r) => <span class="font-medium">{r.name}</span> },
+    { key: 'permissions', title: t('common.permissions'), render: (r) => <span class="text-xs text-base-content/60">{r.permissions}</span> },
   ];
 
   return (
     <div class="space-y-4">
       <div>
-        <h2 class="text-xl font-semibold">项目 / 应用 / 角色</h2>
-        <p class="text-sm text-base-content/60">OAuth 客户端与 RBAC 角色的容器</p>
+        <h2 class="text-xl font-semibold">{t('projects.title')}</h2>
+        <p class="text-sm text-base-content/60">{t('projects.subtitle')}</p>
       </div>
 
       <form onSubmit={onCreate} class="flex items-end gap-2">
         <label class="form-control w-full max-w-xs">
-          <span class="label-text mb-1">项目名称</span>
-          <input type="text" class="input input-bordered input-sm" placeholder="例如：LifeApp" value={nameInput()} onInput={(e) => setNameInput(e.currentTarget.value)} required />
+          <span class="label-text mb-1">{t('projects.projectName')}</span>
+          <input type="text" class="input input-bordered input-sm" placeholder={t('projects.namePlaceholder')} value={nameInput()} onInput={(e) => setNameInput(e.currentTarget.value)} required />
         </label>
         <label class="form-control w-full max-w-xs">
-          <span class="label-text mb-1">组织 ID（可选）</span>
+          <span class="label-text mb-1">{t('projects.orgIdOptional')}</span>
           <input type="text" class="input input-bordered input-sm" placeholder="1" value={orgInput()} onInput={(e) => setOrgInput(e.currentTarget.value)} />
         </label>
         <button type="submit" class="btn btn-primary btn-sm" disabled={creating()}>
-          {creating() ? '创建中…' : '创建项目'}
+          {creating() ? t('common.creating') : t('projects.create')}
         </button>
       </form>
 
@@ -165,12 +167,12 @@ function Projects() {
         totalPages={paged.totalPages()}
         loading={paged.loading()}
         error={paged.error()}
-        emptyText="暂无项目"
+        emptyText={t('projects.empty')}
         onPageChange={(p) => void paged.reload(p)}
         actions={(proj) => (
           <div class="flex gap-1">
-            <button type="button" class="btn btn-ghost btn-xs" onClick={() => onSelect(proj)}>管理</button>
-            <button type="button" class="btn btn-ghost btn-xs text-error" onClick={() => onDelete(proj)}>删除</button>
+            <button type="button" class="btn btn-ghost btn-xs" onClick={() => onSelect(proj)}>{t('common.manage')}</button>
+            <button type="button" class="btn btn-ghost btn-xs text-error" onClick={() => onDelete(proj)}>{t('common.delete')}</button>
           </div>
         )}
       />
@@ -178,14 +180,14 @@ function Projects() {
       <Show when={selected()}>
         {(proj) => (
           <div class="space-y-4 rounded-lg border border-base-300 p-4">
-            <h3 class="font-semibold">项目「{proj().name}」详情</h3>
+            <h3 class="font-semibold">{t('projects.detail', { name: proj().name })}</h3>
 
             <Show when={credentials()}>
               {(creds) => (
                 <div role="alert" class="alert alert-info py-2 text-xs">
                   <div class="space-y-1">
                     <p>client_id: <span class="font-mono">{creds().client_id}</span></p>
-                    <p>client_secret（仅显示一次）: <span class="font-mono">{creds().client_secret}</span></p>
+                    <p>{t('projects.clientSecretOnce')}: <span class="font-mono">{creds().client_secret}</span></p>
                   </div>
                 </div>
               )}
@@ -193,10 +195,10 @@ function Projects() {
 
             <div class="grid gap-4 md:grid-cols-2">
               <div class="space-y-2">
-                <h4 class="text-sm font-semibold">应用</h4>
+                <h4 class="text-sm font-semibold">{t('projects.apps')}</h4>
                 <form onSubmit={onCreateApp} class="flex gap-2">
-                  <input type="text" class="input input-bordered input-sm flex-1" placeholder="应用名" value={appName()} onInput={(e) => setAppName(e.currentTarget.value)} required />
-                  <button type="submit" class="btn btn-primary btn-sm">添加应用</button>
+                  <input type="text" class="input input-bordered input-sm flex-1" placeholder={t('projects.appName')} value={appName()} onInput={(e) => setAppName(e.currentTarget.value)} required />
+                  <button type="submit" class="btn btn-primary btn-sm">{t('projects.addApp')}</button>
                 </form>
                 <DataTable
                   columns={appColumns}
@@ -207,16 +209,16 @@ function Projects() {
                   totalPages={1}
                   loading={false}
                   error={null}
-                  emptyText="暂无应用"
+                  emptyText={t('projects.noApps')}
                   onPageChange={() => {}}
                 />
               </div>
               <div class="space-y-2">
-                <h4 class="text-sm font-semibold">角色</h4>
+                <h4 class="text-sm font-semibold">{t('projects.roles')}</h4>
                 <form onSubmit={onCreateRole} class="flex gap-2">
                   <input type="text" class="input input-bordered input-sm w-24" placeholder="key" value={roleKey()} onInput={(e) => setRoleKey(e.currentTarget.value)} required />
-                  <input type="text" class="input input-bordered input-sm flex-1" placeholder="名称" value={roleName()} onInput={(e) => setRoleName(e.currentTarget.value)} required />
-                  <button type="submit" class="btn btn-primary btn-sm">添加角色</button>
+                  <input type="text" class="input input-bordered input-sm flex-1" placeholder={t('projects.roleName')} value={roleName()} onInput={(e) => setRoleName(e.currentTarget.value)} required />
+                  <button type="submit" class="btn btn-primary btn-sm">{t('projects.addRole')}</button>
                 </form>
                 <DataTable
                   columns={roleColumns}
@@ -227,7 +229,7 @@ function Projects() {
                   totalPages={1}
                   loading={false}
                   error={null}
-                  emptyText="暂无角色"
+                  emptyText={t('projects.noRoles')}
                   onPageChange={() => {}}
                 />
               </div>

@@ -17,11 +17,13 @@ import {
   type AiRunItem,
   type AiWorkflowResult,
 } from '#ui/api';
+import { useI18n } from '#ui/i18n';
 import { formatDateTime } from '#ui/utils';
 
 type Tab = 'providers' | 'approvals' | 'runs' | 'workflow';
 
 function AiAdmin() {
+  const { t: tr } = useI18n();
   const toast = useToast();
   const [tab, setTab] = createSignal<Tab>('providers');
   const [providers, setProviders] = createSignal<AiProviderItem[]>([]);
@@ -101,7 +103,7 @@ function AiAdmin() {
 
   const onSaveProvider = async () => {
     if (!name().trim() || !endpoint().trim()) {
-      toast.show('名称与端点不能为空', 'error');
+      toast.show(tr('ai.nameEndpointRequired'), 'error');
       return;
     }
     try {
@@ -130,7 +132,7 @@ function AiAdmin() {
   };
 
   const onRemoveProvider = async (p: AiProviderItem) => {
-    if (!window.confirm(`确定删除 Provider「${p.name}」？`)) return;
+    if (!window.confirm(tr('ai.confirmDelete', { name: p.name }))) return;
     try {
       await deleteAiProvider(p.id);
       await loadProviders();
@@ -144,7 +146,7 @@ function AiAdmin() {
     setCheckResult(null);
     try {
       await checkAiProvider(p.id);
-      setCheckResult({ id: p.id, ok: true, msg: '连接正常' });
+      setCheckResult({ id: p.id, ok: true, msg: tr('ai.connectionOk') });
     } catch (err) {
       setCheckResult({ id: p.id, ok: false, msg: toApiError(err).message });
     } finally {
@@ -177,21 +179,21 @@ function AiAdmin() {
     <div class="space-y-4">
       <div class="flex items-center justify-between">
         <div>
-          <h2 class="text-xl font-semibold">AI 管理</h2>
-          <p class="text-sm text-base-content/60">Provider、审批、运行记录与工作流</p>
+          <h2 class="text-xl font-semibold">{tr('ai.title')}</h2>
+          <p class="text-sm text-base-content/60">{tr('ai.subtitle')}</p>
         </div>
         <div class="tabs tabs-boxed">
           <button type="button" class={`tab tab-sm ${tab() === 'providers' ? 'tab-active' : ''}`} onClick={() => switchTab('providers')}>
             Provider
           </button>
           <button type="button" class={`tab tab-sm ${tab() === 'approvals' ? 'tab-active' : ''}`} onClick={() => switchTab('approvals')}>
-            审批
+            {tr('ai.approvals')}
           </button>
           <button type="button" class={`tab tab-sm ${tab() === 'runs' ? 'tab-active' : ''}`} onClick={() => switchTab('runs')}>
-            运行记录
+            {tr('ai.runs')}
           </button>
           <button type="button" class={`tab tab-sm ${tab() === 'workflow' ? 'tab-active' : ''}`} onClick={() => switchTab('workflow')}>
-            工作流
+            {tr('ai.workflows')}
           </button>
         </div>
       </div>
@@ -206,19 +208,19 @@ function AiAdmin() {
         <div class="space-y-3">
           <div class="flex justify-end">
             <button type="button" class="btn btn-primary btn-sm" onClick={openCreate}>
-              新建 Provider
+              {tr('ai.newProvider')}
             </button>
           </div>
           <div class="overflow-x-auto rounded-lg border border-base-300">
             <table class="table">
               <thead>
                 <tr>
-                  <th>名称</th>
-                  <th>端点</th>
-                  <th>模型</th>
-                  <th>密钥</th>
-                  <th>状态</th>
-                  <th class="text-right">操作</th>
+                  <th>{tr('common.name')}</th>
+                  <th>{tr('ai.endpoint')}</th>
+                  <th>{tr('ai.model')}</th>
+                  <th>{tr('ai.secret')}</th>
+                  <th>{tr('common.status')}</th>
+                  <th class="text-right">{tr('common.actions')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -230,24 +232,24 @@ function AiAdmin() {
                       <td class="text-sm">{p.models || '-'}</td>
                       <td>
                         <span class={`badge badge-sm ${p.has_keys ? 'badge-success' : 'badge-error'}`}>
-                          {p.has_keys ? '已配置' : '缺失'}
+                          {p.has_keys ? tr('ai.configured') : tr('ai.missing')}
                         </span>
                       </td>
                       <td>
                         <span class={`badge badge-sm ${p.enabled ? 'badge-primary' : 'badge-ghost'}`}>
-                          {p.enabled ? '启用' : '停用'}
+                          {p.enabled ? tr('common.enabled') : tr('common.disabled')}
                         </span>
                       </td>
                       <td class="text-right">
                         <div class="flex justify-end gap-1">
                           <button type="button" class="btn btn-outline btn-xs" disabled={checkingId() === p.id} onClick={() => onCheckProvider(p)}>
-                            {checkingId() === p.id ? '测试中…' : '测试'}
+                            {checkingId() === p.id ? tr('ai.testing') : tr('ai.test')}
                           </button>
                           <button type="button" class="btn btn-outline btn-xs" onClick={() => openEdit(p)}>
-                            编辑
+                            {tr('common.edit')}
                           </button>
                           <button type="button" class="btn btn-ghost btn-xs text-error" onClick={() => onRemoveProvider(p)}>
-                            删除
+                            {tr('common.delete')}
                           </button>
                         </div>
                       </td>
@@ -257,7 +259,7 @@ function AiAdmin() {
                 <Show when={providers().length === 0}>
                   <tr>
                     <td colspan={6} class="py-8 text-center text-base-content/50">
-                      暂无 Provider。配置一个 OpenAI 兼容端点(需设置 ZASDOOR_AI_KEY_SECRET)
+                      {tr('ai.noProviders')}
                     </td>
                   </tr>
                 </Show>
@@ -280,12 +282,12 @@ function AiAdmin() {
             <thead>
               <tr>
                 <th>ID</th>
-                <th>技能</th>
-                <th>参数</th>
-                <th>请求者</th>
-                <th>状态</th>
-                <th>时间</th>
-                <th class="text-right">操作</th>
+                <th>{tr('ai.skill')}</th>
+                <th>{tr('ai.params')}</th>
+                <th>{tr('ai.requester')}</th>
+                <th>{tr('common.status')}</th>
+                <th>{tr('common.time')}</th>
+                <th class="text-right">{tr('common.actions')}</th>
               </tr>
             </thead>
             <tbody>
@@ -298,17 +300,17 @@ function AiAdmin() {
                     <td class="text-sm">{a.requested_by}</td>
                     <td>
                       <span class={`badge badge-sm ${a.status === 'pending' ? 'badge-warning' : a.status === 'approved' ? 'badge-success' : 'badge-ghost'}`}>
-                        {a.status === 'pending' ? '待审批' : a.status === 'approved' ? '已批准' : '已拒绝'}
+                        {a.status === 'pending' ? tr('ai.approval.pending') : a.status === 'approved' ? tr('ai.approval.approved') : tr('ai.approval.rejected')}
                       </span>
                     </td>
                     <td class="text-sm text-base-content/70">{formatDateTime(a.created_at)}</td>
                     <td class="text-right">
                       <div class="flex justify-end gap-1">
                         <button type="button" class="btn btn-success btn-xs" disabled={a.status !== 'pending'} onClick={() => onResolve(a, 'approve')}>
-                          批准
+                          {tr('ai.approve')}
                         </button>
                         <button type="button" class="btn btn-error btn-xs" disabled={a.status !== 'pending'} onClick={() => onResolve(a, 'reject')}>
-                          拒绝
+                          {tr('ai.reject')}
                         </button>
                       </div>
                     </td>
@@ -318,7 +320,7 @@ function AiAdmin() {
               <Show when={approvals().length === 0}>
                 <tr>
                   <td colspan={7} class="py-8 text-center text-base-content/50">
-                    暂无待审批事项
+                    {tr('ai.noApprovals')}
                   </td>
                 </tr>
               </Show>
@@ -333,13 +335,13 @@ function AiAdmin() {
             <thead>
               <tr>
                 <th>ID</th>
-                <th>用户</th>
-                <th>类型</th>
-                <th>模型</th>
-                <th>提示词</th>
-                <th>用量</th>
-                <th>状态</th>
-                <th>时间</th>
+                <th>{tr('ai.user')}</th>
+                <th>{tr('common.type')}</th>
+                <th>{tr('ai.model')}</th>
+                <th>{tr('ai.prompt')}</th>
+                <th>{tr('ai.usage')}</th>
+                <th>{tr('common.status')}</th>
+                <th>{tr('common.time')}</th>
               </tr>
             </thead>
             <tbody>
@@ -353,7 +355,7 @@ function AiAdmin() {
                     <td class="max-w-xs truncate text-sm text-base-content/70">{r.prompt}</td>
                     <td class="text-xs text-base-content/70">
                       {r.tokens_in > 0 || r.tokens_out > 0 ? `${r.tokens_in}→${r.tokens_out} tok` : '—'}
-                      {r.steps > 0 || r.tool_calls > 0 ? ` · ${r.steps}步/${r.tool_calls}工具${r.tool_errors > 0 ? `/${r.tool_errors}错` : ''}` : ''}
+                      {r.steps > 0 || r.tool_calls > 0 ? ` · ${r.steps}${tr('ai.steps')}/${r.tool_calls}${tr('ai.tools')}${r.tool_errors > 0 ? `/${r.tool_errors}${tr('ai.errors')}` : ''}` : ''}
                     </td>
                     <td>
                       <span class={`badge badge-sm ${r.status === 'ok' ? 'badge-success' : 'badge-warning'}`}>{r.status}</span>
@@ -365,7 +367,7 @@ function AiAdmin() {
               <Show when={runs().length === 0}>
                 <tr>
                   <td colspan={8} class="py-8 text-center text-base-content/50">
-                    暂无运行记录
+                    {tr('ai.noRuns')}
                   </td>
                 </tr>
               </Show>
@@ -378,17 +380,17 @@ function AiAdmin() {
         <div class="space-y-3">
           <div class="flex items-center justify-between">
             <p class="text-sm text-base-content/60">
-              演示工作流:依次执行「任务统计」→「租户列表」两个只读技能并汇总结果。
+              {tr('ai.workflowDemo')}
             </p>
             <button type="button" class="btn btn-primary btn-sm" disabled={wfBusy()} onClick={() => void onRunWorkflow()}>
-              {wfBusy() ? '运行中…' : '运行工作流'}
+              {wfBusy() ? tr('ai.running') : tr('ai.runWorkflow')}
             </button>
           </div>
           <Show when={workflow()}>
             {(wf) => (
               <div class="space-y-2">
                 <div>
-                  状态:
+                  {tr('ai.status')}
                   <span class="badge badge-sm badge-ghost ml-2">{wf().status}</span>
                 </div>
                 <For each={wf().steps}>
@@ -414,37 +416,37 @@ function AiAdmin() {
         <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div class="w-full max-w-lg rounded-lg border border-base-300 bg-base-100 p-5 shadow-xl">
             <div class="mb-4 flex items-center justify-between">
-              <h3 class="text-lg font-semibold">{editing() ? '编辑 Provider' : '新建 Provider'}</h3>
-              <button type="button" class="btn btn-ghost btn-sm" onClick={() => setFormOpen(false)} aria-label="关闭">
+              <h3 class="text-lg font-semibold">{editing() ? tr('ai.editProvider') : tr('ai.newProvider')}</h3>
+              <button type="button" class="btn btn-ghost btn-sm" onClick={() => setFormOpen(false)} aria-label={tr('mail.close')}>
                 ✕
               </button>
             </div>
 
-            <label class="block text-sm font-medium text-base-content/70">名称(唯一)</label>
+            <label class="block text-sm font-medium text-base-content/70">{tr('ai.nameUnique')}</label>
             <input type="text" class="input input-bordered input-sm mt-1 w-full" value={name()} onInput={(e) => setName(e.currentTarget.value)} />
 
-            <label class="mt-3 block text-sm font-medium text-base-content/70">端点(OpenAI 兼容)</label>
+            <label class="mt-3 block text-sm font-medium text-base-content/70">{tr('ai.endpointOpenai')}</label>
             <input type="text" class="input input-bordered input-sm mt-1 w-full font-mono" placeholder="https://api.openai.com/v1/chat/completions" value={endpoint()} onInput={(e) => setEndpoint(e.currentTarget.value)} />
 
             <label class="mt-3 block text-sm font-medium text-base-content/70">
-              API 密钥(JSON 数组,如 [{'"'}sk-abc{'"'}]);编辑留空则保持原密钥
+              {tr('ai.apiKeys')}
             </label>
             <input type="password" class="input input-bordered input-sm mt-1 w-full font-mono" value={apiKeys()} onInput={(e) => setApiKeys(e.currentTarget.value)} />
 
-            <label class="mt-3 block text-sm font-medium text-base-content/70">模型(逗号分隔)</label>
+            <label class="mt-3 block text-sm font-medium text-base-content/70">{tr('ai.models')}</label>
             <input type="text" class="input input-bordered input-sm mt-1 w-full" placeholder="gpt-4o-mini,deepseek-v4-flash" value={models()} onInput={(e) => setModels(e.currentTarget.value)} />
 
             <label class="mt-3 flex items-center gap-2 text-sm">
               <input type="checkbox" class="checkbox checkbox-sm" checked={enabled()} onChange={(e) => setEnabled(e.currentTarget.checked)} />
-              启用
+              {tr('common.enabled')}
             </label>
 
             <div class="mt-5 flex justify-end gap-2">
               <button type="button" class="btn btn-ghost btn-sm" onClick={() => setFormOpen(false)}>
-                取消
+                {tr('common.cancel')}
               </button>
               <button type="button" class="btn btn-primary btn-sm" onClick={() => void onSaveProvider()}>
-                保存
+                {tr('common.save')}
               </button>
             </div>
           </div>

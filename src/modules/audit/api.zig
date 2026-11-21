@@ -50,6 +50,7 @@ pub fn AuditApi(comptime AuditServiceT: type, comptime UserService: type) type {
             g = try g.use(authorize_mw.enforce());
             g = try g.use(mw.tokenVersionGuard(self.user_svc.sec, self.user_svc.store));
             try g.get("/audit-logs", listLogs, @ptrCast(@alignCast(self)));
+            try g.get("/audit-logs/cursor", listLogsCursor, @ptrCast(@alignCast(self)));
             try g.get("/audit-logs/export", exportLogs, @ptrCast(@alignCast(self)));
         }
 
@@ -101,6 +102,36 @@ pub fn AuditApi(comptime AuditServiceT: type, comptime UserService: type) type {
             try ctx.setHeader("Content-Type", "text/csv; charset=utf-8");
             try ctx.setHeader("Content-Disposition", "attachment; filename=audit-logs.csv");
             try ctx.text(200, csv.buf.items);
+        }
+
+        fn listLogsCursor(ctx: *http.Context) !void {
+            const self: *Self = @ptrCast(@alignCast(ctx.user_data orelse return error.UnexpectedError));
+            _ = (try requireAdmin(ctx, self)) orelse return;
+            const after = ctx.queryInt(i64, "after", 0);
+            const limit_raw = ctx.queryInt(i64, "limit", 50);
+            const limit: usize = @intCast(@max(1, @min(200, limit_raw)));
+            const filters: service.AuditFilters = .{
+                .actor_user_id = blk: {
+                    const a = ctx.queryInt(i64, "actor", 0);
+                    break :blk if (a > 0) a else null;
+                },
+                .action = ctx.queryParam("action"),
+                .keyword = ctx.queryParam("keyword"),
+            };
+            const result = self.svc.listCursor(filters, if (after > 0) after else null, limit) catch {
+                try ctx.sendErrorResponse(500, 500, "服务器内部错误");
+                return;
+            };
+            defer {
+                for (result.items) |r| r.free(self.svc.allocator);
+                self.svc.allocator.free(result.items);
+            }
+            const dtos = try zmodu.http.Extract.toDtoList(ctx.allocator, result.items, AuditDto, toDto);
+            try ctx.jsonStruct(200, .{
+                .code = 0,
+                .msg = "",
+                .data = .{ .list = dtos, .next_cursor = result.next_cursor, .has_more = result.has_more },
+            });
         }
 
         fn listLogs(ctx: *http.Context) !void {

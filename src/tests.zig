@@ -1712,6 +1712,35 @@ test "user: federated accounts cannot reset or receive a password reset token" {
     try std.testing.expectError(error.FederatedAccount, svc.resetPassword(uid, raw, "Str0ng-pass-123"));
 }
 
+test "audit: keyset cursor pagination walks rows deterministically" {
+    const allocator = std.testing.allocator;
+    var env = try openMemory(allocator);
+    defer env.deinit();
+    var store = audit.persistence.AuditStore.init(allocator, env.client);
+    var svc = audit.service.AuditService.init(allocator, std.testing.io, &store);
+    const now = zmodu.time.wallClockSeconds(std.testing.io);
+    var i: usize = 0;
+    while (i < 5) : (i += 1) {
+        svc.log(@intCast(i), "u", "cursor.test", "audit", @intCast(i), "row", "127.0.0.1", true, 1);
+    }
+    _ = now;
+
+    const p1 = try svc.listCursor(.{}, null, 2);
+    defer {
+        for (p1.items) |r| r.free(allocator);
+        allocator.free(p1.items);
+    }
+    try std.testing.expectEqual(@as(usize, 2), p1.items.len);
+    try std.testing.expect(p1.has_more);
+    const p2 = try svc.listCursor(.{}, p1.next_cursor, 2);
+    defer {
+        for (p2.items) |r| r.free(allocator);
+        allocator.free(p2.items);
+    }
+    try std.testing.expectEqual(@as(usize, 2), p2.items.len);
+    try std.testing.expect(p2.items[0].id < p1.items[p1.items.len - 1].id);
+}
+
 test "eventstore: user facts append and projection produces read model" {
     const allocator = std.testing.allocator;
     var env = try openMemory(allocator);

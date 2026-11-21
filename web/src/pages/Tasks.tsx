@@ -13,17 +13,18 @@ import {
   type TaskStats,
 } from '#ui/api';
 import DataTable, { type Column } from '#ui/components/DataTable';
+import { useI18n } from '#ui/i18n';
 import { usePaged } from '#ui/hooks/usePaged';
 import { formatDateTime } from '#ui/utils';
 
 const PAGE_SIZE = 20;
 
-const STATUS_LABEL: Record<string, string> = {
-  pending: '等待中',
-  claimed: '执行中',
-  done: '已完成',
-  failed: '失败',
-  canceled: '已取消',
+const STATUS_KEYS: Record<string, 'tasks.status.pending' | 'tasks.status.claimed' | 'tasks.status.done' | 'tasks.status.failed' | 'tasks.status.canceled'> = {
+  pending: 'tasks.status.pending',
+  claimed: 'tasks.status.claimed',
+  done: 'tasks.status.done',
+  failed: 'tasks.status.failed',
+  canceled: 'tasks.status.canceled',
 };
 
 const STATUS_CLASS: Record<string, string> = {
@@ -35,6 +36,7 @@ const STATUS_CLASS: Record<string, string> = {
 };
 
 function Tasks() {
+  const { t: tr } = useI18n();
   const toast = useToast();
   const [stats, setStats] = createSignal<TaskStats | null>(null);
   const [status, setStatus] = createSignal('');
@@ -67,7 +69,7 @@ function Tasks() {
     { key: 'id', title: 'ID', render: (t) => <span class="font-mono text-xs">{t.id}</span> },
     {
       key: 'name',
-      title: '任务',
+      title: tr('tasks.column.task'),
       render: (t) => (
         <>
           <p class="font-medium">{t.name}</p>
@@ -77,26 +79,26 @@ function Tasks() {
     },
     {
       key: 'status',
-      title: '状态',
+      title: tr('common.status'),
       render: (t) => (
         <span class={`badge badge-sm ${STATUS_CLASS[t.status] ?? 'badge-ghost'}`}>
-          {STATUS_LABEL[t.status] ?? t.status}
+          {STATUS_KEYS[t.status] ? tr(STATUS_KEYS[t.status]) : t.status}
         </span>
       ),
     },
     {
       key: 'attempts',
-      title: '尝试',
+      title: tr('tasks.column.attempts'),
       render: (t) => <span class="text-sm">{t.attempts}/{t.max_attempts}</span>,
     },
     {
       key: 'last_error',
-      title: '错误信息',
+      title: tr('tasks.column.lastError'),
       render: (t) => <span class="max-w-xs truncate text-sm text-error">{t.last_error || '-'}</span>,
     },
     {
       key: 'created_at',
-      title: '创建时间',
+      title: tr('common.createdAt'),
       render: (t) => <span class="text-sm text-base-content/70">{formatDateTime(t.created_at)}</span>,
     },
   ];
@@ -105,15 +107,15 @@ function Tasks() {
     <div class="space-y-4">
       <div class="flex items-center justify-between">
         <div>
-          <h2 class="text-xl font-semibold">任务中心</h2>
-          <p class="text-sm text-base-content/60">后台任务队列（邮件发送、定时清理等）</p>
+          <h2 class="text-xl font-semibold">{tr('tasks.title')}</h2>
+          <p class="text-sm text-base-content/60">{tr('tasks.subtitle')}</p>
         </div>
         <div class="flex gap-2">
           <button type="button" class="btn btn-outline btn-sm" onClick={() => run(purgeTasks)}>
-            清理已完成
+            {tr('tasks.purge')}
           </button>
           <button type="button" class="btn btn-primary btn-sm" onClick={refresh}>
-            刷新
+            {tr('common.refresh')}
           </button>
         </div>
       </div>
@@ -122,11 +124,11 @@ function Tasks() {
         <div class="grid grid-cols-5 gap-3">
           <For
             each={[
-              ['等待中', stats()!.pending, 'badge-ghost'],
-              ['执行中', stats()!.claimed, 'badge-info'],
-              ['已完成', stats()!.done, 'badge-success'],
-              ['失败', stats()!.failed, 'badge-error'],
-              ['已取消', stats()!.canceled, 'badge-outline'],
+              [tr('tasks.status.pending'), stats()!.pending, 'badge-ghost'],
+              [tr('tasks.status.claimed'), stats()!.claimed, 'badge-info'],
+              [tr('tasks.status.done'), stats()!.done, 'badge-success'],
+              [tr('tasks.status.failed'), stats()!.failed, 'badge-error'],
+              [tr('tasks.status.canceled'), stats()!.canceled, 'badge-outline'],
             ]}
           >
             {([label, count, cls]) => (
@@ -150,12 +152,12 @@ function Tasks() {
             void paged.reload(1);
           }}
         >
-          <option value="">全部状态</option>
-          <option value="pending">等待中</option>
-          <option value="claimed">执行中</option>
-          <option value="done">已完成</option>
-          <option value="failed">失败</option>
-          <option value="canceled">已取消</option>
+          <option value="">{tr('tasks.allStatus')}</option>
+          <option value="pending">{tr('tasks.status.pending')}</option>
+          <option value="claimed">{tr('tasks.status.claimed')}</option>
+          <option value="done">{tr('tasks.status.done')}</option>
+          <option value="failed">{tr('tasks.status.failed')}</option>
+          <option value="canceled">{tr('tasks.status.canceled')}</option>
         </select>
       </div>
 
@@ -168,29 +170,29 @@ function Tasks() {
         totalPages={paged.totalPages()}
         loading={paged.loading()}
         error={paged.error()}
-        emptyText="暂无任务"
+        emptyText={tr('tasks.empty')}
         onPageChange={(p) => void paged.reload(p)}
         actions={(task) => (
           <>
             <Show when={task.status === 'failed'}>
               <button type="button" class="btn btn-ghost btn-xs" onClick={() => run(() => retryTask(task.id))}>
-                重试
+                {tr('tasks.retry')}
               </button>
             </Show>
             <Show when={task.status === 'pending'}>
               <button type="button" class="btn btn-ghost btn-xs" onClick={() => run(() => cancelTask(task.id))}>
-                取消
+                {tr('tasks.cancel')}
               </button>
             </Show>
             <button
               type="button"
               class="btn btn-ghost btn-xs text-error"
               onClick={() => {
-                if (!window.confirm(`确定删除任务 #${task.id} 吗？`)) return;
+                if (!window.confirm(tr('tasks.confirmDelete', { id: task.id }))) return;
                 void run(() => deleteTask(task.id));
               }}
             >
-              删除
+              {tr('common.delete')}
             </button>
           </>
         )}

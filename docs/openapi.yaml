@@ -8125,4 +8125,21 @@ paths:
         '400': {$ref: '#/components/responses/BadRequest'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+  /api/v1/audit-logs/cursor:
+    get:
+      tags: [Audit]
+      summary: List audit logs with keyset (cursor) pagination
+      operationId: GET_api_v1_audit_logs_cursor
+      description: Constant-time pagination over audit_log.id. Pass after=next_cursor from the previous page. Optional actor/action/keyword filters.
+      security: [{bearerAuth: []}]
+      parameters:
+      - {name: after, in: query, required: false, schema: {type: integer, format: int64}}
+      - {name: limit, in: query, required: false, schema: {type: integer, default: 50}}
+      - {name: actor, in: query, required: false, schema: {type: integer, format: int64}}
+      - {name: action, in: query, required: false, schema: {type: string}}
+      - {name: keyword, in: query, required: false, schema: {type: string}}
+      responses:
+        '200': {description: Cursor page, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
 

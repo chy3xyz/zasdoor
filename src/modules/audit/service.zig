@@ -7,6 +7,7 @@ const persist = @import("persistence.zig");
 pub const AuditRow = persist.AuditRow;
 pub const AuditListResult = persist.AuditListResult;
 pub const AuditFilters = persist.AuditFilters;
+pub const CursorPage = persist.CursorPage;
 
 pub const AuditService = struct {
     allocator: std.mem.Allocator,
@@ -35,6 +36,10 @@ pub const AuditService = struct {
         _ = self.store.create(actor_user_id, actor_name, action, target_type, target_id, detail, ip, success, tenant_id, now) catch |err| {
             std.log.err("[audit] write failed for action {s}: {s}", .{ action, @errorName(err) });
         };
+    }
+
+    pub fn listCursor(self: *AuditService, filters: AuditFilters, after: ?i64, page_size: usize) !CursorPage {
+        return self.store.listCursor(filters, after, page_size);
     }
 
     pub fn list(self: *AuditService, page: usize, page_size: usize, filters: AuditFilters) !AuditListResult {

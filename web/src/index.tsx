@@ -22,6 +22,7 @@ import { useAuth } from '#ui/hooks';
 import { AuthLayout, MainLayout } from '#ui/layouts';
 import { AuthProvider } from '#ui/providers';
 import { ToastProvider } from '#ui/components';
+import { t } from '#ui/i18n';
 
 const SignIn = lazy(() => import('#ui/pages/SignIn'));
 const SignUp = lazy(() => import('#ui/pages/SignUp'));
@@ -48,7 +49,7 @@ const NotFound = lazy(() => import('#ui/pages/NotFound'));
 function BootFallback() {
   return (
     <div class="flex min-h-screen items-center justify-center bg-base-100 text-sm text-base-content/60">
-      加载中…
+      {t('app.loading')}
     </div>
   );
 }
@@ -101,12 +102,12 @@ function Root(props: { children?: JSX.Element }) {
         <ErrorBoundary
         fallback={(err, reset) => (
           <div class="flex min-h-screen flex-col items-center justify-center gap-4 p-6">
-            <p class="text-error">页面出错了。</p>
+            <p class="text-error">{t('error.title')}</p>
             <pre class="max-w-lg overflow-auto rounded bg-base-200 p-3 text-xs">
               {err instanceof Error ? err.message : String(err)}
             </pre>
             <button type="button" class="btn btn-primary" onClick={reset}>
-              重试
+              {t('error.retry')}
             </button>
           </div>
         )}

@@ -2,17 +2,19 @@ import { createSignal, For, Show } from 'solid-js';
 import { useToast } from '#ui/components';
 
 import { listMailTemplates, toApiError, upsertMailTemplate, type MailTemplateItem } from '#ui/api';
+import { useI18n } from '#ui/i18n';
 import { usePaged } from '#ui/hooks/usePaged';
 import { formatDateTime } from '#ui/utils';
 
 const PAGE_SIZE = 50;
 
-const CODE_LABELS: Record<string, string> = {
-  verify_email: '邮箱验证',
-  reset_password: '密码重置',
+const CODE_KEYS: Record<string, 'mail.verifyEmail' | 'mail.resetPassword'> = {
+  verify_email: 'mail.verifyEmail',
+  reset_password: 'mail.resetPassword',
 };
 
 function MailTemplates() {
+  const { t } = useI18n();
   const toast = useToast();
   const [editing, setEditing] = createSignal<MailTemplateItem | null>(null);
   const [subject, setSubject] = createSignal('');
@@ -33,13 +35,13 @@ function MailTemplates() {
     const item = editing();
     if (!item) return;
     if (!subject().trim() || !body().trim()) {
-      toast.show('主题和正文不能为空', 'error');
+      toast.show(t('mail.emptySubject'), 'error');
       return;
     }
     setSaving(true);
     try {
       await upsertMailTemplate(item.code, subject(), body());
-      setSaved('已保存');
+      setSaved(t('mail.saved'));
       void paged.reload();
       window.setTimeout(() => setSaved(''), 2000);
     } catch (err) {
@@ -52,9 +54,9 @@ function MailTemplates() {
   return (
     <div class="space-y-4">
       <div>
-        <h2 class="text-xl font-semibold">邮件模板</h2>
+        <h2 class="text-xl font-semibold">{t('mail.title')}</h2>
         <p class="text-sm text-base-content/60">
-          未配置的模板使用内置默认值;支持变量 <code class="font-mono text-xs">{'{app_name}'}</code>{' '}
+          {t('mail.subtitle')}<code class="font-mono text-xs">{'{app_name}'}</code>{' '}
           <code class="font-mono text-xs">{'{link}'}</code> <code class="font-mono text-xs">{'{email}'}</code>
         </p>
       </div>
@@ -63,11 +65,11 @@ function MailTemplates() {
         <table class="table">
           <thead>
             <tr>
-              <th>模板</th>
-              <th>主题</th>
-              <th>正文</th>
-              <th>更新时间</th>
-              <th class="text-right">操作</th>
+              <th>{t('mail.template')}</th>
+              <th>{t('mail.subject')}</th>
+              <th>{t('mail.body')}</th>
+              <th>{t('mail.updatedAt')}</th>
+              <th class="text-right">{t('common.actions')}</th>
             </tr>
           </thead>
           <tbody>
@@ -75,7 +77,7 @@ function MailTemplates() {
               {(item) => (
                 <tr>
                   <td>
-                    <span class="badge badge-ghost">{CODE_LABELS[item.code] ?? item.code}</span>
+                    <span class="badge badge-ghost">{CODE_KEYS[item.code] ? t(CODE_KEYS[item.code]) : item.code}</span>
                     <span class="ml-1 font-mono text-xs text-base-content/50">{item.code}</span>
                   </td>
                   <td class="max-w-xs truncate text-sm">{item.subject}</td>
@@ -83,7 +85,7 @@ function MailTemplates() {
                   <td class="text-sm text-base-content/70">{formatDateTime(item.updated_at)}</td>
                   <td class="text-right">
                     <button type="button" class="btn btn-sm btn-outline" onClick={() => openEdit(item)}>
-                      编辑
+                      {t('mail.editAction')}
                     </button>
                   </td>
                 </tr>
@@ -92,7 +94,7 @@ function MailTemplates() {
             <Show when={paged.items().length === 0 && !paged.loading()}>
               <tr>
                 <td colspan={5} class="py-10 text-center text-base-content/50">
-                  暂无模板
+                  {t('mail.noTemplates')}
                 </td>
               </tr>
             </Show>
@@ -106,20 +108,20 @@ function MailTemplates() {
             <div class="w-full max-w-lg rounded-lg border border-base-300 bg-base-100 p-5 shadow-xl">
               <div class="mb-4 flex items-center justify-between">
                 <div>
-                  <h3 class="text-lg font-semibold">编辑模板</h3>
+                  <h3 class="text-lg font-semibold">{t('mail.edit')}</h3>
                   <p class="font-mono text-xs text-base-content/50">{item().code}</p>
                 </div>
                 <button
                   type="button"
                   class="btn btn-ghost btn-sm"
                   onClick={() => setEditing(null)}
-                  aria-label="关闭"
+                  aria-label={t('mail.close')}
                 >
                   ✕
                 </button>
               </div>
 
-              <label class="block text-sm font-medium text-base-content/70">主题</label>
+              <label class="block text-sm font-medium text-base-content/70">{t('mail.subject')}</label>
               <input
                 type="text"
                 class="input input-bordered input-sm mt-1 w-full"
@@ -127,7 +129,7 @@ function MailTemplates() {
                 onInput={(e) => setSubject(e.currentTarget.value)}
               />
 
-              <label class="mt-4 block text-sm font-medium text-base-content/70">正文</label>
+              <label class="mt-4 block text-sm font-medium text-base-content/70">{t('mail.body')}</label>
               <textarea
                 class="textarea textarea-bordered textarea-sm mt-1 w-full font-mono text-sm"
                 rows={8}
@@ -140,10 +142,10 @@ function MailTemplates() {
                   <span class="text-sm text-success">{saved()}</span>
                 </Show>
                 <button type="button" class="btn btn-ghost btn-sm" onClick={() => setEditing(null)}>
-                  取消
+                  {t('common.cancel')}
                 </button>
                 <button type="button" class="btn btn-primary btn-sm" disabled={saving()} onClick={() => void onSave()}>
-                  {saving() ? '保存中…' : '保存'}
+                  {saving() ? t('common.saving') : t('common.save')}
                 </button>
               </div>
             </div>

@@ -2,32 +2,30 @@ import { createSignal, Show } from 'solid-js';
 
 import { listAuditLogs, toApiError, type AuditLogItem } from '#ui/api';
 import DataTable, { type Column } from '#ui/components/DataTable';
+import { useI18n } from '#ui/i18n';
 import { usePaged } from '#ui/hooks/usePaged';
 import { formatDateTime } from '#ui/utils';
 
 const PAGE_SIZE = 20;
 
-const ACTION_LABELS: Record<string, string> = {
-  'auth.login': '登录',
-  'auth.login.fail': '登录失败',
-  'auth.register': '注册',
-  'user.create': '创建用户',
-  'user.update': '更新用户',
-  'user.delete': '删除用户',
-  'task.retry': '重试任务',
-  'task.cancel': '取消任务',
-  'task.purge': '清理任务',
-  'task.delete': '删除任务',
-  'tenant.create': '创建租户',
-  'tenant.update': '更新租户',
-  'file.delete': '删除文件',
+const ACTION_KEYS: Record<string, 'audit.action.login' | 'audit.action.loginFail' | 'audit.action.register' | 'audit.action.userCreate' | 'audit.action.userUpdate' | 'audit.action.userDelete' | 'audit.action.taskRetry' | 'audit.action.taskCancel' | 'audit.action.taskPurge' | 'audit.action.taskDelete' | 'audit.action.tenantCreate' | 'audit.action.tenantUpdate' | 'audit.action.fileDelete'> = {
+  'auth.login': 'audit.action.login',
+  'auth.login.fail': 'audit.action.loginFail',
+  'auth.register': 'audit.action.register',
+  'user.create': 'audit.action.userCreate',
+  'user.update': 'audit.action.userUpdate',
+  'user.delete': 'audit.action.userDelete',
+  'task.retry': 'audit.action.taskRetry',
+  'task.cancel': 'audit.action.taskCancel',
+  'task.purge': 'audit.action.taskPurge',
+  'task.delete': 'audit.action.taskDelete',
+  'tenant.create': 'audit.action.tenantCreate',
+  'tenant.update': 'audit.action.tenantUpdate',
+  'file.delete': 'audit.action.fileDelete',
 };
 
-function actionLabel(action: string): string {
-  return ACTION_LABELS[action] ?? action;
-}
-
 function AuditLogs() {
+  const { t } = useI18n();
   const [actor, setActor] = createSignal('');
   const [action, setAction] = createSignal('');
   const [keyword, setKeyword] = createSignal('');
@@ -58,14 +56,14 @@ function AuditLogs() {
     { key: 'id', title: 'ID', render: (r) => <span class="font-mono text-xs">{r.id}</span> },
     {
       key: 'action',
-      title: '操作',
+      title: t('common.operation'),
       render: (r) => (
-        <span class={`badge badge-sm ${r.success ? 'badge-ghost' : 'badge-error'}`}>{actionLabel(r.action)}</span>
+        <span class={`badge badge-sm ${r.success ? 'badge-ghost' : 'badge-error'}`}>{ACTION_KEYS[r.action] ? t(ACTION_KEYS[r.action]) : r.action}</span>
       ),
     },
     {
       key: 'actor',
-      title: '操作者',
+      title: t('common.operator'),
       render: (r) => (
         <span>
           {r.actor_name || `#${r.actor_user_id}`}
@@ -75,7 +73,7 @@ function AuditLogs() {
     },
     {
       key: 'target',
-      title: '对象',
+      title: t('common.target'),
       render: (r) => (
         <span class="text-sm">
           {r.target_type || '-'}
@@ -85,11 +83,11 @@ function AuditLogs() {
         </span>
       ),
     },
-    { key: 'detail', title: '详情', render: (r) => <span class="text-sm text-base-content/80">{r.detail}</span> },
+    { key: 'detail', title: t('common.detail'), render: (r) => <span class="text-sm text-base-content/80">{r.detail}</span> },
     { key: 'ip', title: 'IP', render: (r) => <span class="font-mono text-xs">{r.ip || '-'}</span> },
     {
       key: 'created_at',
-      title: '时间',
+      title: t('common.time'),
       render: (r) => <span class="text-sm text-base-content/70">{formatDateTime(r.created_at)}</span>,
     },
   ];
@@ -97,34 +95,34 @@ function AuditLogs() {
   return (
     <div class="space-y-4">
       <div>
-        <h2 class="text-xl font-semibold">审计日志</h2>
-        <p class="text-sm text-base-content/60">共 {paged.total()} 条操作记录</p>
+        <h2 class="text-xl font-semibold">{t('audit.title')}</h2>
+        <p class="text-sm text-base-content/60">{t('audit.count', { count: paged.total() })}</p>
       </div>
 
       <form onSubmit={onSearch} class="flex flex-wrap items-center gap-2">
         <input
           type="number"
           class="input input-bordered input-sm w-28"
-          placeholder="操作者 ID"
+          placeholder={t('audit.actorPlaceholder')}
           value={actor()}
           onInput={(e) => setActor(e.currentTarget.value)}
         />
         <input
           type="text"
           class="input input-bordered input-sm w-44"
-          placeholder="操作类型,如 user."
+          placeholder={t('audit.actionPlaceholder')}
           value={action()}
           onInput={(e) => setAction(e.currentTarget.value)}
         />
         <input
           type="search"
           class="input input-bordered input-sm w-full max-w-xs"
-          placeholder="搜索详情"
+          placeholder={t('audit.keywordPlaceholder')}
           value={keyword()}
           onInput={(e) => setKeyword(e.currentTarget.value)}
         />
         <button type="submit" class="btn btn-sm" disabled={paged.loading()}>
-          搜索
+          {t('common.search')}
         </button>
       </form>
 
@@ -138,7 +136,7 @@ function AuditLogs() {
         loading={paged.loading()}
         error={paged.error()}
         onPageChange={(p) => void paged.reload(p)}
-        emptyText="暂无审计记录"
+        emptyText={t('audit.empty')}
       />
     </div>
   );

@@ -1,5 +1,7 @@
 import { For, Show, type JSX } from 'solid-js';
 
+import { useI18n } from '#ui/i18n';
+
 export interface Column<T> {
   key: string;
   title: string;
@@ -28,6 +30,7 @@ interface DataTableProps<T> {
  * from `usePaged`, with shared loading/empty/error rendering.
  */
 export default function DataTable<T>(props: DataTableProps<T>) {
+  const { t } = useI18n();
   const columnCount = () => props.columns.length + (props.actions ? 1 : 0);
 
   return (
@@ -48,7 +51,7 @@ export default function DataTable<T>(props: DataTableProps<T>) {
                 )}
               </For>
               <Show when={props.actions}>
-                <th class="text-right">{props.actionsTitle ?? '操作'}</th>
+                <th class="text-right">{props.actionsTitle ?? t('table.actions')}</th>
               </Show>
             </tr>
           </thead>
@@ -76,7 +79,7 @@ export default function DataTable<T>(props: DataTableProps<T>) {
             <Show when={props.rows.length === 0 && !props.loading}>
               <tr>
                 <td colspan={columnCount()} class="py-10 text-center text-base-content/50">
-                  {props.emptyText ?? '暂无数据'}
+                  {props.emptyText ?? t('table.empty')}
                 </td>
               </tr>
             </Show>
@@ -100,7 +103,7 @@ export default function DataTable<T>(props: DataTableProps<T>) {
 
       <div class="flex items-center justify-between">
         <span class="text-sm text-base-content/60">
-          第 {props.page} / {props.totalPages} 页 · 共 {props.total} 条
+          {t('common.pageInfo', { page: props.page, totalPages: props.totalPages, total: props.total })}
         </span>
         <div class="join">
           <button
@@ -109,7 +112,7 @@ export default function DataTable<T>(props: DataTableProps<T>) {
             disabled={props.page <= 1 || props.loading}
             onClick={() => props.onPageChange(props.page - 1)}
           >
-            上一页
+            {t('common.prevPage')}
           </button>
           <button
             type="button"
@@ -117,7 +120,7 @@ export default function DataTable<T>(props: DataTableProps<T>) {
             disabled={props.page >= props.totalPages || props.loading}
             onClick={() => props.onPageChange(props.page + 1)}
           >
-            下一页
+            {t('common.nextPage')}
           </button>
         </div>
       </div>

@@ -18,6 +18,8 @@ Start with the [project README](../README.md). These documents go deeper on indi
 | [development-guide.md](development-guide.md) | How to add a business module (zent / zmodu conventions, transactions, security, testing) |
 | [backup.md](backup.md) | Backup and restore playbook |
 | [streaming.md](streaming.md) | Streaming chat contract (SSE) for the AI assistant |
+| [sdk.md](sdk.md) | Consume the HTTP API: bearer auth, `{code,msg,data}` envelope, pagination, error codes, TypeScript/Python/Zig clients, and SDK regeneration from the spec (openapi-generator / orval) |
+| [api-examples.md](api-examples.md) | 13 end-to-end curl flows: register/login, MFA step-up, OAuth code+PKCE, client credentials, device flow, token exchange/refresh, passkeys, IAM, authz policies, orgstruct, agents, audit logs, health/metrics |
 | [openapi.yaml](openapi.yaml) | OpenAPI 3.1 specification of the complete HTTP API (admin `/api/v1` endpoints + root-level OAuth2/OIDC, health and metrics) |
 
 See also [SECURITY.md](../SECURITY.md) for the vulnerability-reporting process and a deployment hardening checklist.

@@ -3,8 +3,10 @@ import { createSignal, onMount, Show } from 'solid-js';
 
 import { verifyEmail } from '#ui/api/auth';
 import { ROUTE_PATH } from '#ui/constants';
+import { useI18n } from '#ui/i18n';
 
 function VerifyEmail() {
+  const { t } = useI18n();
   const [searchParams] = useSearchParams();
   const userId = Number(searchParams.user_id);
   const token = String(searchParams.token ?? '');
@@ -15,7 +17,7 @@ function VerifyEmail() {
   onMount(async () => {
     if (!userId || !token) {
       setStatus('error');
-      setError('验证链接无效，请重新申请。');
+      setError(t('auth.verify.invalidLink'));
       return;
     }
     try {
@@ -23,23 +25,23 @@ function VerifyEmail() {
       setStatus('success');
     } catch (err) {
       setStatus('error');
-      setError(err instanceof Error ? err.message : '验证失败，请稍后重试');
+      setError(err instanceof Error ? err.message : t('auth.verify.failed'));
     }
   });
 
   return (
     <div class="card bg-base-100 shadow-xl">
       <div class="card-body">
-        <h2 class="card-title text-2xl">邮箱验证</h2>
+        <h2 class="card-title text-2xl">{t('auth.verify.title')}</h2>
         <Show when={status() === 'pending'}>
-          <p class="text-sm text-base-content/60">正在验证…</p>
+          <p class="text-sm text-base-content/60">{t('auth.verify.pending')}</p>
         </Show>
         <Show when={status() === 'success'}>
           <div role="alert" class="alert alert-success py-2 text-sm">
-            邮箱验证成功，可以正常使用全部功能了。
+            {t('auth.verify.success')}
           </div>
           <A href={ROUTE_PATH.signIn} class="btn btn-primary">
-            去登录
+            {t('auth.verify.goToSignIn')}
           </A>
         </Show>
         <Show when={status() === 'error'}>
@@ -47,7 +49,7 @@ function VerifyEmail() {
             {error()}
           </div>
           <A href={ROUTE_PATH.signIn} class="btn btn-primary">
-            返回登录
+            {t('auth.verify.backToSignIn')}
           </A>
         </Show>
       </div>

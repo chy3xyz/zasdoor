@@ -8,9 +8,11 @@ import {
   updateProfile,
 } from '#ui/api';
 import { useAuth } from '#ui/hooks';
+import { useI18n } from '#ui/i18n';
 import { formatDateTime } from '#ui/utils';
 
 function Profile() {
+  const { t } = useI18n();
   const [auth, actions] = useAuth();
   const user = () => auth.user;
 
@@ -52,7 +54,7 @@ function Profile() {
         email: email().trim(),
       });
       actions.setCurrentUser(fresh);
-      setProfileOk('资料已保存');
+      setProfileOk(t('profile.saved'));
     } catch (err) {
       setProfileError(toApiError(err).message);
     } finally {
@@ -64,7 +66,7 @@ function Profile() {
     e.preventDefault();
     if (pwSaving()) return;
     if (newPassword() !== confirm()) {
-      setPwError('两次输入的新密码不一致');
+      setPwError(t('common.passwordMismatch'));
       return;
     }
     setPwSaving(true);
@@ -75,7 +77,7 @@ function Profile() {
       setOldPassword('');
       setNewPassword('');
       setConfirm('');
-      setPwOk('密码已更新');
+      setPwOk(t('profile.passwordUpdated'));
     } catch (err) {
       setPwError(toApiError(err).message);
     } finally {
@@ -88,7 +90,7 @@ function Profile() {
     if (walletSaving()) return;
     const addr = walletAddress().trim();
     if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) {
-      setWalletErr('地址格式无效，应为 0x + 40 位十六进制');
+      setWalletErr(t('profile.wallet.invalidAddress'));
       return;
     }
     setWalletSaving(true);
@@ -96,7 +98,7 @@ function Profile() {
     setWalletErr(null);
     try {
       const res = await bindWallet({ chain: walletChain().trim() || 'evm', address: addr });
-      setWalletMsg(`钱包已绑定: ${res.address}`);
+      setWalletMsg(t('profile.wallet.bound', { address: res.address }));
       setWalletAddress('');
     } catch (err) {
       setWalletErr(toApiError(err).message);
@@ -111,7 +113,7 @@ function Profile() {
     setVerifyMsg(null);
     try {
       await sendVerification();
-      setVerifyMsg('验证邮件已发送，请查收邮箱。');
+      setVerifyMsg(t('profile.verifySent'));
     } catch (err) {
       setVerifyMsg(toApiError(err).message);
     } finally {
@@ -122,17 +124,17 @@ function Profile() {
   return (
     <div class="space-y-4">
       <div>
-        <h2 class="text-xl font-semibold">个人资料</h2>
-        <p class="text-sm text-base-content/60">账号信息、邮箱验证与安全设置</p>
+        <h2 class="text-xl font-semibold">{t('profile.title')}</h2>
+        <p class="text-sm text-base-content/60">{t('profile.subtitle')}</p>
       </div>
 
       <Show when={!user()?.verified}>
         <div role="alert" class="alert alert-warning py-2 text-sm">
           <span>
-            邮箱尚未验证。{verifyMsg() ?? '部分功能可能受限。'}
+            {t('profile.unverified')}{verifyMsg() ?? t('profile.verifyHint')}
           </span>
           <button type="button" class="btn btn-sm btn-warning" disabled={verifySending()} onClick={onSendVerification}>
-            {verifySending() ? '发送中…' : '发送验证邮件'}
+            {verifySending() ? t('auth.forgot.submitting') : t('profile.sendVerify')}
           </button>
         </div>
       </Show>
@@ -140,7 +142,7 @@ function Profile() {
       <div class="grid gap-4 lg:grid-cols-2">
         <div class="card w-full bg-base-100 shadow-sm">
           <div class="card-body gap-3">
-            <h3 class="card-title text-base">账号信息</h3>
+            <h3 class="card-title text-base">{t('profile.accountInfo')}</h3>
             <div class="flex items-center gap-4">
               <div class="avatar placeholder">
                 <div class="w-14 rounded-full bg-primary text-neutral-content">
@@ -155,35 +157,35 @@ function Profile() {
             <div class="divider my-1" />
             <dl class="space-y-2 text-sm">
               <div class="flex justify-between">
-                <dt class="text-base-content/60">用户 ID</dt>
+                <dt class="text-base-content/60">{t('profile.userId')}</dt>
                 <dd class="font-mono">{user()?.id}</dd>
               </div>
               <div class="flex justify-between">
-                <dt class="text-base-content/60">角色</dt>
+                <dt class="text-base-content/60">{t('profile.role')}</dt>
                 <dd>
                   <span class={`badge badge-sm ${user()?.admin ? 'badge-primary' : 'badge-ghost'}`}>
-                    {user()?.admin ? '管理员' : '用户'}
+                    {user()?.admin ? t('common.admin') : t('common.user')}
                   </span>
                 </dd>
               </div>
               <div class="flex justify-between">
-                <dt class="text-base-content/60">租户 ID</dt>
+                <dt class="text-base-content/60">{t('profile.tenantId')}</dt>
                 <dd class="font-mono">{user()?.tenant_id}</dd>
               </div>
               <div class="flex justify-between">
-                <dt class="text-base-content/60">验证状态</dt>
+                <dt class="text-base-content/60">{t('profile.verifiedAt')}</dt>
                 <dd>
                   <span class={`badge badge-sm ${user()?.verified ? 'badge-success' : 'badge-outline'}`}>
-                    {user()?.verified ? '已验证' : '未验证'}
+                    {user()?.verified ? t('common.verified') : t('common.unverified')}
                   </span>
                 </dd>
               </div>
               <div class="flex justify-between">
-                <dt class="text-base-content/60">注册时间</dt>
+                <dt class="text-base-content/60">{t('profile.registeredAt')}</dt>
                 <dd>{formatDateTime(user()?.created_at ?? 0)}</dd>
               </div>
               <div class="flex justify-between">
-                <dt class="text-base-content/60">更新时间</dt>
+                <dt class="text-base-content/60">{t('profile.updatedAt')}</dt>
                 <dd>{formatDateTime(user()?.updated_at ?? 0)}</dd>
               </div>
             </dl>
@@ -193,8 +195,8 @@ function Profile() {
         <div class="space-y-4">
           <form onSubmit={onBindWallet} class="card w-full bg-base-100 shadow-sm">
             <div class="card-body gap-3">
-              <h3 class="card-title text-base">绑定 Web3 钱包</h3>
-              <p class="text-sm text-base-content/60">绑定后可用该钱包通过 SIWE 免密登录</p>
+              <h3 class="card-title text-base">{t('profile.wallet.title')}</h3>
+              <p class="text-sm text-base-content/60">{t('profile.wallet.subtitle')}</p>
               <Show when={walletErr()}>
                 <div role="alert" class="alert alert-error py-2 text-sm">
                   {walletErr()}
@@ -206,22 +208,22 @@ function Profile() {
                 </div>
               </Show>
               <label class="form-control w-full">
-                <span class="label-text mb-1">链</span>
+                <span class="label-text mb-1">{t('profile.wallet.chain')}</span>
                 <input type="text" class="input input-bordered input-sm" value={walletChain()} onInput={(e) => setWalletChain(e.currentTarget.value)} placeholder="evm" />
               </label>
               <label class="form-control w-full">
-                <span class="label-text mb-1">钱包地址</span>
+                <span class="label-text mb-1">{t('profile.wallet.address')}</span>
                 <input type="text" class="input input-bordered input-sm" value={walletAddress()} onInput={(e) => setWalletAddress(e.currentTarget.value)} placeholder="0x…" />
               </label>
               <button type="submit" class="btn btn-primary btn-sm self-end" disabled={walletSaving()}>
-                {walletSaving() ? '绑定中…' : '绑定钱包'}
+                {walletSaving() ? t('profile.wallet.binding') : t('profile.wallet.bind')}
               </button>
             </div>
           </form>
 
           <form onSubmit={onSaveProfile} class="card w-full bg-base-100 shadow-sm">
             <div class="card-body gap-3">
-              <h3 class="card-title text-base">编辑资料</h3>
+              <h3 class="card-title text-base">{t('profile.edit')}</h3>
               <Show when={profileError()}>
                 <div role="alert" class="alert alert-error py-2 text-sm">
                   {profileError()}
@@ -233,22 +235,22 @@ function Profile() {
                 </div>
               </Show>
               <label class="form-control w-full">
-                <span class="label-text mb-1">姓名</span>
+                <span class="label-text mb-1">{t('auth.signUp.name')}</span>
                 <input type="text" class="input input-bordered input-sm" value={name()} onInput={(e) => setName(e.currentTarget.value)} required />
               </label>
               <label class="form-control w-full">
-                <span class="label-text mb-1">邮箱</span>
+                <span class="label-text mb-1">{t('common.email')}</span>
                 <input type="email" class="input input-bordered input-sm" value={email()} onInput={(e) => setEmail(e.currentTarget.value)} required />
               </label>
               <button type="submit" class="btn btn-primary btn-sm self-end" disabled={profileSaving()}>
-                {profileSaving() ? '保存中…' : '保存资料'}
+                {profileSaving() ? t('common.saving') : t('profile.save')}
               </button>
             </div>
           </form>
 
           <form onSubmit={onChangePassword} class="card w-full bg-base-100 shadow-sm">
             <div class="card-body gap-3">
-              <h3 class="card-title text-base">修改密码</h3>
+              <h3 class="card-title text-base">{t('profile.password')}</h3>
               <Show when={pwError()}>
                 <div role="alert" class="alert alert-error py-2 text-sm">
                   {pwError()}
@@ -260,19 +262,19 @@ function Profile() {
                 </div>
               </Show>
               <label class="form-control w-full">
-                <span class="label-text mb-1">当前密码</span>
+                <span class="label-text mb-1">{t('profile.currentPassword')}</span>
                 <input type="password" class="input input-bordered input-sm" value={oldPassword()} onInput={(e) => setOldPassword(e.currentTarget.value)} required />
               </label>
               <label class="form-control w-full">
-                <span class="label-text mb-1">新密码（至少 8 位）</span>
+                <span class="label-text mb-1">{t('profile.newPassword')}</span>
                 <input type="password" class="input input-bordered input-sm" value={newPassword()} onInput={(e) => setNewPassword(e.currentTarget.value)} minlength={8} required />
               </label>
               <label class="form-control w-full">
-                <span class="label-text mb-1">确认新密码</span>
+                <span class="label-text mb-1">{t('auth.reset.confirmNewPassword')}</span>
                 <input type="password" class="input input-bordered input-sm" value={confirm()} onInput={(e) => setConfirm(e.currentTarget.value)} minlength={8} required />
               </label>
               <button type="submit" class="btn btn-primary btn-sm self-end" disabled={pwSaving()}>
-                {pwSaving() ? '提交中…' : '更新密码'}
+                {pwSaving() ? t('auth.reset.submitting') : t('profile.updatePassword')}
               </button>
             </div>
           </form>

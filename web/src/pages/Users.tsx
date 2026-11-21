@@ -5,12 +5,14 @@ import { deleteUser, listUsers, revokeUserSessions, toApiError, type AuthUser } 
 import DataTable, { type Column } from '#ui/components/DataTable';
 import UserFormModal, { type UserFormTarget } from '#ui/components/UserFormModal';
 import { useAuth } from '#ui/hooks';
+import { useI18n } from '#ui/i18n';
 import { usePaged } from '#ui/hooks/usePaged';
 import { formatDateTime } from '#ui/utils';
 
 const PAGE_SIZE = 20;
 
 function Users() {
+  const { t } = useI18n();
   const toast = useToast();
   const [auth] = useAuth();
   const [keyword, setKeyword] = createSignal('');
@@ -41,7 +43,7 @@ function Users() {
   };
 
   const onRemove = async (user: AuthUser) => {
-    if (!window.confirm(`确定删除用户「${user.name}」吗？此操作不可恢复。`)) return;
+    if (!window.confirm(t('users.confirmDelete', { name: user.name }))) return;
     try {
       await deleteUser(user.id);
       void paged.reload();
@@ -51,10 +53,10 @@ function Users() {
   };
 
   const onRevoke = async (user: AuthUser) => {
-    if (!window.confirm(`确定踢下线「${user.name}」?其所有登录将立即失效`)) return;
+    if (!window.confirm(t('users.confirmKick', { name: user.name }))) return;
     try {
       await revokeUserSessions(user.id);
-      toast.show('已踢下线', 'success');
+      toast.show(t('common.kicked'), 'success');
     } catch (err) {
       toast.show(toApiError(err).message, 'error');
     }
@@ -62,34 +64,34 @@ function Users() {
 
   const columns: Column<AuthUser>[] = [
     { key: 'id', title: 'ID', render: (u) => <span class="font-mono text-xs">{u.id}</span> },
-    { key: 'name', title: '姓名', render: (u) => u.name },
-    { key: 'email', title: '邮箱', render: (u) => <span class="text-sm">{u.email}</span> },
+    { key: 'name', title: t('auth.signUp.name'), render: (u) => u.name },
+    { key: 'email', title: t('common.email'), render: (u) => <span class="text-sm">{u.email}</span> },
     {
       key: 'admin',
-      title: '角色',
+      title: t('common.role'),
       render: (u) => (
         <span class={`badge badge-sm ${u.admin ? 'badge-primary' : 'badge-ghost'}`}>
-          {u.admin ? '管理员' : '用户'}
+          {u.admin ? t('common.admin') : t('common.user')}
         </span>
       ),
     },
     {
       key: 'verified',
-      title: '状态',
+      title: t('common.status'),
       render: (u) => (
         <span class={`badge badge-sm ${u.verified ? 'badge-success' : 'badge-outline'}`}>
-          {u.verified ? '已验证' : '未验证'}
+          {u.verified ? t('common.verified') : t('common.unverified')}
         </span>
       ),
     },
     {
       key: 'tenant_id',
-      title: '租户',
+      title: t('common.tenant'),
       render: (u) => <span class="badge badge-sm badge-ghost font-mono">{u.tenant_id}</span>,
     },
     {
       key: 'created_at',
-      title: '创建时间',
+      title: t('common.createdAt'),
       render: (u) => <span class="text-sm text-base-content/70">{formatDateTime(u.created_at)}</span>,
     },
   ];
@@ -98,11 +100,11 @@ function Users() {
     <div class="space-y-4">
       <div class="flex items-center justify-between">
         <div>
-          <h2 class="text-xl font-semibold">用户管理</h2>
-          <p class="text-sm text-base-content/60">共 {paged.total()} 个用户</p>
+          <h2 class="text-xl font-semibold">{t('users.title')}</h2>
+          <p class="text-sm text-base-content/60">{t('users.count', { count: paged.total() })}</p>
         </div>
         <button type="button" class="btn btn-primary btn-sm" onClick={openCreate}>
-          新建用户
+          {t('users.new')}
         </button>
       </div>
 
@@ -110,12 +112,12 @@ function Users() {
         <input
           type="search"
           class="input input-bordered input-sm w-full max-w-xs"
-          placeholder="搜索姓名或邮箱"
+          placeholder={t('users.searchPlaceholder')}
           value={searchInput()}
           onInput={(e) => setSearchInput(e.currentTarget.value)}
         />
         <button type="submit" class="btn btn-sm" disabled={paged.loading()}>
-          搜索
+          {t('common.search')}
         </button>
         <Show when={keyword()}>
           <button
@@ -127,7 +129,7 @@ function Users() {
               void paged.reload(1);
             }}
           >
-            清除
+            {t('users.clear')}
           </button>
         </Show>
       </form>
@@ -141,7 +143,7 @@ function Users() {
         totalPages={paged.totalPages()}
         loading={paged.loading()}
         error={paged.error()}
-        emptyText="暂无用户"
+        emptyText={t('users.empty')}
         onPageChange={(p) => void paged.reload(p)}
         actions={(user) => (
           <>
@@ -151,7 +153,7 @@ function Users() {
               onClick={() => openEdit(user)}
               disabled={user.id === auth.user?.id}
             >
-              编辑
+              {t('common.edit')}
             </button>
             <button
               type="button"
@@ -159,7 +161,7 @@ function Users() {
               onClick={() => onRemove(user)}
               disabled={user.id === auth.user?.id}
             >
-              删除
+              {t('common.delete')}
             </button>
             <button
               type="button"
@@ -167,7 +169,7 @@ function Users() {
               onClick={() => void onRevoke(user)}
               disabled={user.id === auth.user?.id}
             >
-              踢下线
+              {t('common.kick')}
             </button>
           </>
         )}

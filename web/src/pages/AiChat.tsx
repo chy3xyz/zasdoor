@@ -13,8 +13,10 @@ import {
 } from '#ui/api';
 import { aiSessionChat } from '#ui/api/ai/path';
 import { APP_CONFIG } from '#ui/config';
+import { useI18n } from '#ui/i18n';
 
 function AiChat() {
+  const { t } = useI18n();
   const [sessions, setSessions] = createSignal<AiSessionItem[]>([]);
   const [activeId, setActiveId] = createSignal<number | null>(null);
   const [messages, setMessages] = createSignal<AiMessageItem[]>([]);
@@ -53,7 +55,7 @@ function AiChat() {
 
   const onNewSession = async () => {
     try {
-      const { id } = await createAiSession('新会话');
+      const { id } = await createAiSession(t('chat.newSession'));
       await refreshSessions();
       await selectSession(id);
     } catch (err) {
@@ -63,7 +65,7 @@ function AiChat() {
 
   const onRemoveSession = async (id: number, e: MouseEvent) => {
     e.stopPropagation();
-    if (!window.confirm('确定删除该会话？')) return;
+    if (!window.confirm(t('chat.deleteSession'))) return;
     try {
       await deleteAiSession(id);
       setActiveId(null);
@@ -120,13 +122,13 @@ function AiChat() {
     });
     if (!resp.ok) {
       const env = (await resp.json().catch(() => null)) as { msg?: string } | null;
-      throw new Error(env?.msg ?? `请求失败(${resp.status})`);
+      throw new Error(env?.msg ?? `${t('chat.requestFailed')}(${resp.status})`);
     }
     const isSse = (resp.headers.get('content-type') ?? '').includes('text/event-stream');
     if (!isSse || !resp.body) {
       // 非流式(旧版/降级):直接解析 JSON。
       const env = (await resp.json()) as { code: number; msg: string; data: { answer: string; reasoning_content?: string } };
-      if (env.code !== 0) throw new Error(env.msg || '请求失败');
+      if (env.code !== 0) throw new Error(env.msg || t('chat.requestFailed'));
       setMessages((prev) => [
         ...prev,
         {
@@ -164,14 +166,14 @@ function AiChat() {
           setStreamingAnswer(answer);
         } else if (ev === 'done') {
           const j = JSON.parse(data) as { answer: string; reasoning_content: string; budget_exhausted: boolean };
-          if (j.budget_exhausted) setError('本次回答触发了 token 预算上限,结果可能不完整。');
+          if (j.budget_exhausted) setError(t('chat.budgetExhausted'));
           return true;
         } else if (ev === 'error') {
           throw new Error(data);
         }
       }
     }
-    throw new Error('流式连接中断');
+    throw new Error(t('chat.streamInterrupted'));
   };
 
   const renderBubble = (m: AiMessageItem): JSX.Element => {
@@ -189,7 +191,7 @@ function AiChat() {
         <div class="max-w-[85%] space-y-2">
           <Show when={m.reasoning_content}>
             <details class="rounded-lg border border-base-300 bg-base-200/60 px-3 py-2">
-              <summary class="cursor-pointer text-xs text-base-content/50">推理过程</summary>
+              <summary class="cursor-pointer text-xs text-base-content/50">{t('chat.reasoning')}</summary>
               <p class="mt-1 text-xs text-base-content/50 whitespace-pre-wrap">{m.reasoning_content}</p>
             </details>
           </Show>
@@ -206,7 +208,7 @@ function AiChat() {
       <aside class="flex w-56 shrink-0 flex-col rounded-lg border border-base-300 bg-base-200/50">
         <div class="border-b border-base-300 p-2">
           <button type="button" class="btn btn-primary btn-sm w-full" onClick={() => void onNewSession()}>
-            ＋ 新会话
+            ＋ {t('chat.newSession')}
           </button>
         </div>
         <div class="flex-1 space-y-1 overflow-y-auto p-2">
@@ -218,12 +220,12 @@ function AiChat() {
                 }`}
                 onClick={() => void selectSession(s.id)}
               >
-                <span class="truncate">{s.title || `会话 #${s.id}`}</span>
+                <span class="truncate">{s.title || `${t('chat.session')} #${s.id}`}</span>
                 <button
                   type="button"
                   class="btn btn-ghost btn-xs opacity-0 group-hover:opacity-100"
                   onClick={(e) => onRemoveSession(s.id, e)}
-                  aria-label="删除会话"
+                  aria-label={t('chat.deleteSessionAria')}
                 >
                   ✕
                 </button>
@@ -231,30 +233,30 @@ function AiChat() {
             )}
           </For>
           <Show when={sessions().length === 0}>
-            <p class="px-2 py-4 text-center text-xs text-base-content/50">暂无会话</p>
+            <p class="px-2 py-4 text-center text-xs text-base-content/50">{t('chat.noSessions')}</p>
           </Show>
         </div>
       </aside>
 
       <div class="flex min-w-0 flex-1 flex-col rounded-lg border border-base-300">
         <div class="flex items-center justify-between border-b border-base-300 px-4 py-2">
-          <h2 class="text-sm font-semibold">AI 助手</h2>
-          <span class="text-xs text-base-content/50">可查询用户/任务/审计/租户;写操作需审批</span>
+          <h2 class="text-sm font-semibold">{t('chat.title')}</h2>
+          <span class="text-xs text-base-content/50">{t('chat.subtitle')}</span>
         </div>
 
         <div class="flex-1 space-y-3 overflow-y-auto p-4">
           <Show when={messages().length === 0 && !busy()}>
             <div class="flex h-full flex-col items-center justify-center gap-2 text-base-content/50">
               <p class="text-lg">🤖</p>
-              <p class="text-sm">试试问我:「任务队列现在什么情况?」</p>
-              <p class="text-xs">「最近有哪些用户注册?」「帮我发条通知给用户 1」</p>
+              <p class="text-sm">{t('chat.hint')}</p>
+              <p class="text-xs">{t('chat.hint2')} {t('chat.hint3')}</p>
             </div>
           </Show>
           <For each={messages()}>{(m) => renderBubble(m)}</For>
           <Show when={busy() && streamingReasoning()}>
             <div class="flex justify-start">
               <div class="max-w-[85%] space-y-1 rounded-lg border border-base-300 bg-base-200/60 px-3 py-2">
-                <p class="text-xs text-base-content/50">推理中…</p>
+                <p class="text-xs text-base-content/50">{t('chat.reasoning')}…</p>
                 <p class="text-xs text-base-content/50 whitespace-pre-wrap">{streamingReasoning()}</p>
               </div>
             </div>
@@ -269,7 +271,7 @@ function AiChat() {
           <Show when={busy() && !streamingAnswer() && !streamingReasoning()}>
             <div class="flex justify-start">
               <div class="rounded-lg border border-base-300 bg-base-200 px-3 py-2 text-sm text-base-content/60">
-                思考中…
+                {t('chat.thinking')}
               </div>
             </div>
           </Show>
@@ -285,13 +287,13 @@ function AiChat() {
           <input
             type="text"
             class="input input-bordered input-sm flex-1"
-            placeholder={activeId() ? '输入你的问题…' : '先选择或新建一个会话'}
+            placeholder={activeId() ? t('chat.placeholder') : t('chat.chooseSession')}
             value={input()}
             disabled={!activeId() || busy()}
             onInput={(e) => setInput(e.currentTarget.value)}
           />
           <button type="submit" class="btn btn-primary btn-sm" disabled={!activeId() || busy() || !input().trim()}>
-            发送
+            {t('chat.send')}
           </button>
         </form>
       </div>

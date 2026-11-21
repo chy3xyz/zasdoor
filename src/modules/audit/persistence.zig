@@ -11,6 +11,12 @@ pub const infos = graph.types;
 pub const Client = schema.Client;
 pub const AuditLogInfo = infos[0];
 
+pub const CursorPage = struct {
+    items: []AuditRow,
+    next_cursor: ?i64,
+    has_more: bool,
+};
+
 pub const AuditRow = struct {
     id: i64,
     actor_user_id: i64,
@@ -124,6 +130,56 @@ pub const AuditStore = struct {
         defer d.deinit();
         _ = try d.Where(.{preds.created_atLT(.{ .int = cutoff })});
         return try d.Exec();
+    }
+
+    /// Keyset (cursor) page over audit_log.id — constant-time pagination for
+    /// large audit tables; filters reuse the same predicates as list().
+    pub fn listCursor(
+        self: *AuditStore,
+        filters: AuditFilters,
+        after: ?i64,
+        page_size: usize,
+    ) !CursorPage {
+        const preds = self.client.audit_log.predicates;
+        var preds_buf: [3]zent.sql.Predicate = undefined;
+        var n_preds: usize = 0;
+        if (filters.actor_user_id) |uid| {
+            preds_buf[n_preds] = preds.actor_user_idEQ(.{ .int = uid });
+            n_preds += 1;
+        }
+        if (filters.action) |a| {
+            if (a.len > 0) {
+                preds_buf[n_preds] = preds.actionContainsEscaped(a);
+                n_preds += 1;
+            }
+        }
+        if (filters.keyword) |kw| {
+            if (kw.len > 0) {
+                preds_buf[n_preds] = preds.detailContainsEscaped(kw);
+                n_preds += 1;
+            }
+        }
+        var page_result = try crud.cursorPage(self.client.audit_log, preds_buf[0..n_preds], .{
+            .cursor_col = "id",
+            .after = after,
+            .desc = true,
+        }, page_size);
+        defer page_result.deinit(infos, AuditLogInfo, self.allocator);
+        var out = try self.allocator.alloc(AuditRow, page_result.items.items.len);
+        var n: usize = 0;
+        errdefer {
+            for (out[0..n]) |r| r.free(self.allocator);
+            self.allocator.free(out);
+        }
+        for (page_result.items.items) |e| {
+            out[n] = try self.dup(e);
+            n += 1;
+        }
+        return .{
+            .items = out,
+            .next_cursor = page_result.next_cursor,
+            .has_more = page_result.has_more,
+        };
     }
 
     pub fn list(self: *AuditStore, page: usize, page_size: usize, filters: AuditFilters) !AuditListResult {
