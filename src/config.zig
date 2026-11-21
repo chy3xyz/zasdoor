@@ -69,6 +69,8 @@ pub const Config = struct {
     webauthn_rp_name: []const u8 = "zasdoor",
     webauthn_origin: []const u8 = "http://localhost:3001",
     webauthn_challenge_ttl_seconds: i64 = 300,
+    /// 新密码使用 Argon2id(PHC);旧 PBKDF2 哈希仍可验证。默认关闭以兼容既有数据。
+    password_argon2id: bool = false,
 
     pub fn fromEnv(environ: *const std.process.Environ.Map) Config {
         var cfg: Config = .{};
@@ -108,6 +110,7 @@ pub const Config = struct {
         cfg.webauthn_rp_name = environ.get("ZASDOOR_WEBAUTHN_RP_NAME") orelse "zasdoor";
         cfg.webauthn_origin = environ.get("ZASDOOR_WEBAUTHN_ORIGIN") orelse "http://localhost:3001";
         cfg.webauthn_challenge_ttl_seconds = parseInt64(environ.get("ZASDOOR_WEBAUTHN_CHALLENGE_TTL") orelse "300", 300);
+        cfg.password_argon2id = parseBool(environ.get("ZASDOOR_PASSWORD_ARGON2ID") orelse "false", false);
         return cfg;
     }
 

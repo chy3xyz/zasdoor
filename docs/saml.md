@@ -16,6 +16,27 @@ should follow. Where a recommendation depends on verification, it says so.
 
 ---
 
+## P0 spike result (2026-11-21): GO
+
+The go/no-go gate has been exercised. Two standalone prototype files live in
+`src/modules/saml/` and are covered by the main test tree (33 additional tests):
+
+- `xml.zig` (722 LOC): fail-closed, namespace-aware XML parser for the SAML
+  subset — rejects DOCTYPE, custom entities, PIs in content, `xml:base`,
+  relative namespace URIs, unbalanced tags, >64 KiB input, depth >64 and
+  duplicate expanded names/ids; CDATA becomes text, comments are discarded.
+- `c14n.zig` (399 LOC): exclusive XML canonicalization 1.0 covering rules 1–10
+  in §5.4, including `InclusiveNamespaces@PrefixList`. 10 golden vectors were
+  cross-checked byte-for-byte with libxml2 `xmllint --exc-c14n`.
+
+**Verdict**: pure Zig is feasible for the SAML subset; do not add libxml2.
+Budget ~1,100–1,600 LOC for production hardening and run the full W3C C14N
+corpus before signing real IdP responses. Open gaps: `#default` PrefixList
+token, comment-preserving c14n (intentionally stricter here), and a full
+W3C conformance corpus.
+
+---
+
 ## 0. Executive summary and decisions
 
 zasdoor already has a federated-login foundation for OAuth2/OIDC

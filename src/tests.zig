@@ -24,6 +24,7 @@ const mfa = @import("modules/mfa/root.zig");
 const web3 = @import("modules/web3/root.zig");
 const agent = @import("modules/agent/root.zig");
 const orgstruct = @import("modules/orgstruct/root.zig");
+const saml = @import("modules/saml/root.zig");
 const cache_svc = @import("services/cache.zig");
 const mail = @import("services/mail.zig");
 
@@ -75,6 +76,11 @@ fn openMemory(allocator: std.mem.Allocator) !db_mod.StoreEnv(schema.infos, .{
         authzm.persistence.infos,
         orgstruct.persistence.infos,
     }).open(allocator, .sqlite, ":memory:");
+}
+
+// SAML P0 spike (XML parser + exclusive c14n) is a standalone test root.
+comptime {
+    _ = saml;
 }
 
 test "health: zmodu + zent importable together" {
@@ -2176,6 +2182,30 @@ test "web3: personalSignDigest uses the 0x19 EIP-191 prefix byte" {
     var expect: [32]u8 = undefined;
     std.crypto.hash.sha3.Keccak256.hash(buf[0..off], &expect, .{});
     try std.testing.expectEqualSlices(u8, &expect, &digest);
+}
+
+test "user: Argon2id hashes verify and legacy PBKDF2 stays readable" {
+    const a = std.testing.allocator;
+    var env = try openMemory(a);
+    defer env.deinit();
+    var store = user.persistence.UserStore.init(a, env.client);
+    var sec = zmodu.security.AppSecurity.init(a, std.testing.io, .{ .jwt_secret = "argon-user" });
+    var svc = user.service.UserService.init(&store, &sec, std.testing.io, 3600, 86400);
+
+    // Legacy PBKDF2 hash (what hashPassword produced) still verifies.
+    const legacy = try sec.module.hashPassword("Legacy-Passw0rd!23");
+    defer sec.module.allocator.free(legacy);
+    try std.testing.expect(try svc.verifyUserPassword("Legacy-Passw0rd!23", legacy));
+
+    // Opt in: new user password is Argon2id PHC and verifies through the service.
+    svc.argon2id = true;
+    const session = try svc.register(a, "Argon", "argon@example.com", "Unrelated-Passw0rd!23", false, 1);
+    defer svc.freeSession(session);
+    const stored = (try store.getPasswordHashById(session.row.id)).?;
+    defer a.free(stored);
+    try std.testing.expect(std.mem.startsWith(u8, stored, "$argon2id$v=19$"));
+    try std.testing.expect(try svc.verifyUserPassword("Unrelated-Passw0rd!23", stored));
+    try std.testing.expect(!try svc.verifyUserPassword("wrong", stored));
 }
 
 test "web3: DID derivation and multi-chain address validation" {

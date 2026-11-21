@@ -14,3 +14,4 @@ export { default as Sessions } from './Sessions';
 export { default as Roles } from './Roles';
 export { default as Groups } from './Groups';
 export { default as Domains } from './Domains';
+export { default as Consent } from './Consent';

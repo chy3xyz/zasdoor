@@ -254,6 +254,7 @@ pub fn main(init: std.process.Init) !void {
     var iam_store = iam.persistence.IamStore.init(allocator, store_env.client);
     var iam_svc = iam.service.IamService.init(allocator, io, &iam_store, &sec);
     user_svc.bindIamService(&iam_svc);
+    user_svc.argon2id = cfg.password_argon2id;
     var oauth_svc = oauth.service.OAuthService.initWithExtraKeys(allocator, io, &iam_svc, &user_svc, &sec, cfg.app_host, cfg.oidc_key_secrets);
 
     var event_store = eventstore.persistence.EventStore.init(allocator, store_env.client);

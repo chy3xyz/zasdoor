@@ -6,6 +6,7 @@ export const ROUTE_PATH = {
   forgotPassword: '/forgot-password',
   resetPassword: '/reset-password',
   verifyEmail: '/verify-email',
+  oauthConsent: '/oauth/consent',
   users: '/users',
   profile: '/profile',
   tasks: '/tasks',

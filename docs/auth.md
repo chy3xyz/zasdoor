@@ -40,7 +40,13 @@ API 层把每个错误映射为具体的 400 提示信息。
 - **忘记密码**:不会为联邦账号生成重置 token(接口仍返回统一成功,防枚举)。
 - **重置密码**:即使持有历史 token 也返回 `FederatedAccount`(HTTP 400 "该账号使用第三方登录,不支持密码重置"),避免绕过 IdP 获得本地密码。
 
-## 6. MFA 登录强制
+## 6. Argon2id 密码哈希
+
+- 默认仍用 PBKDF2 以兼容既有数据;设置 `ZASDOOR_PASSWORD_ARGON2ID=true` 后,**新**密码以 Argon2id PHC 格式写入(`$argon2id$v=19$m=65536,t=3,p=1$...`)。
+- 验证时自动识别格式:Argon2id 用 `std.crypto.pwhash.argon2`,旧 PBKDF2 走 SecurityModule,因此升级不需要批量重置密码。
+- 可逐步迁移:旧用户登录成功后仍保持旧哈希,改密/重置时写入 Argon2id。
+
+## 7. MFA 登录强制
 
 - 租户策略 `require_mfa=true` 且用户已配置 TOTP 时,`POST /auth/login` 返回 403 `{mfa_required:true}` 且**不下发 token**。
 - 客户端用同一邮箱/密码 + TOTP code 调 `POST /mfa/login/finish`,服务端再次校验密码与 TOTP 后才签发正式会话。

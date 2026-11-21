@@ -6,6 +6,7 @@ const zmodu = @import("zmodu");
 const persist = @import("persistence.zig");
 const iam_svc_mod = @import("../iam/service.zig");
 const event_svc_mod = @import("../eventstore/service.zig");
+const password_hash = @import("../../services/password_hash.zig");
 
 pub const UserRow = persist.UserRow;
 
@@ -316,6 +317,9 @@ pub const UserService = struct {
     /// Optional event store: domain writes are also appended as immutable
     /// facts so projections can build independent query models.
     event_svc: ?*event_svc_mod.EventService = null,
+    /// Use Argon2id (PHC) for new password hashes. Legacy PBKDF2 hashes remain
+    /// verifiable either way; opt in at startup after capacity planning.
+    argon2id: bool = false,
 
     pub fn init(
         store: *persist.UserStore,
@@ -335,6 +339,33 @@ pub const UserService = struct {
 
     /// Bind the IAM service used to persist Session rows. Called once at
     /// startup; every later successful authentication records a session.
+    /// Hash a user password with the configured algorithm.
+    fn hashUserPassword(self: *UserService, password: []const u8) ![]const u8 {
+        if (self.argon2id) {
+            return password_hash.hash(self.storeAllocator(), self.io, password, .{}) catch return error.Unexpected;
+        }
+        return self.sec.module.hashPassword(password) catch return error.Unexpected;
+    }
+
+    /// Verify a user password: Argon2id PHC strings are checked natively, while
+    /// legacy $pbkdf2$ records go through SecurityModule (same error mapping).
+    pub fn verifyUserPassword(self: *UserService, password: []const u8, stored: []const u8) error{ MalformedStoredHash, OutOfMemory, Unexpected }!bool {
+        if (std.mem.startsWith(u8, stored, "$argon2id$")) {
+            return password_hash.verify(self.storeAllocator(), self.io, password, stored) catch |err| switch (err) {
+                error.MalformedStoredHash, error.UnsupportedAlgorithm => return error.Unexpected,
+                error.OutOfMemory, error.EntropyUnavailable, error.Unexpected => return error.Unexpected,
+            };
+        }
+        return self.sec.module.verifyPassword(password, stored) catch |err| switch (err) {
+            error.MalformedStoredHash => return error.Unexpected,
+            error.OutOfMemory => return error.Unexpected,
+        };
+    }
+
+    fn storeAllocator(self: *UserService) std.mem.Allocator {
+        return self.store.allocator;
+    }
+
     /// Bind the event store used to record domain facts. Called once at startup.
     pub fn bindEventService(self: *UserService, svc: *event_svc_mod.EventService) void {
         self.event_svc = svc;
@@ -420,7 +451,7 @@ pub const UserService = struct {
             return error.EmailTaken;
         }
 
-        const hash = self.sec.module.hashPassword(password) catch return error.InvalidPassword;
+        const hash = self.hashUserPassword(password) catch return error.InvalidPassword;
         defer self.sec.module.allocator.free(hash);
 
         const now = zmodu.time.wallClockSeconds(self.io);
@@ -481,12 +512,13 @@ pub const UserService = struct {
         // cannot decode (or an allocation failure while decoding it) is a
         // server-side fault, not a wrong password. Surface it as 500 so the
         // failed-login counter is not fed a lie.
-        const password_ok = self.sec.module.verifyPassword(password, hash) catch |err| switch (err) {
+        const password_ok = self.verifyUserPassword(password, hash) catch |err| switch (err) {
             error.MalformedStoredHash => {
                 std.log.err("[user] unusable stored password hash for user id {d}", .{row.id});
                 return error.Unexpected;
             },
             error.OutOfMemory => return error.Unexpected,
+            error.Unexpected => return error.Unexpected,
         };
         if (!password_ok) {
             self.lockoutRecord(norm_email, now);
@@ -725,7 +757,7 @@ pub const UserService = struct {
             error.PasswordContainsIdentity => return error.PasswordContainsIdentity,
         };
 
-        const hash = self.sec.module.hashPassword(new_password) catch return error.Unexpected;
+        const hash = self.hashUserPassword(new_password) catch return error.Unexpected;
         defer self.sec.module.allocator.free(hash);
         const now = zmodu.time.wallClockSeconds(self.io);
         // Hash update + token clear commit in one transaction: no window where
@@ -796,12 +828,13 @@ pub const UserService = struct {
         const hash_opt = self.store.getPasswordHashById(id) catch return error.InvalidCredentials;
         const hash = hash_opt orelse return error.InvalidCredentials;
         defer self.sec.module.allocator.free(hash);
-        const password_ok = self.sec.module.verifyPassword(old_password, hash) catch |err| switch (err) {
+        const password_ok = self.verifyUserPassword(old_password, hash) catch |err| switch (err) {
             error.MalformedStoredHash => {
                 std.log.err("[user] unusable stored password hash for user id {d}", .{id});
                 return error.Unexpected;
             },
             error.OutOfMemory => return error.Unexpected,
+            error.Unexpected => return error.Unexpected,
         };
         if (!password_ok) return error.InvalidCredentials;
         self.setPassword(id, new_password) catch |err| switch (err) {

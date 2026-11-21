@@ -29,6 +29,7 @@ const SignUp = lazy(() => import('#ui/pages/SignUp'));
 const ForgotPassword = lazy(() => import('#ui/pages/ForgotPassword'));
 const ResetPassword = lazy(() => import('#ui/pages/ResetPassword'));
 const VerifyEmail = lazy(() => import('#ui/pages/VerifyEmail'));
+const Consent = lazy(() => import('#ui/pages/Consent'));
 const Users = lazy(() => import('#ui/pages/Users'));
 const Tasks = lazy(() => import('#ui/pages/Tasks'));
 const Files = lazy(() => import('#ui/pages/Files'));
@@ -165,6 +166,14 @@ if (root) {
           component={() => (
             <AuthLayout>
               <VerifyEmail />
+            </AuthLayout>
+          )}
+        />
+        <Route
+          path={ROUTE_PATH.oauthConsent}
+          component={() => (
+            <AuthLayout>
+              <Consent />
             </AuthLayout>
           )}
         />

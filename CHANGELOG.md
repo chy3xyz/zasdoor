@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **SAML P0 spike (go/no-go)**: pure-Zig XML parser (`src/modules/saml/xml.zig`)
+  and exclusive c14n (`c14n.zig`) prototypes pass 33 golden-vector/negative
+  tests cross-checked with libxml2. Verdict: GO for pure Zig; no libxml2
+  dependency needed. See `docs/saml.md` for the production hardening plan.
+
+### Added
+
+- **Argon2id password hashing**: new passwords use Argon2id (PHC format,
+  `ZASDOOR_PASSWORD_ARGON2ID=true` to opt in); legacy PBKDF2 hashes remain
+  verifiable, enabling gradual migration without a forced reset.
+- **OAuth consent screen**: `/oauth/consent` page lists requested scopes,
+  approves by retrying `/oauth/authorize` with `consent_granted=true`
+  (following the 302), and denies with `error=access_denied`.
+
+### Added
+
 - **Web3 multi-chain + DID**: wallets support `evm`, `solana`, `btc` and
   custom chains with per-chain address validation; deterministic
   `did:zasdoor:<chain>:<address>` identifiers are exposed via
@@ -222,7 +238,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Verified
 
-- `zig build`, `zig build test` (119/119) and `zig build -Doptimize=ReleaseSafe`
+- `zig build`, `zig build test` (144/144) and `zig build -Doptimize=ReleaseSafe`
   pass on Zig 0.17.0; `zig fmt --check` and `scripts/run_e2e.sh` (boot ->
   probes -> admin/login/info -> graceful shutdown, no panic/leak) are green,
   with the web typecheck/vitest/rsbuild also passing.
