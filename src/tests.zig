@@ -54,6 +54,7 @@ fn openMemory(allocator: std.mem.Allocator) !db_mod.StoreEnv(schema.infos, .{
     agent.persistence.infos,
     authzm.persistence.infos,
     orgstruct.persistence.infos,
+    saml.persistence.infos,
 }) {
     return db_mod.StoreEnv(schema.infos, .{
         tenant.persistence.infos,
@@ -75,6 +76,7 @@ fn openMemory(allocator: std.mem.Allocator) !db_mod.StoreEnv(schema.infos, .{
         agent.persistence.infos,
         authzm.persistence.infos,
         orgstruct.persistence.infos,
+        saml.persistence.infos,
     }).open(allocator, .sqlite, ":memory:");
 }
 
@@ -116,6 +118,7 @@ test "sqlite store query prepares and runs standalone" {
         agent.persistence.infos,
         authzm.persistence.infos,
         orgstruct.persistence.infos,
+        saml.persistence.infos,
     }).open(allocator, .sqlite, ":memory:");
     defer env.deinit();
     var store = user.persistence.UserStore.init(allocator, env.client);

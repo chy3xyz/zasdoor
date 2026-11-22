@@ -16,6 +16,19 @@ should follow. Where a recommendation depends on verification, it says so.
 
 ---
 
+## Implementation status (2026-11-22): partial SP core
+
+Implemented and wired:
+- `src/modules/saml/xml.zig` + `c14n.zig`: P0 parser + exclusive c14n prototype (33 tests).
+- `model.zig` + `persistence.zig`: replay cache and one-time login tickets with CAS consumption, wired into schema/StoreEnv/cleanup.
+- `config.zig`: fail-closed SamlConfig parser (cert count, URLs, transient NameID rejection).
+- `service.zig`: SP metadata XML, raw-DEFLATE AuthnRequest (Redirect binding), assertion fact extraction from the parsed DOM.
+- Endpoints: `GET /saml/{id}/metadata`, `GET /saml/{id}/login` (302 to IdP with SAMLRequest/RelayState), `GET /saml/{id}/acs` (405), `POST /saml/{id}/acs` (501 fail-closed).
+
+**Not implemented**: XML-DSig verification (pem.zig/dsig.zig), assertion validation (Audience/Recipient/conditions/InResponseTo/replay), and `POST /api/v1/auth/saml/exchange`. The ACS deliberately answers 501 until a real signature check exists; no unauthenticated assertion can create a session. Completing DSig is the next task (design sections 4.3/5.5/5.6).
+
+---
+
 ## P0 spike result (2026-11-21): GO
 
 The go/no-go gate has been exercised. Two standalone prototype files live in

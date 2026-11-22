@@ -1,11 +1,14 @@
-//! SAML 2.0 SP protocol primitives (P0 spike: XML + exclusive c14n).
-//!
-//! This module is not yet wired into the application; the parser and
-//! canonicalizer are exercised via the unit-test tree. See docs/saml.md.
+//! SAML 2.0 Service Provider module.
 pub const xml = @import("xml.zig");
 pub const c14n = @import("c14n.zig");
+pub const model = @import("model.zig");
+pub const persistence = @import("persistence.zig");
+pub const config = @import("config.zig");
+pub const service = @import("service.zig");
 
 comptime {
     _ = @import("xml.zig");
     _ = @import("c14n.zig");
+    _ = @import("config.zig");
+    _ = @import("service.zig");
 }

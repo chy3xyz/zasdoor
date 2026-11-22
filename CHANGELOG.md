@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **SAML SP core (partial)**: SP metadata + AuthnRequest generation
+  (`GET /saml/{id}/metadata`, `/login`), fail-closed config parser, replay /
+  one-time-ticket tables with CAS and cleanup. ACS answers 501 until XML-DSig
+  verification is implemented — no unauthenticated assertion can issue a token.
+
+### Added
+
 - **SAML P0 spike (go/no-go)**: pure-Zig XML parser (`src/modules/saml/xml.zig`)
   and exclusive c14n (`c14n.zig`) prototypes pass 33 golden-vector/negative
   tests cross-checked with libxml2. Verdict: GO for pure Zig; no libxml2
@@ -238,7 +245,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Verified
 
-- `zig build`, `zig build test` (144/144) and `zig build -Doptimize=ReleaseSafe`
+- `zig build`, `zig build test` (148/148) and `zig build -Doptimize=ReleaseSafe`
   pass on Zig 0.17.0; `zig fmt --check` and `scripts/run_e2e.sh` (boot ->
   probes -> admin/login/info -> graceful shutdown, no panic/leak) are green,
   with the web typecheck/vitest/rsbuild also passing.

@@ -8162,4 +8162,30 @@ paths:
         '200': {description: Resolved DID, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
         '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
+  /saml/{id}/metadata:
+    parameters: [{name: id, in: path, required: true, schema: {type: integer, format: int64}}]
+    get:
+      tags: [SAML]
+      summary: SP metadata for this provider
+      operationId: GET_saml_id_metadata
+      responses:
+        '200': {description: SAML metadata XML}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /saml/{id}/login:
+    parameters: [{name: id, in: path, required: true, schema: {type: integer, format: int64}}]
+    get:
+      tags: [SAML]
+      summary: Start SP-initiated SSO (redirect to IdP)
+      operationId: GET_saml_id_login
+      responses:
+        '302': {description: Redirect to IdP with SAMLRequest and RelayState}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /saml/{id}/acs:
+    parameters: [{name: id, in: path, required: true, schema: {type: integer, format: int64}}]
+    post:
+      tags: [SAML]
+      summary: Assertion Consumer Service (not enabled until XML-DSig lands)
+      operationId: POST_saml_id_acs
+      responses:
+        '501': {description: Assertion validation not implemented}
 

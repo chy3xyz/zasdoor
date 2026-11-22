@@ -45,6 +45,7 @@ const mfa = @import("modules/mfa/root.zig");
 const web3 = @import("modules/web3/root.zig");
 const agent = @import("modules/agent/root.zig");
 const orgstruct = @import("modules/orgstruct/root.zig");
+const saml = @import("modules/saml/root.zig");
 
 /// Set by SIGINT/SIGTERM so the main thread can stop the server gracefully.
 const ShutdownFlag = struct {
@@ -64,6 +65,7 @@ const CleanupCtx = struct {
     audit_store: *audit.persistence.AuditStore,
     iam_store: *iam.persistence.IamStore,
     mfa_store: *mfa.persistence.MfaStore,
+    saml_store: *saml.persistence.SamlStore,
     authz_store: *authz.persistence.AuthzStore,
     password_token_max_age: i64,
     verification_token_max_age: i64,
@@ -77,6 +79,7 @@ fn jobTokensCleanup(ctx: ?*anyopaque) void {
     _ = c.user_store.purgeExpiredPasswordTokens(now, c.password_token_max_age) catch {};
     _ = c.user_store.purgeExpiredEmailVerifications(now, c.verification_token_max_age) catch {};
     _ = c.mfa_store.purgeExpiredWebauthnChallenges(now) catch {};
+    _ = c.saml_store.purgeExpired(now) catch {};
     _ = c.authz_store.purgeDecisionsBefore(now - 30 * 24 * 3600) catch {};
 }
 
@@ -187,6 +190,7 @@ pub fn main(init: std.process.Init) !void {
         agent.persistence.infos,
         authz.persistence.infos,
         orgstruct.persistence.infos,
+        saml.persistence.infos,
     }).open(allocator, kind, dsn);
     defer store_env.deinit();
     std.log.info("[zent] migrated schema via {s} ({s})", .{ @tagName(kind), dsn });
@@ -285,6 +289,8 @@ pub fn main(init: std.process.Init) !void {
     var agent_api = agent.api.AgentApi(@TypeOf(agent_svc), @TypeOf(user_svc)).init(&agent_svc, &user_svc, default_tenant_id);
     var orgstruct_store = orgstruct.persistence.OrgStructStore.init(allocator, store_env.client);
     var orgstruct_svc = orgstruct.service.OrgStructService.init(allocator, io, &orgstruct_store, &sec);
+    var saml_store = saml.persistence.SamlStore.init(allocator, store_env.client);
+    var saml_svc = saml.service.SamlService.init(allocator, io, &saml_store, cfg.app_host, cfg.app_host);
 
     // ── ZigModu module lifecycle (Application API: scan + validate + start/stop) ──
     var app = try zmodu.Application.init(io, allocator, "zasdoor", .{
@@ -321,6 +327,7 @@ pub fn main(init: std.process.Init) !void {
         .iam_store = &iam_store,
         .mfa_store = &mfa_store,
         .authz_store = &authz_store,
+        .saml_store = &saml_store,
         .password_token_max_age = cfg.password_token_expiration_seconds,
         .verification_token_max_age = cfg.verification_token_expiration_seconds,
         .notification_max_age = 30 * 24 * 3600,
@@ -399,6 +406,7 @@ pub fn main(init: std.process.Init) !void {
     var mfa_api = mfa.api.MfaApi(@TypeOf(mfa_svc), @TypeOf(user_svc)).init(&mfa_svc, &user_svc, default_tenant_id);
     var webauthn_api = mfa.webauthn_api.WebauthnApi(@TypeOf(webauthn_svc), @TypeOf(user_svc)).init(&webauthn_svc, &user_svc, &login_registry, default_tenant_id);
     var orgstruct_api = orgstruct.api.OrgStructApi(@TypeOf(orgstruct_svc), @TypeOf(user_svc)).init(&orgstruct_svc, &user_svc, &audit_svc, default_tenant_id);
+    var saml_api = saml.api.SamlApi(@TypeOf(saml_svc)).init(&saml_svc, &mfa_store, default_tenant_id);
     var web3_api = web3.api.Web3Api(@TypeOf(web3_svc), @TypeOf(user_svc)).init(&web3_svc, &user_svc, default_tenant_id);
     var idp_api = mfa.idp_api.IdpApi(@TypeOf(idp_svc), @TypeOf(user_svc)).init(&idp_svc, &user_svc, default_tenant_id);
     var system_api = system.api.SystemApi(@TypeOf(cache), @TypeOf(task_svc)).init(
@@ -469,6 +477,7 @@ pub fn main(init: std.process.Init) !void {
 
     // OAuth2 / OIDC public protocol endpoints (server root, no /api prefix).
     try oauth_api.registerRoutes(&server);
+    try saml_api.registerRoutes(&server);
 
     // Health: liveness at the server root (probe convention) and readiness
     // under the API prefix (checks the data store).
