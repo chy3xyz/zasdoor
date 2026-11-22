@@ -406,7 +406,7 @@ pub fn main(init: std.process.Init) !void {
     var mfa_api = mfa.api.MfaApi(@TypeOf(mfa_svc), @TypeOf(user_svc)).init(&mfa_svc, &user_svc, default_tenant_id);
     var webauthn_api = mfa.webauthn_api.WebauthnApi(@TypeOf(webauthn_svc), @TypeOf(user_svc)).init(&webauthn_svc, &user_svc, &login_registry, default_tenant_id);
     var orgstruct_api = orgstruct.api.OrgStructApi(@TypeOf(orgstruct_svc), @TypeOf(user_svc)).init(&orgstruct_svc, &user_svc, &audit_svc, default_tenant_id);
-    var saml_api = saml.api.SamlApi(@TypeOf(saml_svc)).init(&saml_svc, &mfa_store, default_tenant_id);
+    var saml_api = saml.api.SamlApi(@TypeOf(saml_svc), @TypeOf(user_svc)).init(&saml_svc, &mfa_store, &user_svc, default_tenant_id);
     var web3_api = web3.api.Web3Api(@TypeOf(web3_svc), @TypeOf(user_svc)).init(&web3_svc, &user_svc, default_tenant_id);
     var idp_api = mfa.idp_api.IdpApi(@TypeOf(idp_svc), @TypeOf(user_svc)).init(&idp_svc, &user_svc, default_tenant_id);
     var system_api = system.api.SystemApi(@TypeOf(cache), @TypeOf(task_svc)).init(
@@ -477,7 +477,7 @@ pub fn main(init: std.process.Init) !void {
 
     // OAuth2 / OIDC public protocol endpoints (server root, no /api prefix).
     try oauth_api.registerRoutes(&server);
-    try saml_api.registerRoutes(&server);
+    try saml_api.registerRoutes(&server, &v1);
 
     // Health: liveness at the server root (probe convention) and readiness
     // under the API prefix (checks the data store).

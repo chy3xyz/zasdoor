@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **SAML login loop**: PEM pin parsing + RSA-SHA256 SignedInfo verification,
+  ACS that exchanges a signed Response for a one-time ticket, and
+  `POST /api/v1/auth/saml/exchange` minting the platform JWT. Replay cache
+  and single-use ticket tests included. Reference digest verification is still
+  pending (documented in docs/saml.md).
+
+### Added
+
 - **SAML SP core (partial)**: SP metadata + AuthnRequest generation
   (`GET /saml/{id}/metadata`, `/login`), fail-closed config parser, replay /
   one-time-ticket tables with CAS and cleanup. ACS answers 501 until XML-DSig
@@ -245,7 +253,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Verified
 
-- `zig build`, `zig build test` (148/148) and `zig build -Doptimize=ReleaseSafe`
+- `zig build`, `zig build test` (152/152) and `zig build -Doptimize=ReleaseSafe`
   pass on Zig 0.17.0; `zig fmt --check` and `scripts/run_e2e.sh` (boot ->
   probes -> admin/login/info -> graceful shutdown, no panic/leak) are green,
   with the web typecheck/vitest/rsbuild also passing.

@@ -1750,6 +1750,23 @@ test "audit: keyset cursor pagination walks rows deterministically" {
     try std.testing.expect(p2.items[0].id < p1.items[p1.items.len - 1].id);
 }
 
+test "saml: login ticket is single-use and assertion replay is rejected" {
+    const a = std.testing.allocator;
+    var env = try openMemory(a);
+    defer env.deinit();
+    var store = saml.persistence.SamlStore.init(a, env.client);
+    const now = zmodu.time.wallClockSeconds(std.testing.io);
+    try store.createTicket(1, 7, "deadbeef", 42, "/", now + 60, now);
+    const first = (try store.consumeTicket("deadbeef", now + 1)).?;
+    defer first.free(a);
+    try std.testing.expectEqual(@as(i64, 42), first.user_id);
+    try std.testing.expect((try store.consumeTicket("deadbeef", now + 2)) == null);
+    try store.createTicket(1, 7, "expired", 42, "/", now - 1, now);
+    try std.testing.expect((try store.consumeTicket("expired", now)) == null);
+    try std.testing.expect(try store.claimAssertion(1, 7, "_assert-1", now + 60, now));
+    try std.testing.expect(!(try store.claimAssertion(1, 7, "_assert-1", now + 60, now)));
+}
+
 test "eventstore: user facts append and projection produces read model" {
     const allocator = std.testing.allocator;
     var env = try openMemory(allocator);

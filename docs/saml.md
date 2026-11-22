@@ -25,7 +25,17 @@ Implemented and wired:
 - `service.zig`: SP metadata XML, raw-DEFLATE AuthnRequest (Redirect binding), assertion fact extraction from the parsed DOM.
 - Endpoints: `GET /saml/{id}/metadata`, `GET /saml/{id}/login` (302 to IdP with SAMLRequest/RelayState), `GET /saml/{id}/acs` (405), `POST /saml/{id}/acs` (501 fail-closed).
 
-**Not implemented**: XML-DSig verification (pem.zig/dsig.zig), assertion validation (Audience/Recipient/conditions/InResponseTo/replay), and `POST /api/v1/auth/saml/exchange`. The ACS deliberately answers 501 until a real signature check exists; no unauthenticated assertion can create a session. Completing DSig is the next task (design sections 4.3/5.5/5.6).
+**Implemented later**: `pem.zig` (PEM→DER, SHA-256 fingerprint, RSA key parse)
+and `dsig.zig` (RSA-SHA256 verification + algorithm allow-list). The ACS now
+parses the Response, verifies SignedInfo against pinned certs, consumes the
+one-time state, extracts assertion facts and issues a one-time ticket;
+`POST /api/v1/auth/saml/exchange` consumes that ticket and mints the normal JWT.
+
+**Remaining limitation**: the Reference/DigestValue check is not yet performed,
+so signed-info authenticity is established but assertion-body tampering within
+a valid SignedInfo is not independently detected. Do not use against untrusted
+IdPs until digest verification lands. Audience/Recipient/conditions checks and
+full W3C C14N conformance are also still pending (design sections 4.3/5.5).
 
 ---
 

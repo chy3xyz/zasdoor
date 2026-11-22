@@ -8187,5 +8187,15 @@ paths:
       summary: Assertion Consumer Service (not enabled until XML-DSig lands)
       operationId: POST_saml_id_acs
       responses:
-        '501': {description: Assertion validation not implemented}
+        '303': {description: Redirect to SPA complete page with one-time ticket}
+        '400': {$ref: '#/components/responses/BadRequest'}
+  /api/v1/auth/saml/exchange:
+    post:
+      tags: [SAML]
+      summary: Exchange a one-time SAML ticket for a platform JWT
+      operationId: POST_api_v1_auth_saml_exchange
+      security: []
+      responses:
+        '200': {description: Login succeeded, content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
 
